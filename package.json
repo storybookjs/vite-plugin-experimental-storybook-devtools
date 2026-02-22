@@ -41,6 +41,7 @@
     "dev": "tsdown --watch",
     "play": "vite",
     "test": "vitest",
+    "e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "release": "bumpp && pnpm publish",
     "prepublishOnly": "pnpm run build",
@@ -62,8 +63,8 @@
     "@types/node": "^25.0.3",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/devtools": "0.0.0-alpha.25",
-    "@vitejs/devtools-kit": "0.0.0-alpha.25",
+    "@vitejs/devtools": "0.0.0-alpha.32",
+    "@vitejs/devtools-kit": "0.0.0-alpha.32",
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/browser-playwright": "^4.0.16",
     "@vitest/coverage-v8": "4.0.17",
@@ -75,12 +76,15 @@
     "storybook": "10.3.0-alpha.0",
     "tsdown": "^0.18.1",
     "typescript": "^5.9.3",
-    "vite": "^8.0.0-beta.7",
+    "vite": "^8.0.0-beta.14",
     "vitest": "^4.0.16",
     "vitest-browser-react": "^2.0.2"
   },
   "dependencies": {
     "@babel/generator": "^7.28.6",
+    "@medv/finder": "^3.1.0",
+    "@testing-library/dom": "^10.4.0",
+    "dom-accessibility-api": "^0.6.3",
     "nanoevents": "^9.0.0",
     "react-element-to-jsx-string": "^15.0.0"
   }

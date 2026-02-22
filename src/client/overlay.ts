@@ -1,6 +1,14 @@
 import type { ComponentInstance, SerializedProps } from '../frameworks/types'
 import type { Emitter } from 'nanoevents'
 import { createNanoEvents } from 'nanoevents'
+import {
+  UI_MARKER,
+  getPlayFunctionCode,
+  isCurrentlyRecording,
+  startRecording,
+  stopRecording,
+} from './interaction-recorder'
+
 // Event emitter for overlay actions
 export interface OverlayEvents {
   'log-info': (data: {
@@ -9,6 +17,10 @@ export interface OverlayEvents {
     serializedProps?: SerializedProps
     componentRegistry?: Record<string, string>
     storyName?: string
+    /** Generated play function code lines (e.g. ['play: async ({ canvasElement }) => {', ...]) */
+    playFunction?: string[]
+    /** Import statements required by the play function */
+    playImports?: string[]
   }) => void
 }
 
@@ -46,7 +58,10 @@ let currentCloseHandler: ((e: MouseEvent) => void) | null = null
 let currentEscapeHandler: ((e: KeyboardEvent) => void) | null = null
 
 // Cache for story file existence checks
-const storyFileCache: Map<string, { hasStory: boolean; storyPath: string | null }> = new Map()
+const storyFileCache: Map<
+  string,
+  { hasStory: boolean; storyPath: string | null }
+> = new Map()
 
 // Import component registry from listeners
 let componentRegistry: Map<string, ComponentInstance>
@@ -69,7 +84,17 @@ function escapeHtml(str: string): string {
 // Suggest a story name based on props
 function suggestStoryName(props: Record<string, unknown>): string {
   // Common prop names that make good story names
-  const meaningfulProps = ['variant', 'type', 'size', 'mode', 'status', 'kind', 'color', 'intent', 'appearance']
+  const meaningfulProps = [
+    'variant',
+    'type',
+    'size',
+    'mode',
+    'status',
+    'kind',
+    'color',
+    'intent',
+    'appearance',
+  ]
 
   for (const propName of meaningfulProps) {
     const value = props[propName]
@@ -90,7 +115,9 @@ function suggestStoryName(props: Record<string, unknown>): string {
 }
 
 // Check if a component has a story file
-async function checkStoryFile(componentPath: string): Promise<{ hasStory: boolean; storyPath: string | null }> {
+async function checkStoryFile(
+  componentPath: string,
+): Promise<{ hasStory: boolean; storyPath: string | null }> {
   // Check cache first
   if (storyFileCache.has(componentPath)) {
     return storyFileCache.get(componentPath)!
@@ -98,7 +125,7 @@ async function checkStoryFile(componentPath: string): Promise<{ hasStory: boolea
 
   try {
     const response = await fetch(
-      `/__component-highlighter/check-story?componentPath=${encodeURIComponent(componentPath)}`
+      `/__component-highlighter/check-story?componentPath=${encodeURIComponent(componentPath)}`,
     )
     if (response.ok) {
       const result = await response.json()
@@ -130,6 +157,7 @@ function createHighlightContainer() {
 
   highlightContainer = document.createElement('div')
   highlightContainer.id = 'component-highlighter-container'
+  highlightContainer.setAttribute(UI_MARKER, 'true')
   highlightContainer.style.cssText = `
     position: fixed;
     top: 0;
@@ -180,7 +208,7 @@ function updateHighlightElement(
   el: HTMLDivElement,
   instance: ComponentInstance,
   type: 'hovered' | 'sameType' | 'other' | 'selected',
-  hasStory: boolean
+  hasStory: boolean,
 ) {
   if (!instance.rect) return
 
@@ -189,7 +217,9 @@ function updateHighlightElement(
 
   // Set z-index based on DOM depth - deeper elements (children) get higher z-index
   // This ensures clicking on a child highlight captures the child, not the parent
-  const depth = instance.element?.isConnected ? getDOMDepth(instance.element) : 0
+  const depth = instance.element?.isConnected
+    ? getDOMDepth(instance.element)
+    : 0
   el.style.zIndex = String(depth)
 
   el.style.left = `${rect.left}px`
@@ -243,12 +273,16 @@ function drawAllHighlights() {
   // Find the component name to highlight (either hovered or selected)
   let highlightComponentName: string | null = null
   if (selectedComponentId) {
-    const selectedInstance = instances.find((inst) => inst.id === selectedComponentId)
+    const selectedInstance = instances.find(
+      (inst) => inst.id === selectedComponentId,
+    )
     if (selectedInstance) {
       highlightComponentName = selectedInstance.meta.componentName
     }
   } else if (currentHoveredId && isOverlayEnabled) {
-    const hoveredInstance = instances.find((inst) => inst.id === currentHoveredId)
+    const hoveredInstance = instances.find(
+      (inst) => inst.id === currentHoveredId,
+    )
     if (hoveredInstance) {
       highlightComponentName = hoveredInstance.meta.componentName
     }
@@ -353,7 +387,11 @@ function createStoriesForComponentsWithoutStories() {
   if (!componentRegistry) return
 
   // Get the component registry for import resolution
-  const getRegistry = (window as unknown as { __componentHighlighterGetRegistry?: () => Map<string, string> }).__componentHighlighterGetRegistry
+  const getRegistry = (
+    window as unknown as {
+      __componentHighlighterGetRegistry?: () => Map<string, string>
+    }
+  ).__componentHighlighterGetRegistry
   let componentRegistryObj: Record<string, string> = {}
   if (getRegistry) {
     const registry = getRegistry()
@@ -402,14 +440,23 @@ function createStoriesForComponentsWithoutStories() {
     }
 
     // Emit event to create story
-    console.log('Creating story for component:', instance.meta.componentName, componentInfo)
-    overlayEvents.emit('log-info', componentInfo as Parameters<typeof overlayEvents.emit<'log-info'>>[1])
+    console.log(
+      'Creating story for component:',
+      instance.meta.componentName,
+      componentInfo,
+    )
+    overlayEvents.emit(
+      'log-info',
+      componentInfo as Parameters<typeof overlayEvents.emit<'log-info'>>[1],
+    )
 
     storiesCreated++
   }
 
   if (storiesCreated > 0) {
-    console.log(`[component-highlighter] Created stories for ${storiesCreated} components without stories`)
+    console.log(
+      `[component-highlighter] Created stories for ${storiesCreated} components without stories`,
+    )
 
     // After story creation, wait a bit for processing and then update the UI
     setTimeout(() => {
@@ -425,7 +472,10 @@ function createStoriesForComponentsWithoutStories() {
 }
 
 function handleHighlightClick(instance: ComponentInstance, e: MouseEvent) {
-  console.log('[component-highlighter] highlight clicked:', instance.meta.componentName)
+  console.log(
+    '[component-highlighter] highlight clicked:',
+    instance.meta.componentName,
+  )
   selectComponent(instance, e.clientX, e.clientY)
 }
 
@@ -439,8 +489,103 @@ function clearAllHighlights() {
 // Store current context menu's component path for updates
 let currentContextMenuComponentPath: string | null = null
 
+let wasOverlayEnabledBeforeRecording = false
+let wasHighlightAllActiveBeforeRecording = false
+
+function suspendHighlightingForRecording() {
+  wasOverlayEnabledBeforeRecording = isOverlayEnabled
+  wasHighlightAllActiveBeforeRecording = isHighlightAllActive
+
+  console.log(
+    '[component-highlighter] Suspending highlight UI for interaction recording',
+    {
+      isOverlayEnabled,
+      isHighlightAllActive,
+    },
+  )
+
+  selectedComponentId = null
+  hideHoverMenu()
+  hideContextMenu()
+  disableOverlay()
+}
+
+function resumeHighlightingAfterRecording() {
+  console.log(
+    '[component-highlighter] Resuming highlight UI after interaction recording',
+    {
+      wasOverlayEnabledBeforeRecording,
+      wasHighlightAllActiveBeforeRecording,
+    },
+  )
+
+  if (
+    wasOverlayEnabledBeforeRecording ||
+    wasHighlightAllActiveBeforeRecording
+  ) {
+    enableOverlay()
+  }
+
+  if (wasHighlightAllActiveBeforeRecording) {
+    setHighlightAll(true)
+  } else {
+    drawAllHighlights()
+  }
+
+  wasOverlayEnabledBeforeRecording = false
+  wasHighlightAllActiveBeforeRecording = false
+}
+
+function emitCreateStory(
+  data: {
+    meta: ComponentInstance['meta']
+    props: Record<string, unknown>
+    serializedProps?: SerializedProps
+    storyName: string
+  },
+  includePlayFunction: boolean,
+) {
+  const getRegistry = (
+    window as unknown as {
+      __componentHighlighterGetRegistry?: () => Map<string, string>
+    }
+  ).__componentHighlighterGetRegistry
+
+  let componentRegistryObj: Record<string, string> = {}
+  if (getRegistry) {
+    const registry = getRegistry()
+    componentRegistryObj = Object.fromEntries(registry)
+  }
+
+  const playCode = includePlayFunction ? getPlayFunctionCode() : null
+
+  const componentInfo: Parameters<typeof overlayEvents.emit<'log-info'>>[1] = {
+    meta: data.meta,
+    props: data.props,
+    serializedProps: data.serializedProps,
+    componentRegistry: componentRegistryObj,
+    storyName: data.storyName,
+    ...(playCode
+      ? { playFunction: playCode.playLines, playImports: playCode.imports }
+      : {}),
+  }
+
+  console.log('[component-highlighter] Emitting story creation payload', {
+    component: data.meta.componentName,
+    storyName: data.storyName,
+    includePlayFunction,
+    interactionCount: playCode?.playLines.length ?? 0,
+  })
+
+  overlayEvents.emit('log-info', componentInfo)
+}
+
 // Context menu management
-async function showContextMenu(instance: ComponentInstance, x: number, y: number) {
+async function showContextMenu(
+  instance: ComponentInstance,
+  x: number,
+  y: number,
+) {
   hideContextMenu()
 
   const meta = instance.meta
@@ -454,6 +599,7 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
   currentContextMenuComponentPath = meta.filePath
 
   contextMenuElement = document.createElement('div')
+  contextMenuElement.setAttribute(UI_MARKER, 'true')
   contextMenuElement.style.cssText = `
     position: fixed;
     left: ${x}px;
@@ -485,15 +631,11 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
         return `<div style="font-family: monospace; background: #1e3a5f; color: #93c5fd; padding: 2px 6px; border-radius: 3px; margin: 2px; display: inline-block; font-size: 12px;" title="${escapeHtml(jsxValue.source)}">${key}=&lt;JSX&gt;</div>`
       }
       // Check if this is a function placeholder
-      if (
-        value &&
-        typeof value === 'object' &&
-        '__isFunction' in value
-      ) {
+      if (value && typeof value === 'object' && '__isFunction' in value) {
         return `<div style="font-family: monospace; background: #4a3728; color: #fbbf24; padding: 2px 6px; border-radius: 3px; margin: 2px; display: inline-block; font-size: 12px;">${key}=&lt;fn&gt;</div>`
       }
       return `<div style="font-family: monospace; background: #222222; color: white; padding: 2px 6px; border-radius: 3px; margin: 2px; display: inline-block; font-size: 12px;">${key}=${JSON.stringify(
-        value
+        value,
       )}</div>`
     })
     .join('')
@@ -518,6 +660,11 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
     </div>
   `
 
+  const recording = isCurrentlyRecording()
+  const recordingStatusHtml = recording
+    ? '<div style="color: #dc2626; font-size: 11px; margin-bottom: 8px;">Recording in progress. Stop the recording to save the story with interactions.</div>'
+    : ''
+
   contextMenuElement.innerHTML = `
     <div style="padding: 12px;">
       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
@@ -526,6 +673,7 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
       </div>
       <div style="color: #6b7280; font-size: 11px; margin-bottom: 10px; word-break: break-all;">${relativePath}</div>
       ${openButtonsHtml}
+      ${recordingStatusHtml}
       <div style="margin-bottom: 8px;">
         <div style="font-weight: bold; margin-bottom: 4px; font-size: 12px; color: #374151;">Props:</div>
         <div style="max-height: 120px; overflow-y: auto;">${propsHtml || '<span style="color: #9ca3af;">none</span>'}</div>
@@ -533,17 +681,22 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
       <div style="border-top: 1px solid #e5e7eb; padding-top: 10px; margin-top: 10px;">
         <div style="margin-bottom: 8px;">
           <label style="font-weight: bold; display: block; margin-bottom: 4px; font-size: 12px; color: #374151;">Story Name:</label>
-          <input 
-            id="story-name-input" 
-            type="text" 
+          <input
+            id="story-name-input"
+            type="text"
             value="${suggestedName}"
             style="width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; box-sizing: border-box;"
             placeholder="Enter story name..."
           />
         </div>
-        <button id="create-story-btn" style="background: #2563eb; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; width: 100%; font-weight: 500;">
-          ${storyInfo.hasStory ? 'Add Story' : 'Create Story'}
-        </button>
+        <div style="display: flex; gap: 8px;">
+          <button id="save-story-btn" style="background: #2563eb; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; width: 100%; font-weight: 500;">
+            Save Story
+          </button>
+          <button id="save-story-with-interactions-btn" style="background: #7c3aed; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: ${recording ? 'not-allowed' : 'pointer'}; opacity: ${recording ? '0.65' : '1'}; font-size: 12px; width: 100%; font-weight: 500;" ${recording ? 'disabled' : ''}>
+            Save Story with Interactions
+          </button>
+        </div>
       </div>
     </div>
   `
@@ -582,8 +735,12 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
   contextMenuElement.style.top = `${finalTop}px`
 
   // Add click handlers for the open buttons
-  const openComponentBtn = contextMenuElement.querySelector('#open-component-btn') as HTMLButtonElement
-  const openStoriesBtn = contextMenuElement.querySelector('#open-stories-btn') as HTMLButtonElement
+  const openComponentBtn = contextMenuElement.querySelector(
+    '#open-component-btn',
+  ) as HTMLButtonElement
+  const openStoriesBtn = contextMenuElement.querySelector(
+    '#open-stories-btn',
+  ) as HTMLButtonElement
 
   openComponentBtn.addEventListener('click', () => {
     openInEditor(meta.filePath)
@@ -595,12 +752,15 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
     })
   }
 
-  // Add click handler for the create story button
-  const createStoryBtn = contextMenuElement.querySelector(
-    '#create-story-btn'
+  // Add click handlers for save buttons
+  const saveStoryBtn = contextMenuElement.querySelector(
+    '#save-story-btn',
+  ) as HTMLButtonElement
+  const saveStoryWithInteractionsBtn = contextMenuElement.querySelector(
+    '#save-story-with-interactions-btn',
   ) as HTMLButtonElement
   const storyNameInput = contextMenuElement.querySelector(
-    '#story-name-input'
+    '#story-name-input',
   ) as HTMLInputElement
 
   // Select input text on focus for easy editing
@@ -612,45 +772,84 @@ async function showContextMenu(instance: ComponentInstance, x: number, y: number
   storyNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      createStoryBtn.click()
+      saveStoryBtn.click()
     }
   })
 
-  createStoryBtn.addEventListener('click', () => {
-    // Get the story name from input
+  saveStoryBtn.addEventListener('click', () => {
+    console.log(
+      '[component-highlighter] Save Story clicked (without interactions)',
+      {
+        component: meta.componentName,
+      },
+    )
+
+    // Stop recording if active to avoid stale recording state
+    if (isCurrentlyRecording()) {
+      console.log(
+        '[component-highlighter] Active recording detected during Save Story, stopping recording first',
+      )
+      stopRecording()
+      resumeHighlightingAfterRecording()
+    }
+
+    const storyName = storyNameInput.value.trim() || suggestedName
+    emitCreateStory(
+      {
+        meta,
+        props,
+        serializedProps,
+        storyName,
+      },
+      false,
+    )
+
+    saveStoryBtn.textContent = 'Saving...'
+    saveStoryBtn.disabled = true
+  })
+
+  saveStoryWithInteractionsBtn.addEventListener('click', () => {
+    if (isCurrentlyRecording()) {
+      console.log(
+        '[component-highlighter] Save Story with Interactions ignored because recording is already active',
+      )
+      return
+    }
+
     const storyName = storyNameInput.value.trim() || suggestedName
 
-    // Get the component registry for import resolution
-    const getRegistry = (window as unknown as { __componentHighlighterGetRegistry?: () => Map<string, string> }).__componentHighlighterGetRegistry
-    let componentRegistryObj: Record<string, string> = {}
-    if (getRegistry) {
-      const registry = getRegistry()
-      componentRegistryObj = Object.fromEntries(registry)
-    }
+    console.log(
+      '[component-highlighter] Save Story with Interactions clicked, starting recording session',
+      {
+        component: meta.componentName,
+        storyName,
+      },
+    )
 
-    const componentInfo: {
-      meta: typeof meta
-      props: typeof props
-      serializedProps: SerializedProps | undefined
-      componentRegistry: Record<string, string>
-      storyName: string
-    } = {
-      meta,
-      props,
-      serializedProps,
-      componentRegistry: componentRegistryObj,
-      storyName,
-    }
+    suspendHighlightingForRecording()
 
-    console.log('Component Info:', componentInfo)
+    startRecording((interactions) => {
+      console.log(
+        '[component-highlighter] Recording callback received, creating story with recorded interactions',
+        {
+          component: meta.componentName,
+          storyName,
+          interactions: interactions.length,
+        },
+      )
 
-    // Emit event that vite-devtools client script can listen to (when dock is active)
-    console.log('Emitting log-info event:', componentInfo)
-    overlayEvents.emit('log-info', componentInfo as Parameters<typeof overlayEvents.emit<'log-info'>>[1])
+      emitCreateStory(
+        {
+          meta,
+          props,
+          serializedProps,
+          storyName,
+        },
+        true,
+      )
 
-    // Show feedback - button state will be updated by showStoryCreationFeedback
-    createStoryBtn.textContent = 'Creating...'
-    createStoryBtn.disabled = true
+      resumeHighlightingAfterRecording()
+    })
   })
 
   // Close on click outside
@@ -696,7 +895,7 @@ let hoverMenuElement: HTMLDivElement | null = null
 export function showHoverMenu(
   instance: ComponentInstance,
   x: number,
-  y: number
+  y: number,
 ) {
   hideHoverMenu()
 
@@ -707,6 +906,7 @@ export function showHoverMenu(
   const hasStory = storyInfo?.hasStory ?? false
 
   hoverMenuElement = document.createElement('div')
+  hoverMenuElement.setAttribute(UI_MARKER, 'true')
   hoverMenuElement.style.cssText = `
     position: fixed;
     left: ${x + 10}px;
@@ -767,6 +967,7 @@ function createDebugOverlay(): HTMLDivElement {
 
   debugOverlayElement = document.createElement('div')
   debugOverlayElement.id = 'component-highlighter-debug'
+  debugOverlayElement.setAttribute(UI_MARKER, 'true')
   debugOverlayElement.style.cssText = `
     position: fixed;
     bottom: 12px;
@@ -813,7 +1014,8 @@ function updateDebugOverlay() {
 
   const uniqueCount = uniqueSourceIds.size
   const withStoriesCount = componentsWithStories.size
-  const coverage = uniqueCount > 0 ? Math.round((withStoriesCount / uniqueCount) * 100) : 0
+  const coverage =
+    uniqueCount > 0 ? Math.round((withStoriesCount / uniqueCount) * 100) : 0
 
   // Color coding for coverage
   let coverageColor = '#ef4444' // red
@@ -853,9 +1055,13 @@ function updateDebugOverlay() {
   `
 
   // Add click handler for the storybook logo
-  const storybookLogo = debugOverlayElement.querySelector('#storybook-logo') as HTMLDivElement
+  const storybookLogo = debugOverlayElement.querySelector(
+    '#storybook-logo',
+  ) as HTMLDivElement
   if (storybookLogo) {
-    storybookLogo.addEventListener('click', () => createStoriesForComponentsWithoutStories())
+    storybookLogo.addEventListener('click', () =>
+      createStoriesForComponentsWithoutStories(),
+    )
     storybookLogo.addEventListener('mouseenter', () => {
       storybookLogo.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
     })
@@ -869,7 +1075,10 @@ function showDebugOverlay() {
   console.log('[component-highlighter] showDebugOverlay called')
   createDebugOverlay()
   updateDebugOverlay()
-  console.log('[component-highlighter] Debug overlay created:', !!debugOverlayElement)
+  console.log(
+    '[component-highlighter] Debug overlay created:',
+    !!debugOverlayElement,
+  )
 }
 
 function hideDebugOverlay() {
@@ -924,7 +1133,7 @@ export function updateHover(instanceId: string | null) {
 export function selectComponent(
   instance: ComponentInstance,
   x: number,
-  y: number
+  y: number,
 ) {
   selectedComponentId = instance.id
   drawAllHighlights()
@@ -968,7 +1177,9 @@ export function invalidateStoryCache(componentPath: string) {
 function updateOpenStoriesButton(storyPath: string) {
   if (!contextMenuElement) return
 
-  const openStoriesBtn = contextMenuElement.querySelector('#open-stories-btn') as HTMLButtonElement | null
+  const openStoriesBtn = contextMenuElement.querySelector(
+    '#open-stories-btn',
+  ) as HTMLButtonElement | null
   if (!openStoriesBtn) return
 
   // Update button state
@@ -990,17 +1201,6 @@ function updateOpenStoriesButton(storyPath: string) {
     openInEditor(storyPath)
   })
 
-  // Also update the create story button text
-  const createStoryBtn = contextMenuElement.querySelector('#create-story-btn') as HTMLButtonElement | null
-  if (createStoryBtn && createStoryBtn.textContent?.includes('Created')) {
-    // After reset, it should say "Add Story"
-    setTimeout(() => {
-      if (createStoryBtn && contextMenuElement?.contains(createStoryBtn)) {
-        createStoryBtn.textContent = 'Add Story'
-      }
-    }, 2000)
-  }
-
   // Add Storybook icon to header if not present
   const header = contextMenuElement.querySelector('div > div:first-child')
   if (header && !header.querySelector('svg')) {
@@ -1014,18 +1214,29 @@ function updateOpenStoriesButton(storyPath: string) {
 /**
  * Show feedback for story creation (success or error)
  */
-export function showStoryCreationFeedback(status: 'success' | 'error', filePath?: string, componentPath?: string): void {
-  const createStoryBtn = contextMenuElement?.querySelector('#create-story-btn') as HTMLButtonElement | null
+export function showStoryCreationFeedback(
+  status: 'success' | 'error',
+  filePath?: string,
+  componentPath?: string,
+): void {
+  const saveStoryBtn = contextMenuElement?.querySelector(
+    '#save-story-btn',
+  ) as HTMLButtonElement | null
 
-  if (!createStoryBtn) {
-    console.log('[component-highlighter] No create-story button found for feedback')
+  if (!saveStoryBtn) {
+    console.log(
+      '[component-highlighter] No save-story button found for feedback (menu may be closed)',
+    )
     return
   }
 
   if (status === 'success') {
-    createStoryBtn.textContent = '✓ Created!'
-    createStoryBtn.style.background = '#16a34a'
-    console.log('[component-highlighter] Story creation success feedback shown', filePath)
+    saveStoryBtn.textContent = '✓ Saved!'
+    saveStoryBtn.style.background = '#16a34a'
+    console.log(
+      '[component-highlighter] Story creation success feedback shown',
+      filePath,
+    )
 
     // Invalidate cache so the icon appears
     if (componentPath) {
@@ -1046,19 +1257,17 @@ export function showStoryCreationFeedback(status: 'success' | 'error', filePath?
     // Redraw highlights to show story icons
     drawAllHighlights()
   } else {
-    createStoryBtn.textContent = '✗ Failed'
-    createStoryBtn.style.background = '#dc2626'
+    saveStoryBtn.textContent = '✗ Failed'
+    saveStoryBtn.style.background = '#dc2626'
     console.log('[component-highlighter] Story creation error feedback shown')
   }
 
   // Reset button after a delay
   setTimeout(() => {
-    if (createStoryBtn && contextMenuElement?.contains(createStoryBtn)) {
-      // Check if story now exists
-      const hasStory = storyFileCache.get(currentContextMenuComponentPath || '')?.hasStory
-      createStoryBtn.textContent = hasStory ? 'Add Story' : 'Create Story'
-      createStoryBtn.style.background = '#2563eb'
-      createStoryBtn.disabled = false
+    if (saveStoryBtn && contextMenuElement?.contains(saveStoryBtn)) {
+      saveStoryBtn.textContent = 'Save Story'
+      saveStoryBtn.style.background = '#2563eb'
+      saveStoryBtn.disabled = false
     }
   }, 2000)
 }

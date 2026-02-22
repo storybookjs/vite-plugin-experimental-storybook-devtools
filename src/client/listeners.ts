@@ -12,6 +12,7 @@ import {
   clearSelection,
   isHighlightAllEnabled,
 } from './overlay'
+import { isCurrentlyRecording } from './interaction-recorder'
 
 // Type declarations for globals
 declare global {
@@ -64,7 +65,9 @@ function debounce(func: Function, wait: number) {
 function findComponentAtPoint(x: number, y: number): ComponentInstance | null {
   // When highlights are showing, we need to check what's under the pointer
   // accounting for the highlight layer
-  const highlightContainer = document.getElementById('component-highlighter-container')
+  const highlightContainer = document.getElementById(
+    'component-highlighter-container',
+  )
 
   // Temporarily hide the highlight container to get the actual element
   if (highlightContainer) {
@@ -103,6 +106,13 @@ const handleMouseMove = debounce((event: MouseEvent) => {
   // Only respond when dock is active (highlight mode is on)
   if (!isDockActive) return
 
+  // Never render highlight UI while interactions are being recorded
+  if (isCurrentlyRecording()) {
+    updateHover(null)
+    hideHoverMenu()
+    return
+  }
+
   // Update instance rects for all components (for overlay positioning)
   updateInstanceRects()
 
@@ -121,6 +131,8 @@ const handleMouseMove = debounce((event: MouseEvent) => {
 
 // Keyboard handlers
 function handleKeyDown(event: KeyboardEvent) {
+  if (isCurrentlyRecording()) return
+
   // Option/Alt key handling
   if (event.key === 'Alt' && isDockActive && !isOptionHeld) {
     isOptionHeld = true
@@ -141,6 +153,8 @@ function handleKeyDown(event: KeyboardEvent) {
 }
 
 function handleKeyUp(event: KeyboardEvent) {
+  if (isCurrentlyRecording()) return
+
   // Option/Alt key release
   if (event.key === 'Alt' && isOptionHeld) {
     isOptionHeld = false
@@ -157,7 +171,9 @@ function initialize() {
   // Prevent duplicate initialization if module is loaded multiple times
   if (typeof window === 'undefined') return
   if (window.__componentHighlighterInitialized) {
-    console.warn('[component-highlighter] Already initialized, skipping duplicate initialization')
+    console.warn(
+      '[component-highlighter] Already initialized, skipping duplicate initialization',
+    )
     return
   }
 
@@ -168,17 +184,23 @@ function initialize() {
   setComponentRegistry(componentRegistry)
 
   // Event listeners for registry synchronization
-  window.addEventListener('component-highlighter:register', ((event: CustomEvent) => {
+  window.addEventListener('component-highlighter:register', ((
+    event: CustomEvent,
+  ) => {
     const instance = event.detail
     componentRegistry.set(instance.id, instance)
   }) as EventListener)
 
-  window.addEventListener('component-highlighter:unregister', ((event: CustomEvent) => {
+  window.addEventListener('component-highlighter:unregister', ((
+    event: CustomEvent,
+  ) => {
     const id = event.detail
     componentRegistry.delete(id)
   }) as EventListener)
 
-  window.addEventListener('component-highlighter:update-props', ((event: CustomEvent) => {
+  window.addEventListener('component-highlighter:update-props', ((
+    event: CustomEvent,
+  ) => {
     const { id, props, serializedProps } = event.detail
     const instance = componentRegistry.get(id)
     if (instance) {
@@ -202,7 +224,7 @@ function initialize() {
         updateInstanceRects()
       }
     },
-    { passive: true }
+    { passive: true },
   )
 
   // Export for debugging

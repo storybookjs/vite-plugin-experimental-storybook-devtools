@@ -11,7 +11,7 @@ import * as path from 'path'
 declare module '@vitejs/devtools-kit' {
   interface DevToolsRpcFunctions {
     'component-highlighter:highlight-target': (
-      data: ComponentHighlightData | null
+      data: ComponentHighlightData | null,
     ) => void
     'component-highlighter:toggle-overlay': (data: { enabled: boolean }) => void
     'component-highlighter:create-story': (data: ComponentStoryData) => void
@@ -45,6 +45,10 @@ interface ComponentStoryData {
   componentRegistry?: Record<string, string>
   /** Custom story name */
   storyName?: string
+  /** Play function code lines generated from recorded interactions */
+  playFunction?: string[]
+  /** Import statements required by the play function */
+  playImports?: string[]
 }
 
 export interface ComponentHighlighterOptions {
@@ -102,11 +106,19 @@ export interface ComponentHighlighterOptions {
  */
 export function createComponentHighlighterPlugin(
   framework: FrameworkConfig,
-  options: ComponentHighlighterOptions = {}
+  options: ComponentHighlighterOptions = {},
 ): Plugin {
   const {
     include = framework.extensions.map((ext) => `**/*${ext}`),
-    exclude = ['**/node_modules/**', '**/dist/**', '**/*.d.ts'],
+    exclude = [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/*.d.ts',
+      '**/*.stories.*',
+      '**/stories.*',
+      '**/*.story.*',
+      '**/story.*',
+    ],
     eventName = 'component-highlighter:create-story',
     enableOverlay = true,
     devtoolsDockId = 'component-highlighter',
@@ -131,54 +143,77 @@ export function createComponentHighlighterPlugin(
       server = srv
 
       // Add middleware to check if story files exist
-      srv.middlewares.use('/__component-highlighter/check-story', (req, res) => {
-        const url = new URL(req.url || '', 'http://localhost')
-        const componentPath = url.searchParams.get('componentPath')
+      srv.middlewares.use(
+        '/__component-highlighter/check-story',
+        (req, res) => {
+          const url = new URL(req.url || '', 'http://localhost')
+          const componentPath = url.searchParams.get('componentPath')
 
-        if (!componentPath) {
-          res.statusCode = 400
-          res.end(JSON.stringify({ error: 'Missing componentPath parameter' }))
-          return
-        }
-
-        // Check for story file
-        const componentDir = path.dirname(componentPath)
-        const componentFileName = path.basename(
-          componentPath,
-          path.extname(componentPath)
-        )
-
-        // Check both with and without storiesDir
-        const possiblePaths = [
-          path.join(componentDir, `${componentFileName}.stories.tsx`),
-          path.join(componentDir, `${componentFileName}.stories.ts`),
-          path.join(componentDir, `${componentFileName}.stories.jsx`),
-          path.join(componentDir, `${componentFileName}.stories.js`),
-        ]
-
-        if (storiesDir) {
-          possiblePaths.push(
-            path.join(componentDir, storiesDir, `${componentFileName}.stories.tsx`),
-            path.join(componentDir, storiesDir, `${componentFileName}.stories.ts`),
-            path.join(componentDir, storiesDir, `${componentFileName}.stories.jsx`),
-            path.join(componentDir, storiesDir, `${componentFileName}.stories.js`)
-          )
-        }
-
-        let storyPath: string | null = null
-        for (const p of possiblePaths) {
-          if (fs.existsSync(p)) {
-            storyPath = p
-            break
+          if (!componentPath) {
+            res.statusCode = 400
+            res.end(
+              JSON.stringify({ error: 'Missing componentPath parameter' }),
+            )
+            return
           }
-        }
 
-        res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify({
-          hasStory: !!storyPath,
-          storyPath,
-        }))
-      })
+          // Check for story file
+          const componentDir = path.dirname(componentPath)
+          const componentFileName = path.basename(
+            componentPath,
+            path.extname(componentPath),
+          )
+
+          // Check both with and without storiesDir
+          const possiblePaths = [
+            path.join(componentDir, `${componentFileName}.stories.tsx`),
+            path.join(componentDir, `${componentFileName}.stories.ts`),
+            path.join(componentDir, `${componentFileName}.stories.jsx`),
+            path.join(componentDir, `${componentFileName}.stories.js`),
+          ]
+
+          if (storiesDir) {
+            possiblePaths.push(
+              path.join(
+                componentDir,
+                storiesDir,
+                `${componentFileName}.stories.tsx`,
+              ),
+              path.join(
+                componentDir,
+                storiesDir,
+                `${componentFileName}.stories.ts`,
+              ),
+              path.join(
+                componentDir,
+                storiesDir,
+                `${componentFileName}.stories.jsx`,
+              ),
+              path.join(
+                componentDir,
+                storiesDir,
+                `${componentFileName}.stories.js`,
+              ),
+            )
+          }
+
+          let storyPath: string | null = null
+          for (const p of possiblePaths) {
+            if (fs.existsSync(p)) {
+              storyPath = p
+              break
+            }
+          }
+
+          res.setHeader('Content-Type', 'application/json')
+          res.end(
+            JSON.stringify({
+              hasStory: !!storyPath,
+              storyPath,
+            }),
+          )
+        },
+      )
     },
     devtools: {
       setup(ctx) {
@@ -213,7 +248,7 @@ export function createComponentHighlighterPlugin(
                 console.log('[DevTools] Highlight target:', data)
               },
             }),
-          })
+          }),
         )
 
         ctx.rpc.register(
@@ -225,7 +260,7 @@ export function createComponentHighlighterPlugin(
                 console.log('[DevTools] Toggle overlay:', data.enabled)
               },
             }),
-          })
+          }),
         )
 
         ctx.rpc.register(
@@ -234,7 +269,12 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: (data: ComponentStoryData) => {
-                console.log('[DevTools] Create story:', data.meta.componentName, 'name:', data.storyName)
+                console.log(
+                  '[DevTools] Create story:',
+                  data.meta.componentName,
+                  'name:',
+                  data.storyName,
+                )
 
                 // Generate and write the story file
                 if (writeStoryFiles && data.serializedProps) {
@@ -243,7 +283,7 @@ export function createComponentHighlighterPlugin(
                     const registryMap = new Map<string, string>()
                     if (data.componentRegistry) {
                       for (const [name, filePath] of Object.entries(
-                        data.componentRegistry
+                        data.componentRegistry,
                       )) {
                         registryMap.set(name, filePath)
                       }
@@ -253,17 +293,17 @@ export function createComponentHighlighterPlugin(
                     const componentDir = path.dirname(data.meta.filePath)
                     const componentFileName = path.basename(
                       data.meta.filePath,
-                      path.extname(data.meta.filePath)
+                      path.extname(data.meta.filePath),
                     )
                     let outputPath = path.join(
                       componentDir,
-                      `${componentFileName}.stories.tsx`
+                      `${componentFileName}.stories.tsx`,
                     )
                     if (storiesDir) {
                       outputPath = path.join(
                         componentDir,
                         storiesDir,
-                        `${componentFileName}.stories.tsx`
+                        `${componentFileName}.stories.tsx`,
                       )
                     }
 
@@ -272,7 +312,7 @@ export function createComponentHighlighterPlugin(
                     if (fs.existsSync(outputPath)) {
                       existingContent = fs.readFileSync(outputPath, 'utf-8')
                       console.log(
-                        `[DevTools] Appending to existing story file: ${outputPath}`
+                        `[DevTools] Appending to existing story file: ${outputPath}`,
                       )
                     }
 
@@ -280,7 +320,9 @@ export function createComponentHighlighterPlugin(
                       meta: {
                         componentName: data.meta.componentName,
                         filePath: data.meta.filePath,
-                        relativeFilePath: data.meta.relativeFilePath ?? path.relative(process.cwd(), data.meta.filePath),
+                        relativeFilePath:
+                          data.meta.relativeFilePath ??
+                          path.relative(process.cwd(), data.meta.filePath),
                         sourceId: data.meta.sourceId,
                         isDefaultExport: data.meta.isDefaultExport ?? false,
                       },
@@ -288,7 +330,19 @@ export function createComponentHighlighterPlugin(
                       componentRegistry: registryMap,
                       ...(data.storyName ? { storyName: data.storyName } : {}),
                       ...(existingContent ? { existingContent } : {}),
+                      ...(data.playFunction
+                        ? { playFunction: data.playFunction }
+                        : {}),
+                      ...(data.playImports
+                        ? { playImports: data.playImports }
+                        : {}),
                     })
+
+                    if (data.playFunction?.length) {
+                      console.log(
+                        `[DevTools] Story includes a play function with ${data.playFunction.length} lines`,
+                      )
+                    }
 
                     // Ensure the directory exists
                     const outputDir = path.dirname(outputPath)
@@ -299,7 +353,7 @@ export function createComponentHighlighterPlugin(
                     // Write the story file
                     fs.writeFileSync(outputPath, story.content, 'utf-8')
                     console.log(
-                      `[DevTools] Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`
+                      `[DevTools] Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
                     )
 
                     // Notify the client about the created file
@@ -322,7 +376,7 @@ export function createComponentHighlighterPlugin(
                 }
               },
             }),
-          })
+          }),
         )
       },
     },

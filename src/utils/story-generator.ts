@@ -18,6 +18,10 @@ export interface StoryGenerationData {
   storyName?: string
   /** Existing file content to append to */
   existingContent?: string
+  /** Play function code lines generated from recorded interactions */
+  playFunction?: string[]
+  /** Import statements required by the play function (e.g. "import { userEvent, within } from 'storybook/test';") */
+  playImports?: string[]
 }
 
 export interface GeneratedStory {
@@ -35,7 +39,15 @@ export interface GeneratedStory {
  * Generates a Storybook story file from captured component data
  */
 export function generateStory(data: StoryGenerationData): GeneratedStory {
-  const { meta, props, componentRegistry, storyName: customStoryName, existingContent } = data
+  const {
+    meta,
+    props,
+    componentRegistry,
+    storyName: customStoryName,
+    existingContent,
+    playFunction,
+    playImports,
+  } = data
   const { componentName, filePath, isDefaultExport } = meta
 
   // Calculate relative paths and story file location
@@ -43,7 +55,7 @@ export function generateStory(data: StoryGenerationData): GeneratedStory {
   const componentFileName = path.basename(filePath, path.extname(filePath))
   const storyFilePath = path.join(
     componentDir,
-    `${componentFileName}.stories.tsx`
+    `${componentFileName}.stories.tsx`,
   )
 
   // Determine story name
@@ -92,6 +104,8 @@ export function generateStory(data: StoryGenerationData): GeneratedStory {
       imports,
       componentName,
       componentRegistry,
+      playFunction,
+      playImports,
     })
   } else {
     // Generate new file
@@ -102,6 +116,8 @@ export function generateStory(data: StoryGenerationData): GeneratedStory {
       isDefaultExport,
       storyName,
       componentRegistry,
+      playFunction,
+      playImports,
     })
   }
 
@@ -121,7 +137,7 @@ function toValidStoryName(name: string): string {
   let validName = name
     .replace(/[^a-zA-Z0-9\s]/g, '') // Remove special chars
     .split(/\s+/) // Split by whitespace
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join('')
 
   // If empty or starts with a digit, it's invalid
@@ -130,6 +146,37 @@ function toValidStoryName(name: string): string {
   }
 
   return validName
+}
+
+/**
+ * Format play function lines as a story object property (indented with 2 spaces)
+ */
+function formatPlayFunctionForStory(playLines: string[]): string {
+  return playLines
+    .map((line, i) => {
+      const indented = `  ${line}`
+      // Add trailing comma to the closing brace
+      if (i === playLines.length - 1 && line === '}') {
+        return `${indented},`
+      }
+      return indented
+    })
+    .join('\n')
+}
+
+/**
+ * Extract named imports from a storybook/test import statement
+ * e.g. "import { userEvent, within } from 'storybook/test';" -> ['userEvent', 'within']
+ */
+function extractStorybookTestImports(importStatement: string): string[] {
+  const match = importStatement.match(
+    /import\s*\{([^}]+)\}\s*from\s*['"]storybook\/test['"]/,
+  )
+  if (!match || !match[1]) return []
+  return match[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 }
 
 /**
@@ -142,8 +189,17 @@ function appendStoryToExisting(options: {
   imports: Array<{ name: string; path: string }>
   componentName: string
   componentRegistry?: Map<string, string>
+  playFunction?: string[]
+  playImports?: string[]
 }): string {
-  const { existingContent, storyName, props, imports } = options
+  const {
+    existingContent,
+    storyName,
+    props,
+    imports,
+    playFunction,
+    playImports,
+  } = options
 
   // Check if story with same name already exists
   let finalStoryName = storyName
@@ -172,25 +228,40 @@ function appendStoryToExisting(options: {
   const needsFnImport = hasAnyFunctionProps(props)
   if (needsFnImport && !existingContent.includes("from 'storybook/test'")) {
     // Add fn import after existing imports
-    const lastImportMatch = updatedContent.match(/^(import\s+.+from\s+['"][^'"]+['"];?\s*\n)+/m)
+    const lastImportMatch = updatedContent.match(
+      /^(import\s+.+from\s+['"][^'"]+['"];?\s*\n)+/m,
+    )
     if (lastImportMatch) {
       const insertPos = lastImportMatch.index! + lastImportMatch[0].length
-      updatedContent = updatedContent.slice(0, insertPos) + `import { fn } from 'storybook/test';\n` + updatedContent.slice(insertPos)
+      updatedContent =
+        updatedContent.slice(0, insertPos) +
+        `import { fn } from 'storybook/test';\n` +
+        updatedContent.slice(insertPos)
     }
-  } else if (needsFnImport && existingContent.includes("from 'storybook/test'") && !existingContent.includes('fn')) {
+  } else if (
+    needsFnImport &&
+    existingContent.includes("from 'storybook/test'") &&
+    !existingContent.includes('fn')
+  ) {
     // Extend existing storybook/test import to include fn
     updatedContent = updatedContent.replace(
       /import\s*\{([^}]+)\}\s*from\s*['"]@storybook\/test['"]/,
-      (_match, existingImports) => `import { ${existingImports.trim()}, fn } from 'storybook/test'`
+      (_match, existingImports) =>
+        `import { ${existingImports.trim()}, fn } from 'storybook/test'`,
     )
   }
 
   for (const imp of imports) {
     // Skip if import already exists (simple check)
     const importName = imp.name.replace(/[{}]/g, '').trim()
-    if (!existingContent.includes(importName) || !existingContent.includes(imp.path)) {
+    if (
+      !existingContent.includes(importName) ||
+      !existingContent.includes(imp.path)
+    ) {
       // Check if there's an existing import from the same path we can extend
-      const samePathRegex = new RegExp(`import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${escapeRegex(imp.path)}['"]`)
+      const samePathRegex = new RegExp(
+        `import\\s*\\{([^}]+)\\}\\s*from\\s*['"]${escapeRegex(imp.path)}['"]`,
+      )
       const samePathMatch = updatedContent.match(samePathRegex)
 
       if (samePathMatch && samePathMatch[1] && imp.name.startsWith('{')) {
@@ -198,15 +269,64 @@ function appendStoryToExisting(options: {
         const existingNames = samePathMatch[1]
         if (!existingNames.includes(importName)) {
           const newNames = `${existingNames.trim()}, ${importName}`
-          updatedContent = updatedContent.replace(samePathMatch[0], `import { ${newNames} } from '${imp.path}'`)
+          updatedContent = updatedContent.replace(
+            samePathMatch[0],
+            `import { ${newNames} } from '${imp.path}'`,
+          )
         }
-      } else if (!samePathMatch && !existingContent.includes(`from '${imp.path}'`)) {
+      } else if (
+        !samePathMatch &&
+        !existingContent.includes(`from '${imp.path}'`)
+      ) {
         // Add new import at the end of existing imports
-        const lastImportMatch = updatedContent.match(/^(import\s+.+from\s+['"][^'"]+['"];?\s*\n)+/m)
+        const lastImportMatch = updatedContent.match(
+          /^(import\s+.+from\s+['"][^'"]+['"];?\s*\n)+/m,
+        )
         if (lastImportMatch) {
           const insertPos = lastImportMatch.index! + lastImportMatch[0].length
           const newImport = `import ${imp.name} from '${imp.path}';\n`
-          updatedContent = updatedContent.slice(0, insertPos) + newImport + updatedContent.slice(insertPos)
+          updatedContent =
+            updatedContent.slice(0, insertPos) +
+            newImport +
+            updatedContent.slice(insertPos)
+        }
+      }
+    }
+  }
+
+  // Merge play imports (e.g. "import { userEvent, within } from 'storybook/test';") with existing
+  if (playImports && playImports.length > 0) {
+    for (const playImport of playImports) {
+      const newNames = extractStorybookTestImports(playImport)
+      if (newNames.length > 0) {
+        const existingMatch = updatedContent.match(
+          /import\s*\{([^}]+)\}\s*from\s*['"]storybook\/test['"]/,
+        )
+        if (existingMatch && existingMatch[1]) {
+          // Merge into existing import
+          const existingNames = existingMatch[1]
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+          const mergedNames = [
+            ...new Set([...existingNames, ...newNames]),
+          ].join(', ')
+          updatedContent = updatedContent.replace(
+            existingMatch[0],
+            `import { ${mergedNames} } from 'storybook/test'`,
+          )
+        } else {
+          // Add new import after existing imports
+          const lastImportMatch = updatedContent.match(
+            /^(import\s+.+from\s+['"][^'"]+['"];?\s*\n)+/m,
+          )
+          if (lastImportMatch) {
+            const insertPos = lastImportMatch.index! + lastImportMatch[0].length
+            updatedContent =
+              updatedContent.slice(0, insertPos) +
+              `${playImport}\n` +
+              updatedContent.slice(insertPos)
+          }
         }
       }
     }
@@ -215,15 +335,17 @@ function appendStoryToExisting(options: {
   // Generate the new story export
   const argsContent = generateArgsContent(props, 1, options.componentRegistry)
   const hasArgs = Object.keys(props).length > 0
+  const hasPlay = playFunction && playFunction.length > 0
+  const playContent = hasPlay
+    ? `\n${formatPlayFunctionForStory(playFunction!)}`
+    : ''
   const newStory = `
-export const ${finalStoryName}: Story = {${hasArgs ? `\n  args: ${argsContent},` : ''
-    }
+export const ${finalStoryName}: Story = {${hasArgs ? `\n  args: ${argsContent},` : ''}${playContent}
 };
 `
 
   // Append the new story at the end
   return updatedContent.trimEnd() + '\n' + newStory
-
 }
 
 /**
@@ -248,7 +370,11 @@ function extractComponentNamesFromJSXSource(jsxSource: string): Set<string> {
   while ((match = jsxTagPattern.exec(jsxSource)) !== null) {
     const componentName = match[1]
     // Skip React fragments
-    if (componentName && componentName !== 'Fragment' && componentName !== 'React') {
+    if (
+      componentName &&
+      componentName !== 'Fragment' &&
+      componentName !== 'React'
+    ) {
       componentNames.add(componentName)
     }
   }
@@ -259,10 +385,7 @@ function extractComponentNamesFromJSXSource(jsxSource: string): Set<string> {
 /**
  * Recursively collect component references from serialized props
  */
-function collectComponentRefs(
-  props: SerializedProps,
-  refs: Set<string>
-): void {
+function collectComponentRefs(props: SerializedProps, refs: Set<string>): void {
   for (const value of Object.values(props)) {
     if (isJSXSerializedValue(value)) {
       // Add component refs from the serialized value
@@ -297,7 +420,9 @@ function isJSXSerializedValue(value: unknown): value is JSXSerializedValue {
 /**
  * Type guard for function serialized values
  */
-function isFunctionSerializedValue(value: unknown): value is FunctionSerializedValue {
+function isFunctionSerializedValue(
+  value: unknown,
+): value is FunctionSerializedValue {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -320,7 +445,11 @@ function hasAnyFunctionProps(props: SerializedProps): boolean {
         return true
       }
     }
-    if (typeof value === 'object' && value !== null && !isJSXSerializedValue(value)) {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !isJSXSerializedValue(value)
+    ) {
       if (hasAnyFunctionProps(value as SerializedProps)) {
         return true
       }
@@ -337,7 +466,11 @@ function hasAnyJSXProps(props: SerializedProps): boolean {
     if (isJSXSerializedValue(value)) {
       return true
     }
-    if (typeof value === 'object' && value !== null && !isJSXSerializedValue(value)) {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      !isJSXSerializedValue(value)
+    ) {
       if (hasAnyJSXProps(value as SerializedProps)) {
         return true
       }
@@ -407,13 +540,15 @@ function hasFunctionHandlersInJSX(jsxSource: string): boolean {
 
     // Check if content looks like a function handler
     const functionPatterns = [
-      /^\([^)]*\)\s*=>/,           // () => or (args) =>
-      /^async\s*\([^)]*\)\s*=>/,    // async () =>
-      /^function\s*\(/,              // function(
-      /^[\w.]+\([^)]*\)/,           // functionCall()
+      /^\([^)]*\)\s*=>/, // () => or (args) =>
+      /^async\s*\([^)]*\)\s*=>/, // async () =>
+      /^function\s*\(/, // function(
+      /^[\w.]+\([^)]*\)/, // functionCall()
     ]
 
-    const isFunctionHandler = functionPatterns.some(pattern => pattern.test(content))
+    const isFunctionHandler = functionPatterns.some((pattern) =>
+      pattern.test(content),
+    )
 
     if (isFunctionHandler) {
       return true
@@ -488,17 +623,22 @@ function replaceFunctionHandlersInJSX(jsxSource: string): string {
 
     // Check if content looks like a function handler
     const functionPatterns = [
-      /^\([^)]*\)\s*=>/,           // () => or (args) =>
-      /^async\s*\([^)]*\)\s*=>/,    // async () =>
-      /^function\s*\(/,              // function(
-      /^[\w.]+\([^)]*\)/,           // functionCall()
+      /^\([^)]*\)\s*=>/, // () => or (args) =>
+      /^async\s*\([^)]*\)\s*=>/, // async () =>
+      /^function\s*\(/, // function(
+      /^[\w.]+\([^)]*\)/, // functionCall()
     ]
 
-    const isFunctionHandler = functionPatterns.some(pattern => pattern.test(content))
+    const isFunctionHandler = functionPatterns.some((pattern) =>
+      pattern.test(content),
+    )
 
     if (isFunctionHandler) {
       // Replace the entire prop={...} with prop={fn()}
-      result = result.slice(0, propStart) + `${propName}={fn()}` + result.slice(braceEnd + 1)
+      result =
+        result.slice(0, propStart) +
+        `${propName}={fn()}` +
+        result.slice(braceEnd + 1)
       pos = propStart + `${propName}={fn()}`.length
     } else {
       pos = braceEnd + 1
@@ -535,18 +675,43 @@ function generateStoryContent(options: {
   isDefaultExport: boolean
   storyName: string
   componentRegistry?: Map<string, string>
+  playFunction?: string[]
+  playImports?: string[]
 }): string {
-  const { componentName, imports, props, storyName } = options
+  const {
+    componentName,
+    imports,
+    props,
+    storyName,
+    playFunction,
+    playImports,
+  } = options
 
   // Check if we need imports
   const needsFnImport = hasAnyFunctionProps(props)
   const needsReactImport = hasAnyJSXProps(props)
 
+  // Collect all storybook/test named imports, merging fn and play imports
+  const storybookTestNames = new Set<string>()
+  if (needsFnImport) storybookTestNames.add('fn')
+  if (playImports) {
+    for (const playImport of playImports) {
+      for (const name of extractStorybookTestImports(playImport)) {
+        storybookTestNames.add(name)
+      }
+    }
+  }
+
+  const storybookTestImport =
+    storybookTestNames.size > 0
+      ? `import { ${[...storybookTestNames].join(', ')} } from 'storybook/test';`
+      : null
+
   // Build import statements
   const importStatements = [
     ...(needsReactImport ? [`import React from 'react';`] : []),
     `import type { Meta, StoryObj } from '@storybook/react-vite';`,
-    ...(needsFnImport ? [`import { fn } from 'storybook/test';`] : []),
+    ...(storybookTestImport ? [storybookTestImport] : []),
     ...imports.map((imp) => `import ${imp.name} from '${imp.path}';`),
   ].join('\n')
 
@@ -555,6 +720,10 @@ function generateStoryContent(options: {
 
   // Build the story file
   const hasArgs = Object.keys(props).length > 0
+  const hasPlay = playFunction && playFunction.length > 0
+  const playContent = hasPlay
+    ? `\n${formatPlayFunctionForStory(playFunction!)}`
+    : ''
 
   return `${importStatements}
 
@@ -565,8 +734,7 @@ const meta: Meta<typeof ${componentName}> = {
 export default meta;
 type Story = StoryObj<typeof ${componentName}>;
 
-export const ${storyName}: Story = {${hasArgs ? `\n  args: ${argsContent},` : ''
-    }
+export const ${storyName}: Story = {${hasArgs ? `\n  args: ${argsContent},` : ''}${playContent}
 };
 `
 }
@@ -574,7 +742,11 @@ export const ${storyName}: Story = {${hasArgs ? `\n  args: ${argsContent},` : ''
 /**
  * Generate the args object content with proper formatting
  */
-function generateArgsContent(props: SerializedProps, indentLevel: number, componentRegistry?: Map<string, string>): string {
+function generateArgsContent(
+  props: SerializedProps,
+  indentLevel: number,
+  componentRegistry?: Map<string, string>,
+): string {
   const indent = '  '.repeat(indentLevel)
   const innerIndent = '  '.repeat(indentLevel + 1)
 
@@ -586,7 +758,11 @@ function generateArgsContent(props: SerializedProps, indentLevel: number, compon
 
   const propsContent = entries
     .map(([key, value]) => {
-      const formattedValue = formatPropValue(value, indentLevel + 1, componentRegistry)
+      const formattedValue = formatPropValue(
+        value,
+        indentLevel + 1,
+        componentRegistry,
+      )
       return `${innerIndent}${formatPropKey(key)}: ${formattedValue},`
     })
     .join('\n')
@@ -613,7 +789,10 @@ function formatPropKey(key: string): string {
  * - </styled.div> -> </div>
  * - Also replaces unknown component names that aren't in componentRegistry with div
  */
-function replaceStyledComponentsInJSX(jsxSource: string, componentRegistry?: Map<string, string>): string {
+function replaceStyledComponentsInJSX(
+  jsxSource: string,
+  componentRegistry?: Map<string, string>,
+): string {
   let result = jsxSource
 
   // First, handle styled.* patterns (like <styled.div>, <styled.Component />)
@@ -645,7 +824,11 @@ function replaceStyledComponentsInJSX(jsxSource: string, componentRegistry?: Map
 /**
  * Format a prop value for output
  */
-function formatPropValue(value: unknown, indentLevel: number, componentRegistry?: Map<string, string>): string {
+function formatPropValue(
+  value: unknown,
+  indentLevel: number,
+  componentRegistry?: Map<string, string>,
+): string {
   // Handle JSX serialized values - emit raw JSX with function handlers replaced
   if (isJSXSerializedValue(value)) {
     // Replace function handlers in JSX source with fn()
@@ -693,7 +876,10 @@ function formatPropValue(value: unknown, indentLevel: number, componentRegistry?
     const indent = '  '.repeat(indentLevel)
     const innerIndent = '  '.repeat(indentLevel + 1)
     const items = value
-      .map((item) => `${innerIndent}${formatPropValue(item, indentLevel + 1, componentRegistry)},`)
+      .map(
+        (item) =>
+          `${innerIndent}${formatPropValue(item, indentLevel + 1, componentRegistry)},`,
+      )
       .join('\n')
     return `[\n${items}\n${indent}]`
   }
@@ -708,7 +894,11 @@ function formatPropValue(value: unknown, indentLevel: number, componentRegistry?
     const props = entries
       .map(([k, v]) => {
         const formattedKey = formatPropKey(k)
-        const formattedValue = formatPropValue(v, indentLevel + 1, componentRegistry)
+        const formattedValue = formatPropValue(
+          v,
+          indentLevel + 1,
+          componentRegistry,
+        )
         return `${innerIndent}${formattedKey}: ${formattedValue},`
       })
       .join('\n')
@@ -739,4 +929,3 @@ export function generateStoryName(props: SerializedProps): string {
 function capitalizeFirst(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
-
