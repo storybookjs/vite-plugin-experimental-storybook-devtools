@@ -191,11 +191,11 @@ When holding `Alt`, a debug overlay appears in the top-right corner showing:
 
 ## 🏗️ Architecture
 
-For detailed technical documentation, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Vite Plugin   │    │  Virtual Module  │    │  DevTools Dock  │
+│   Vite Plugin   │    │ Runtime Module   │    │  DevTools Dock  │
 │                 │    │                  │    │                 │
 │ • Transform JSX │───▶│ • Runtime HOC    │───▶│ • Component UI  │
 │ • Inject meta   │    │ • Registry       │    │ • RPC Handler   │
@@ -247,15 +247,27 @@ pnpm typecheck
 ```
 ├── src/
 │   ├── index.ts                    # Package entry
-│   ├── component-highlighter-plugin.ts  # Main Vite plugin
-│   ├── transform.ts                # Babel AST transformation
-│   ├── virtual-module.ts           # Runtime HOC
-│   ├── story-generator.ts          # Story file generation
-│   ├── provider-analyzer.ts        # Provider detection
-│   └── client/
+│   ├── create-component-highlighter-plugin.ts  # Main Vite plugin
+│   ├── runtime-helpers.ts          # Shared runtime utilities
+│   ├── frameworks/
+│   │   ├── types.ts                 # Shared framework interfaces
+│   │   ├── react/
+│   │   │   ├── index.ts             # React framework config
+│   │   │   ├── plugin.ts            # React entry point
+│   │   │   ├── transform.ts         # Babel AST transformation
+│   │   │   └── runtime-module.ts    # Runtime HOC (React)
+│   │   └── vue/
+│   │       ├── index.ts             # Vue framework config
+│   │       ├── plugin.ts            # Vue entry point
+│   │       ├── transform.ts         # Vue SFC transformation
+│   │       └── runtime-module.ts    # Runtime HOC (Vue)
+│   ├── client/
 │       ├── overlay.ts              # UI overlay
 │       ├── listeners.ts            # Event handlers
 │       └── vite-devtools.ts        # DevTools dock
+│   └── utils/
+│       ├── story-generator.ts      # Story file generation
+│       └── provider-analyzer.ts    # Provider detection
 ├── tests/                          # Unit tests
 ├── e2e/                            # E2E tests
 └── playground/                     # Development app

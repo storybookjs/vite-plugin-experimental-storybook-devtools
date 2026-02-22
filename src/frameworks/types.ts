@@ -71,7 +71,7 @@ export interface SerializedProps {
 }
 
 /**
- * Options passed to the virtual module setup
+ * Options passed to the runtime module loader
  */
 export interface HighlighterOptions {
   /** Custom event name for story creation */
@@ -89,12 +89,6 @@ export interface HighlighterOptions {
  * Takes source code and file ID, returns transformed code or undefined
  */
 export type TransformFunction = (code: string, id: string) => string | undefined
-
-/**
- * Virtual module setup function signature
- * Takes options and returns the runtime code string
- */
-export type VirtualModuleSetup = (options: HighlighterOptions) => string
 
 /**
  * Framework detection function signature
@@ -116,8 +110,8 @@ export interface FrameworkConfig {
   detect: FrameworkDetector
   /** Transform function for this framework */
   transform: TransformFunction
-  /** Setup the virtual module runtime */
-  setupVirtualModule: VirtualModuleSetup
+  /** Path (without extension) to the runtime module entry */
+  runtimeModuleFile: string
   /** Virtual module ID for imports */
   virtualModuleId: string
   /** Storybook framework package name */
@@ -135,4 +129,3 @@ export interface ProviderDependency {
   requiredImports?: string[]
   docsUrl?: string
 }
-

@@ -109,8 +109,7 @@ export function createComponentHighlighterPlugin(
   framework: FrameworkConfig,
   options: ComponentHighlighterOptions = {},
 ): Plugin {
-  const runtimeHelperVirtualId =
-    'vite-plugin-experimental-storybook-devtools/runtime-helpers'
+  const runtimeHelperVirtualId = 'virtual:component-highlighter/runtime-helpers'
   const resolvedRuntimeHelperVirtualId = `\0${runtimeHelperVirtualId}`
   const packageRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -126,6 +125,16 @@ export function createComponentHighlighterPlugin(
     'src',
     'runtime-helpers.ts',
   )
+  const runtimeModuleSourcePath = path.join(
+    packageRoot,
+    'src',
+    `${framework.runtimeModuleFile}.ts`,
+  )
+  const runtimeModuleFilePath = path.join(
+    packageRoot,
+    'dist',
+    `${framework.runtimeModuleFile}.mjs`,
+  )
 
   const {
     include = framework.extensions.map((ext) => `**/*${ext}`),
@@ -138,8 +147,8 @@ export function createComponentHighlighterPlugin(
       '**/*.story.*',
       '**/story.*',
     ],
-    eventName = 'component-highlighter:create-story',
-    enableOverlay = true,
+    eventName: _eventName = 'component-highlighter:create-story',
+    enableOverlay: _enableOverlay = true,
     devtoolsDockId = 'component-highlighter',
     storybookUrl = 'http://localhost:6006',
     force = false,
@@ -163,6 +172,9 @@ export function createComponentHighlighterPlugin(
 
       if (fs.existsSync(runtimeHelperSourcePath)) {
         srv.watcher.add(runtimeHelperSourcePath)
+      }
+      if (fs.existsSync(runtimeModuleSourcePath)) {
+        srv.watcher.add(runtimeModuleSourcePath)
       }
 
       // Add middleware to check if story files exist
@@ -407,6 +419,9 @@ export function createComponentHighlighterPlugin(
       if (id === runtimeHelperVirtualId) {
         return resolvedRuntimeHelperVirtualId
       }
+      if (id === resolvedRuntimeHelperVirtualId) {
+        return resolvedRuntimeHelperVirtualId
+      }
       if (id === framework.virtualModuleId) {
         return '\0' + id
       }
@@ -438,12 +453,49 @@ export function createComponentHighlighterPlugin(
         return fs.readFileSync(runtimeHelperFilePath, 'utf-8')
       }
       if (id === '\0' + framework.virtualModuleId) {
-        return framework.setupVirtualModule({
-          eventName,
-          enableOverlay,
-          devtoolsDockId,
-          debugMode,
-        })
+        const shouldUseSource =
+          isServe && fs.existsSync(runtimeModuleSourcePath)
+
+        const injectDebugMode = (code: string) =>
+          code.replace(
+            /__COMPONENT_HIGHLIGHTER_DEBUG__/g,
+            debugMode ? 'true' : 'false',
+          )
+
+        const normalizeRuntimeImports = (code: string) =>
+          code.replace(
+            /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers/g,
+            'virtual:component-highlighter/runtime-helpers',
+          )
+
+        if (shouldUseSource && server) {
+          const transformed = await server.transformRequest(
+            runtimeModuleSourcePath,
+          )
+          if (transformed?.code) {
+            return injectDebugMode(normalizeRuntimeImports(transformed.code))
+          }
+        }
+
+        if (shouldUseSource) {
+          return injectDebugMode(
+            normalizeRuntimeImports(
+              fs.readFileSync(runtimeModuleSourcePath, 'utf-8'),
+            ),
+          )
+        }
+
+        if (!fs.existsSync(runtimeModuleFilePath)) {
+          throw new Error(
+            '[component-highlighter] runtime module not built. Run `pnpm build` first.',
+          )
+        }
+
+        return injectDebugMode(
+          normalizeRuntimeImports(
+            fs.readFileSync(runtimeModuleFilePath, 'utf-8'),
+          ),
+        )
       }
       return null
     },
@@ -473,6 +525,12 @@ export function createComponentHighlighterPlugin(
       if (ctx.file === runtimeHelperSourcePath) {
         const mod = ctx.server.moduleGraph.getModuleById(
           resolvedRuntimeHelperVirtualId,
+        )
+        return mod ? [mod] : []
+      }
+      if (ctx.file === runtimeModuleSourcePath) {
+        const mod = ctx.server.moduleGraph.getModuleById(
+          '\0' + framework.virtualModuleId,
         )
         return mod ? [mod] : []
       }

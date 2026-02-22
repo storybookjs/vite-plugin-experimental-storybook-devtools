@@ -37,8 +37,8 @@ import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/re
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────────┐   │
-│  │  virtual-module  │    │   listeners.ts   │    │     overlay.ts       │   │
-│  │  (HOC runtime)   │───▶│  (event mgmt)    │───▶│   (UI rendering)     │   │
+│  │  virtual runtime │    │   listeners.ts   │    │     overlay.ts       │   │
+│  │  module (HOC)    │───▶│  (event mgmt)    │───▶│   (UI rendering)     │   │
 │  └──────────────────┘    └──────────────────┘    └──────────────────────┘   │
 │         │                                                   │               │
 │         ▼                                                   ▼               │
@@ -92,6 +92,7 @@ import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/re
 - Register RPC handlers for client-server communication
 - Handle `/__component-highlighter/check-story` endpoint
 - Handle `/__open-in-editor` endpoint
+- Serve runtime virtual modules (dev TS with HMR, build JS from `dist`)
 - Invoke `utils/story-generator.ts` to create story files
 - Send WebSocket notifications on story creation
 
@@ -133,9 +134,9 @@ export const MyButton = withComponentHighlighter(
 )
 ```
 
-### 3. `frameworks/react/runtime.ts` (Runtime)
+### 3. `frameworks/react/runtime-module.ts` (Runtime)
 
-**Purpose**: Runtime code injected into the browser. Contains the HOC implementation and prop serialization logic.
+**Purpose**: Runtime code injected into the browser (via a virtual module). Contains the HOC implementation and prop serialization logic.
 
 **Key Responsibilities**:
 - Implement `withComponentHighlighter` HOC
@@ -144,6 +145,19 @@ export const MyButton = withComponentHighlighter(
 - Serialize props including JSX children using `react-element-to-jsx-string`
 - Dispatch custom events for component lifecycle (register, unregister, update-props)
 - Extract component references for import resolution
+
+**Runtime loading behavior**:
+- **Dev**: loads `src/frameworks/*/runtime-module.ts`, transforms with Vite, and supports HMR
+- **Build/Publish**: loads compiled JS from `dist/frameworks/*/runtime-module.mjs`
+
+### 4. `runtime-helpers.ts` (Shared Runtime Utilities)
+
+**Purpose**: Shared runtime helpers used by both React and Vue runtimes.
+
+**Key Responsibilities**:
+- Resolve trackable DOM elements (skip `display: contents` or zero-size roots)
+- Attach Mutation/Resize observers for rect updates
+- Shared register/update/cleanup orchestration for component tracking
 
 **ComponentInstance Interface**:
 ```typescript
@@ -157,7 +171,7 @@ interface ComponentInstance {
 }
 ```
 
-### 4. `overlay.ts` (Client-Side UI)
+### 5. `overlay.ts` (Client-Side UI)
 
 **Purpose**: Manages the visual overlay, highlights, hover menus, and context menus.
 
@@ -182,7 +196,7 @@ interface ComponentInstance {
 - `sameType`: Same component name (pink dashed, 5% bg opacity)
 - `selected`: Clicked/selected (pink solid, 20% bg opacity)
 
-### 5. `listeners.ts` (Client-Side Events)
+### 6. `listeners.ts` (Client-Side Events)
 
 **Purpose**: Event handling and component registry management.
 
@@ -194,7 +208,7 @@ interface ComponentInstance {
 - Coordinate with overlay module for UI updates
 - Export `enableHighlightMode()` / `disableHighlightMode()` for DevTools control
 
-### 6. `vite-devtools.ts` (Dock Client)
+### 7. `vite-devtools.ts` (Dock Client)
 
 **Purpose**: Client-side script running inside the Vite DevTools dock iframe.
 
@@ -204,7 +218,7 @@ interface ComponentInstance {
 - Handle story creation success/failure feedback
 - Listen for `component-highlighter:story-created` WebSocket events
 
-### 7. `utils/story-generator.ts` (Server-Side)
+### 8. `utils/story-generator.ts` (Server-Side)
 
 **Purpose**: Generate Storybook `.stories.tsx` file content.
 
@@ -242,7 +256,7 @@ export const Primary: Story = {
 };
 ```
 
-### 8. `utils/provider-analyzer.ts` (Server-Side, Standalone)
+### 9. `utils/provider-analyzer.ts` (Server-Side, Standalone)
 
 **Purpose**: Analyze app entry points to detect provider dependencies for Storybook decorator setup.
 
@@ -335,6 +349,7 @@ interface DetectedProvider {
 src/
 ├── index.ts                      # Core exports (types, utilities)
 ├── create-component-highlighter-plugin.ts # Plugin factory (createComponentHighlighterPlugin)
+├── runtime-helpers.ts            # Shared runtime utilities
 ├── storybook-icon.svg            # Icon for DevTools dock
 │
 ├── frameworks/                   # Multi-framework support
@@ -344,7 +359,7 @@ src/
 │       ├── index.ts              # React framework config
 │       ├── plugin.ts             # React entry point: import from '/react'
 │       ├── transform.ts          # Babel AST transformation
-│       └── runtime.ts            # HOC and serialization runtime
+│       └── runtime-module.ts     # HOC and serialization runtime
 │
 ├── client/                       # Framework-agnostic client code
 │   ├── overlay.ts                # UI overlay and context menu
@@ -378,7 +393,7 @@ The codebase is structured for multi-framework support:
 │  ┌────────────────────────────────────────────────────────────────┐ │
 │  │                    frameworks/types.ts                         │ │
 │  │  - ComponentMeta, ComponentInstance, SerializedProps           │ │
-│  │  - FrameworkConfig, TransformFunction, VirtualModuleSetup      │ │
+│  │  - FrameworkConfig, TransformFunction                          │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                                 │                                   │
 │                                 ▼                                   │
@@ -396,7 +411,8 @@ The codebase is structured for multi-framework support:
 │  │  (current)   │       │   (future)   │       │   (future)   │     │
 │  ├──────────────┤       ├──────────────┤       ├──────────────┤     │
 │  │ transform.ts │       │ transform.ts │       │ transform.ts │     │
-│  │ runtime.ts   │       │ runtime.ts   │       │ runtime.ts   │     │
+│  │ runtime-     │       │ runtime-     │       │ runtime-     │     │
+│  │ module.ts    │       │ module.ts    │       │ module.ts    │     │
 │  │ index.ts     │       │ index.ts     │       │ index.ts     │     │
 │  └──────────────┘       └──────────────┘       └──────────────┘     │
 │                                                                     │
@@ -411,7 +427,7 @@ interface FrameworkConfig {
   extensions: string[]            // ['.tsx', '.jsx']
   detect: FrameworkDetector       // (code, id) => boolean
   transform: TransformFunction    // (code, id) => string | undefined
-  setupVirtualModule: VirtualModuleSetup  // (options) => string
+  runtimeModuleFile: string        // 'frameworks/react/runtime-module'
   virtualModuleId: string         // 'virtual:component-highlighter/runtime'
   storybookFramework: string      // '@storybook/react-vite'
 }
@@ -420,7 +436,7 @@ interface FrameworkConfig {
 **Adding a New Framework** (e.g., Vue):
 1. Create `src/frameworks/vue/` directory
 2. Implement `transform.ts` with Vue-specific AST transformation
-3. Implement `runtime.ts` with Vue-specific wrapper runtime
+3. Implement `runtime-module.ts` with Vue-specific wrapper runtime
 4. Create `index.ts` exporting a `FrameworkConfig`
 5. Create `plugin.ts` as the entry point:
    ```typescript
@@ -453,7 +469,7 @@ interface PluginOptions {
 2. Include packages, hooks, components, decorator suggestion, and docs URL
 
 ### Adding New Prop Serialization
-1. Modify `serializeValue()` in `frameworks/react/runtime.ts`
+1. Modify `serializeValue()` in `frameworks/react/runtime-module.ts`
 2. Add corresponding handling in `formatPropValue()` in `utils/story-generator.ts`
 
 ### Customizing Story Generation
@@ -580,16 +596,16 @@ src/
 ├── frameworks/
 │   ├── react/
 │   │   ├── transform.ts
-│   │   └── runtime.ts
+│   │   └── runtime-module.ts
 │   ├── vue/
 │   │   ├── transform.ts
-│   │   └── runtime.ts
+│   │   └── runtime-module.ts
 │   ├── svelte/
 │   │   ├── transform.ts
-│   │   └── runtime.ts
+│   │   └── runtime-module.ts
 │   └── angular/
 │       ├── transform.ts
-│       └── runtime.ts
+│       └── runtime-module.ts
 ├── shared/
 │   ├── overlay.ts
 │   ├── story-generator.ts

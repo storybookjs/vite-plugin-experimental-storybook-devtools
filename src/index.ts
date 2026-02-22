@@ -8,7 +8,10 @@
  */
 
 // Core plugin factory (for advanced use cases)
-export { createComponentHighlighterPlugin, type ComponentHighlighterOptions } from './create-component-highlighter-plugin'
+export {
+  createComponentHighlighterPlugin,
+  type ComponentHighlighterOptions,
+} from './create-component-highlighter-plugin'
 
 // Story generator
 export { generateStory, generateStoryName } from './utils/story-generator'
@@ -25,11 +28,13 @@ export type {
   ComponentInstance,
   HighlighterOptions,
   TransformFunction,
-  VirtualModuleSetup,
   FrameworkDetector,
   FrameworkConfig,
   ProviderDependency,
 } from './frameworks'
 
 // Provider analyzer
-export { analyzeAppProviders, analyzeComponentFile } from './utils/provider-analyzer'
+export {
+  analyzeAppProviders,
+  analyzeComponentFile,
+} from './utils/provider-analyzer'

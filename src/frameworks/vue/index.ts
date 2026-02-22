@@ -6,7 +6,6 @@
 
 import type { FrameworkConfig } from '../types'
 import { transform, detectVue, VIRTUAL_MODULE_ID } from './transform'
-import { setupVirtualModule } from './runtime'
 
 /**
  * Vue framework configuration
@@ -17,11 +16,10 @@ export const vueFramework: FrameworkConfig = {
   extensions: ['.vue'],
   detect: detectVue,
   transform,
-  setupVirtualModule,
+  runtimeModuleFile: 'frameworks/vue/runtime-module',
   virtualModuleId: VIRTUAL_MODULE_ID,
   storybookFramework: '@storybook/vue3-vite',
 }
 
 // Re-export for convenience
 export { transform, detectVue, VIRTUAL_MODULE_ID } from './transform'
-export { setupVirtualModule } from './runtime'

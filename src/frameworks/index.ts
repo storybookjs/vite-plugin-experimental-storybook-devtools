@@ -13,7 +13,6 @@ export type {
   SerializedProps,
   HighlighterOptions,
   TransformFunction,
-  VirtualModuleSetup,
   FrameworkDetector,
   FrameworkConfig,
   ProviderDependency,
