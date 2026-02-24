@@ -160,15 +160,52 @@ export function collectComponentRefs(
   }
 }
 
+function normalizeJsxIdentifierToken(raw: string): string {
+  const parts = raw.match(/[A-Za-z0-9_$]+/g)
+  if (!parts || parts.length === 0) return ''
+
+  return parts
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('')
+}
+
+/** Normalize non-identifier JSX tags, e.g. <Styled(Link)> -> <StyledLink> */
+function normalizeNonIdentifierJsxTags(jsxSource: string): string {
+  const openingTagPattern = /<([A-Z][A-Za-z0-9_$]*)\(([^)]+)\)(?=\s|\/?>)/g
+  const closingTagPattern = /<\/([A-Z][A-Za-z0-9_$]*)\(([^)]+)\)\s*>/g
+
+  const normalizeName = (prefix: string, innerRaw: string): string => {
+    const normalizedInner = normalizeJsxIdentifierToken(innerRaw)
+    return normalizedInner ? `${prefix}${normalizedInner}` : prefix
+  }
+
+  let normalized = jsxSource.replace(
+    openingTagPattern,
+    (_match, prefix, inner) => {
+      return `<${normalizeName(prefix, inner)}`
+    },
+  )
+
+  normalized = normalized.replace(
+    closingTagPattern,
+    (_match, prefix, inner) => {
+      return `</${normalizeName(prefix, inner)}>`
+    },
+  )
+
+  return normalized
+}
+
 /** Extract component names from JSX source */
 export function extractComponentNamesFromJSXSource(
   jsxSource: string,
 ): Set<string> {
   const componentNames = new Set<string>()
+  const normalizedSource = normalizeNonIdentifierJsxTags(jsxSource)
   const jsxTagPattern = /<([A-Z][a-zA-Z0-9]*)(?:\s|>|\.)/g
   let match
 
-  while ((match = jsxTagPattern.exec(jsxSource)) !== null) {
+  while ((match = jsxTagPattern.exec(normalizedSource)) !== null) {
     const componentName = match[1]
     if (
       componentName &&
@@ -379,8 +416,10 @@ export function replaceStyledComponentsInJSX(
 
     for (const componentName of componentNames) {
       if (!componentRegistry.has(componentName)) {
+        const fallbackReason = `The component ${componentName} could not be used as it is not exported, so a simple div was used instead. Please replace it.`
+        const fallbackAttribute = ` data-important-read-this="${fallbackReason}"`
         const openingTagRegex = new RegExp(`<${componentName}(\\s|>)`, 'g')
-        result = result.replace(openingTagRegex, '<div$1')
+        result = result.replace(openingTagRegex, `<div${fallbackAttribute}$1`)
 
         const closingTagRegex = new RegExp(`</${componentName}>`, 'g')
         result = result.replace(closingTagRegex, '</div>')
@@ -398,7 +437,8 @@ export function formatPropValue(
   componentRegistry?: Map<string, string>,
 ): string {
   if (isJSXSerializedValue(value)) {
-    let jsxSource = replaceFunctionHandlersInJSX(value.source)
+    let jsxSource = normalizeNonIdentifierJsxTags(value.source)
+    jsxSource = replaceFunctionHandlersInJSX(jsxSource)
     jsxSource = replaceStyledComponentsInJSX(jsxSource, componentRegistry)
 
     if (jsxSource.includes('\n')) {

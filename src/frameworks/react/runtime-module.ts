@@ -58,6 +58,29 @@ function generateInstanceId(sourceId: string) {
 function getComponentName(type: unknown) {
   if (typeof type === 'string') return type // DOM element
 
+  const normalizeDisplayName = (name: string): string => {
+    const hocMatch = name.match(/^(?:with\w+|memo|forwardRef)\((.+)\)$/)
+    if (hocMatch && hocMatch[1]) {
+      return normalizeDisplayName(hocMatch[1])
+    }
+
+    const wrapperMatch = name.match(/^([A-Z][A-Za-z0-9_$]*)\(([^)]+)\)$/)
+    if (!wrapperMatch) return name
+
+    const prefix = wrapperMatch[1]
+    const innerRaw = wrapperMatch[2]
+    if (!prefix || !innerRaw) return name
+
+    const parts = innerRaw.match(/[A-Za-z0-9_$]+/g)
+    if (!parts || parts.length === 0) return prefix
+
+    const normalizedInner = parts
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('')
+
+    return `${prefix}${normalizedInner}`
+  }
+
   // Check for our custom __originalName property first (most reliable)
   if ((type as { __originalName?: string })?.__originalName) {
     return (type as { __originalName: string }).__originalName
@@ -67,9 +90,7 @@ function getComponentName(type: unknown) {
     // Try to unwrap HOC patterns from displayName
     const displayName = (type as { displayName?: string }).displayName
     if (displayName) {
-      const match = displayName.match(/^(?:with\w+|memo|forwardRef)\((.+)\)$/)
-      if (match) return match[1]
-      return displayName
+      return normalizeDisplayName(displayName)
     }
     return (type as { name?: string }).name || 'Unknown'
   }
@@ -79,11 +100,9 @@ function getComponentName(type: unknown) {
     if ((type as { __originalName?: string }).__originalName)
       return (type as { __originalName: string }).__originalName
     if ((type as { displayName?: string }).displayName) {
-      const match = (type as { displayName?: string }).displayName?.match(
-        /^(?:with\w+|memo|forwardRef)\((.+)\)$/,
+      return normalizeDisplayName(
+        (type as { displayName?: string }).displayName as string,
       )
-      if (match) return match[1]
-      return (type as { displayName?: string }).displayName as string
     }
     if (
       (type as { render?: { __originalName?: string } }).render?.__originalName
@@ -91,7 +110,9 @@ function getComponentName(type: unknown) {
       return (type as { render: { __originalName: string } }).render
         .__originalName
     if ((type as { render?: { displayName?: string } }).render?.displayName)
-      return (type as { render: { displayName: string } }).render.displayName
+      return normalizeDisplayName(
+        (type as { render: { displayName: string } }).render.displayName,
+      )
     if ((type as { type?: unknown }).type)
       return getComponentName((type as { type: unknown }).type)
   }

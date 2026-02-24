@@ -312,7 +312,9 @@ describe('generateStory', () => {
         ]),
       })
 
-      expect(result.content).toContain('children: <div /><div prop="value" />')
+      expect(result.content).toContain(
+        'children: <div data-important-read-this="The component Spacing could not be used as it is not exported, so a simple div was used instead. Please fix this." /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please replace it." prop="value" />',
+      )
     })
 
     it('should keep known component references unchanged', () => {
@@ -331,7 +333,9 @@ describe('generateStory', () => {
         ]),
       })
 
-      expect(result.content).toContain('children: <KnownComponent /><div />')
+      expect(result.content).toContain(
+        'children: <KnownComponent /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please fix this." />',
+      )
       expect(result.content).toContain(
         "import { KnownComponent } from './KnownComponent'",
       )
@@ -376,6 +380,31 @@ describe('generateStory', () => {
 
       expect(result.content).toContain("import { TaskCard } from './TaskCard'")
       expect(result.content).toContain("import { Button } from './Button'")
+    })
+
+    it('should normalize styled-wrapper names in JSX source for imports and output', () => {
+      const result = generateStory({
+        meta: baseMeta,
+        props: {
+          children: {
+            __isJSX: true,
+            source:
+              '<MyComponent><Styled(Link) to="/categories">Visit page</Styled(Link)></MyComponent>',
+            componentRefs: ['Styled(Link)', 'MyComponent'],
+          },
+        },
+        componentRegistry: new Map([
+          ['MyComponent', '/project/src/components/MyComponent.tsx'],
+          ['StyledLink', '/project/src/components/StyledLink.tsx'],
+        ]),
+      })
+
+      expect(result.content).toContain(
+        'children: <MyComponent><StyledLink to="/categories">Visit page</StyledLink></MyComponent>',
+      )
+      expect(result.content).toContain(
+        "import { StyledLink } from './StyledLink'",
+      )
     })
 
     it('should handle relative imports from different directories', () => {
