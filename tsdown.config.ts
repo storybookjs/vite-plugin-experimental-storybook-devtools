@@ -22,5 +22,8 @@ export default defineConfig({
     '@babel/generator',
     '@babel/types',
     '@vue/compiler-sfc',
+    'vue',
+    'react',
+    'virtual:component-highlighter/runtime-helpers',
   ],
 })

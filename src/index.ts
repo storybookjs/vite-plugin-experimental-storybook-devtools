@@ -14,7 +14,7 @@ export {
 } from './create-component-highlighter-plugin'
 
 // Story generator
-export { generateStory, generateStoryName } from './utils/story-generator'
+export { generateStoryName } from './utils/story-generator'
 export type {
   SerializedProps,
   JSXSerializedValue,
