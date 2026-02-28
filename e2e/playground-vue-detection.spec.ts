@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -31,14 +32,6 @@ async function getRegistrySnapshot(page: Parameters<typeof test>[0]['page']) {
     }
 
     return snapshot
-  })
-}
-
-async function enableHighlighting(page: Parameters<typeof test>[0]['page']) {
-  await page.evaluate(() => {
-    ;(window as any).__componentHighlighterEnable?.()
-    ;(window as any).__componentHighlighterDraw?.()
-    ;(window as any).__componentHighlighterToggle?.()
   })
 }
 
@@ -84,16 +77,9 @@ test.describe('Vue playground detection coverage', () => {
     )
   })
 
-  test('can enable and render highlights without Vite DevTools authorization', async ({
-    page,
-  }) => {
-    await enableHighlighting(page)
-    await page.waitForTimeout(300)
+})
 
-    const container = page.locator('#component-highlighter-container')
-    await expect(container).toBeVisible()
-
-    const highlights = container.locator('div[data-highlight-id]')
-    await expect(highlights.first()).toBeVisible()
-  })
+registerCommonHighlighterSuite(test as any, {
+  framework: 'vue',
+  targetComponent: 'TaskList',
 })
