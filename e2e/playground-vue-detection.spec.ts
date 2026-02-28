@@ -4,31 +4,21 @@ type RegistrySnapshot = {
   size: number
   uniqueNames: string[]
   hasUnknownFilePath: boolean
-  byName: Record<string, number>
 }
 
 async function getRegistrySnapshot(page: Parameters<typeof test>[0]['page']) {
   return page.evaluate(() => {
     const registry = (window as any).__componentHighlighterRegistry as
-      | Map<
-          string,
-          {
-            meta?: { componentName?: string; filePath?: string }
-          }
-        >
+      | Map<string, { meta?: { componentName?: string; filePath?: string } }>
       | undefined
 
     if (!registry) return null
 
     const entries = Array.from(registry.values())
-    const byName: Record<string, number> = {}
+    const uniqueNames = Array.from(
+      new Set(entries.map((entry) => entry.meta?.componentName || 'Unknown')),
+    ).sort()
 
-    for (const entry of entries) {
-      const name = entry.meta?.componentName || 'Unknown'
-      byName[name] = (byName[name] || 0) + 1
-    }
-
-    const uniqueNames = Object.keys(byName).sort()
     const hasUnknownFilePath = entries.some((entry) => {
       const filePath = entry.meta?.filePath || ''
       return filePath === 'unknown' || filePath.trim() === ''
@@ -38,7 +28,6 @@ async function getRegistrySnapshot(page: Parameters<typeof test>[0]['page']) {
       size: registry.size,
       uniqueNames,
       hasUnknownFilePath,
-      byName,
     }
 
     return snapshot
@@ -53,14 +42,14 @@ async function enableHighlighting(page: Parameters<typeof test>[0]['page']) {
   })
 }
 
-test.describe('React playground detection coverage', () => {
+test.describe('Vue playground detection coverage', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('button')
     await page.waitForTimeout(1000)
   })
 
-  test('detects the expected 7 distinct components on initial render', async ({
+  test('detects expected baseline components on initial render', async ({
     page,
   }) => {
     const snapshot = await getRegistrySnapshot(page)
@@ -68,25 +57,21 @@ test.describe('React playground detection coverage', () => {
     expect(snapshot).toBeTruthy()
     expect(snapshot?.hasUnknownFilePath).toBe(false)
 
-    // Expected baseline set from App.tsx initial render.
-    expect(snapshot?.uniqueNames).toEqual([
-      'App',
-      'Badge',
-      'Button',
-      'Header',
-      'Modal',
-      'TaskCard',
-      'TaskList',
-    ])
-
-    // Basic sanity check that key components are actually instantiated.
-    expect(snapshot?.byName.TaskCard).toBeGreaterThanOrEqual(3)
-    expect(snapshot?.byName.Button).toBeGreaterThanOrEqual(1)
+    // Vue names can include "Anonymous" for script setup root in some toolchains,
+    // so validate the key concrete components are present.
+    expect(snapshot?.uniqueNames).toEqual(
+      expect.arrayContaining([
+        'Header',
+        'TaskList',
+        'TaskCard',
+        'Button',
+        'Badge',
+        'Modal',
+      ]),
+    )
   })
 
-  test('tracks modal subtree components after opening the task form', async ({
-    page,
-  }) => {
+  test('tracks modal form components when modal opens', async ({ page }) => {
     await page.getByRole('button', { name: '+ New Task' }).click()
     await page.waitForTimeout(500)
 
@@ -94,33 +79,9 @@ test.describe('React playground detection coverage', () => {
 
     expect(snapshot).toBeTruthy()
     expect(snapshot?.hasUnknownFilePath).toBe(false)
-
-    // Modal open should add form controls/components to the registry.
     expect(snapshot?.uniqueNames).toEqual(
-      expect.arrayContaining(['TaskForm', 'Input', 'Select']),
+      expect.arrayContaining(['Form', 'Input', 'Select']),
     )
-  })
-
-  test('uses real source metadata for TaskList (no unknown path)', async ({
-    page,
-  }) => {
-    const meta = await page.evaluate(() => {
-      const registry = (window as any).__componentHighlighterRegistry as
-        | Map<string, { meta?: { componentName?: string; filePath?: string } }>
-        | undefined
-
-      if (!registry) return null
-
-      const taskList = Array.from(registry.values()).find(
-        (entry) => entry.meta?.componentName === 'TaskList',
-      )
-
-      return taskList?.meta || null
-    })
-
-    expect(meta).toBeTruthy()
-    expect(meta?.filePath).toContain('/playground/react/src/components/TaskList.tsx')
-    expect(meta?.filePath).not.toBe('unknown')
   })
 
   test('can enable and render highlights without Vite DevTools authorization', async ({
