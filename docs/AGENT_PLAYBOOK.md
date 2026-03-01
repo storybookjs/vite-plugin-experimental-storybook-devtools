@@ -11,8 +11,8 @@ When receiving a request:
   - tests-only
   - implementation
   - refactor
-- Decide if this should be a separate PR (often yes for tests-first).
-- Identify cross-framework impact (React + Vue).
+- Prefer one PR containing both tests and implementation (tests-first within same PR).
+- Identify cross-framework impact across supported frameworks (see `docs/SUPPORTED_FRAMEWORKS.md`).
 
 ## 2) Tests-First Strategy
 
@@ -36,7 +36,18 @@ Prefer this sequence:
 - Keep deterministic activation paths for highlight tooling.
 - Keep web server config explicit (host/port/framework project mapping).
 
-## 5) Definition of Done
+## 5) Validation Commands
+
+Use simple, stable commands by default:
+
+```bash
+pnpm test
+pnpm exec playwright test
+```
+
+If a change is scoped, run targeted subsets too, but do not skip the relevant baseline checks.
+
+## 6) Definition of Done
 
 A change is done only when:
 
@@ -45,7 +56,7 @@ A change is done only when:
 - Docs are updated if behavior/workflow changed.
 - PR description contains reproducible verification commands.
 
-## 6) Documentation Freshness Contract
+## 7) Documentation Freshness Contract
 
 Any PR that changes behavior, architecture, or test strategy must update docs accordingly.
 

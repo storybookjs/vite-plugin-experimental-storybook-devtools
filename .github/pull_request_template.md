@@ -8,8 +8,7 @@
 
 ## Scope
 
-- [ ] React impact considered
-- [ ] Vue impact considered
+- [ ] Supported framework impact considered (see `docs/SUPPORTED_FRAMEWORKS.md`)
 - [ ] Shared e2e helpers/suite reused where possible
 
 ## Validation
@@ -17,9 +16,9 @@
 <!-- Paste exact commands and results -->
 
 ```bash
-# Example
-pnpm test tests/frameworks/react/playground-story-generation.test.ts tests/frameworks/vue/playground-story-generation.test.ts
-pnpm exec playwright test e2e/playground-react-detection.spec.ts e2e/playground-vue-detection.spec.ts
+# Baseline
+pnpm test
+pnpm exec playwright test
 ```
 
 ## Screenshots / Evidence

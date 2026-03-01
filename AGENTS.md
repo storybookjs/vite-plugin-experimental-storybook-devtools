@@ -5,7 +5,7 @@ Guidance for AI coding agents working in this repository.
 ## Goals
 
 - Ship minimal, correct changes.
-- Preserve cross-framework parity (React + Vue playgrounds).
+- Preserve cross-framework parity across all supported integrations.
 - Prove behavior with tests before claiming completion.
 
 ## Working Rules
@@ -14,9 +14,10 @@ Guidance for AI coding agents working in this repository.
    - If behavior changes, add/update tests first.
    - Prefer extending shared e2e helpers/suites over duplicating spec logic.
 
-2. **Keep React and Vue playgrounds aligned**
-   - Component naming and app structure should stay equivalent when possible.
-   - If one playground changes, review whether the other should match.
+2. **Keep framework playgrounds aligned**
+   - Component naming and app structure should stay equivalent across supported frameworks when possible.
+   - If one framework playground changes, review whether the others should match.
+   - Keep `docs/SUPPORTED_FRAMEWORKS.md` current.
 
 3. **Use shared test primitives**
    - Reuse:
@@ -44,18 +45,18 @@ Guidance for AI coding agents working in this repository.
 Run relevant checks (at minimum):
 
 ```bash
-pnpm test tests/frameworks/react/playground-story-generation.test.ts tests/frameworks/vue/playground-story-generation.test.ts
-pnpm exec playwright test e2e/playground-react-detection.spec.ts e2e/playground-vue-detection.spec.ts
+pnpm test
+pnpm exec playwright test
 ```
 
 If you touch broader behavior, run the full test set impacted by your changes.
 
 ## PR Hygiene
 
-- Keep PRs focused (tests PR vs implementation PR when useful).
+- Prefer tests and implementation in the same PR (tests-first sequence within one PR).
 - In PR description include:
   - What changed
   - Why
   - Exact commands run
   - Any caveats/follow-ups
-- If stacked PRs are used, explicitly document base/head relationships.
+- Keep test additions and implementation changes together in one PR whenever practical.
