@@ -621,6 +621,19 @@ function emitCreateStory(
   })
 
   overlayEvents.emit('log-info', componentInfo)
+
+  // Test/integration hook: mirror create-story requests on window events
+  // so E2E can assert payloads without relying on external DevTools RPC.
+  const createStoryEvent = new CustomEvent(
+    'component-highlighter:create-story-request',
+    {
+      detail: {
+        ...componentInfo,
+        includePlayFunction,
+      },
+    },
+  )
+  window.dispatchEvent(createStoryEvent)
 }
 
 // Context menu management

@@ -21,6 +21,7 @@ declare global {
     __componentHighlighterToggle?: () => boolean
     __componentHighlighterDraw?: () => void
     __componentHighlighterInitialized?: boolean
+    __componentHighlighterEnable?: () => void
   }
 }
 
@@ -238,6 +239,12 @@ function initialize() {
     enableOverlay()
     updateInstanceRects()
   }
+
+  // Test/automation hook: bypass DevTools dock activation when needed.
+  ;(window as unknown as { __componentHighlighterEnable?: () => void }).__componentHighlighterEnable =
+    () => {
+      enableHighlightMode()
+    }
 }
 
 // Run initialization

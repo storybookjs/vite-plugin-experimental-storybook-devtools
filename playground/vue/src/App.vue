@@ -4,7 +4,7 @@ import Header from './components/Header.vue'
 import Button from './components/Button.vue'
 import TaskCard from './components/TaskCard.vue'
 import TaskList from './components/TaskList.vue'
-import TaskForm, { type TaskFormData } from './components/Form.vue'
+import TaskForm, { type TaskFormData } from './components/TaskForm.vue'
 import Modal from './components/Modal.vue'
 
 interface Task {

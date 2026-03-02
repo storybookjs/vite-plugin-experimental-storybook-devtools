@@ -22,7 +22,7 @@ const dirname =
 export default defineConfig({
   plugins: [
     react(),
-    process.env.STORYBOOK ? null : DevTools(),
+    process.env.STORYBOOK || process.env.E2E ? null : DevTools(),
     process.env.STORYBOOK
       ? null
       : componentHighlighter({
