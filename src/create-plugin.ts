@@ -197,7 +197,6 @@ export function createPlugin(
         viteConfig.server.proxy[STORYBOOK_IFRAME_WRAPPER_URL] = {
           target: STORYBOOK_IFRAME_WRAPPER_DEV_URL,
           changeOrigin: true,
-          //rewrite: (path) => path.replace(STORYBOOK_IFRAME_WRAPPER_URL, '/'),
         }
       }
     },

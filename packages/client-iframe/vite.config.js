@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: 'dist',
   },
 
-  base: '/client-iframe/',
+  base: '/client-iframe',
   server: {
     port: 6005,
   }
