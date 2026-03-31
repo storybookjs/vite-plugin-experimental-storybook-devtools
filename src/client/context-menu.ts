@@ -15,6 +15,7 @@ const SB_ICON = `<svg width="16" height="16" viewBox="-31.5 0 319 319" xmlns="ht
 </svg>`
 
 const CODE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`
+const EYE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
 
 // ─── Stylesheet (injected into the shadow root) ────────────────────────────
 const STYLES = /* css */ `
@@ -173,6 +174,12 @@ const STYLES = /* css */ `
   }
   .icon-btn.sb-btn:hover:not([disabled]) {
     background: rgba(255, 71, 133, 0.1);
+  }
+  .icon-btn.view-btn {
+    color: #3b82f6;
+  }
+  .icon-btn.view-btn:hover:not([disabled]) {
+    background: rgba(59, 130, 246, 0.1);
   }
   .action-label {
     font-size: 9px;
@@ -685,12 +692,14 @@ export interface ContextMenuCallbacks {
   onSaveStory: (storyName: string) => void
   onSaveStoryWithInteractions: (storyName: string) => void
   onClose: () => void
+  visitStory?: (relativeFilePath: string) => void | Promise<void>
 }
 
 export interface ContextMenuHandle {
   host: HTMLDivElement
   showSaveFeedback: (status: 'success' | 'error') => void
   enableGoToStory: (storyPath: string) => void
+  enableViewStory: () => void
   destroy: () => void
 }
 
@@ -815,6 +824,31 @@ export function createContextMenu(
   storyBtnWrap.appendChild(goToStoryBtn)
   storyBtnWrap.appendChild(storyBtnLabel)
   actions.appendChild(storyBtnWrap)
+
+  // View Story in Storybook panel button
+  let viewStoryWrap: HTMLDivElement | undefined
+  let viewStoryBtn: HTMLButtonElement | undefined
+  let viewStoryLabel: HTMLSpanElement | undefined
+  if (callbacks.visitStory) {
+    viewStoryWrap = document.createElement('div')
+    viewStoryWrap.className = 'action-btn-wrap'
+    viewStoryBtn = document.createElement('button')
+    viewStoryBtn.className = 'icon-btn view-btn'
+    viewStoryBtn.innerHTML = EYE_ICON
+    viewStoryLabel = document.createElement('span')
+    viewStoryLabel.className = 'action-label'
+    viewStoryLabel.textContent = storyInfo.hasStory ? 'View Story' : 'No Story'
+    if (!storyInfo.hasStory) {
+      viewStoryBtn.setAttribute('disabled', '')
+    } else {
+      const relPath = meta.relativeFilePath || meta.filePath
+      const visitCb = callbacks.visitStory
+      viewStoryBtn.addEventListener('click', () => visitCb(relPath))
+    }
+    viewStoryWrap.appendChild(viewStoryBtn)
+    viewStoryWrap.appendChild(viewStoryLabel)
+    actions.appendChild(viewStoryWrap)
+  }
 
   header.appendChild(actions)
   body.appendChild(header)
@@ -1178,6 +1212,18 @@ export function createContextMenu(
       storyBtnWrap.replaceChild(newBtn, goToStoryBtn)
       goToStoryBtn = newBtn
       storyBtnLabel.textContent = 'Go to Story'
+    },
+    enableViewStory() {
+      if (!viewStoryBtn || !viewStoryLabel || !callbacks.visitStory) return
+      const relPath = meta.relativeFilePath || meta.filePath
+      const visitCb = callbacks.visitStory
+      const newBtn = document.createElement('button')
+      newBtn.className = 'icon-btn view-btn'
+      newBtn.innerHTML = EYE_ICON
+      newBtn.addEventListener('click', () => visitCb(relPath))
+      viewStoryWrap!.replaceChild(newBtn, viewStoryBtn)
+      viewStoryBtn = newBtn
+      viewStoryLabel.textContent = 'View Story'
     },
     destroy() {
       dismissPopover()

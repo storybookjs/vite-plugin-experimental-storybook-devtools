@@ -300,7 +300,7 @@ th {
 }
 
 th:last-child {
-  width: 82px;
+  width: 110px;
   text-align: center;
 }
 
@@ -404,6 +404,11 @@ td {
 .act-btn.sb:hover {
   color: #FF4785;
   background: rgba(255, 71, 133, 0.1);
+}
+
+.act-btn.visit:hover {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .act-btn[disabled] {

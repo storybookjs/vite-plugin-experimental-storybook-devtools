@@ -12,6 +12,7 @@ const SB_TAB_ICON = `<svg width="14" height="14" viewBox="-31.5 0 319 319" xmlns
 const COVERAGE_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`
 const TERMINAL_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`
 const CROSSHAIR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>`
+const EYE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -33,7 +34,11 @@ interface CoverageData {
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 function coverageColorClass(pct: number): string {
@@ -44,7 +49,9 @@ function coverageColorClass(pct: number): string {
 }
 
 function openInEditor(filePath: string) {
-  fetch(`/__open-in-editor?file=${encodeURIComponent(filePath)}`).catch(() => {})
+  fetch(`/__open-in-editor?file=${encodeURIComponent(filePath)}`).catch(
+    () => {},
+  )
 }
 
 /** Get the storybookUrl from the query string (set by the server plugin) */
@@ -53,10 +60,138 @@ function getStorybookUrl(): string {
   return params.get('sbUrl') || 'http://localhost:6006'
 }
 
+// ─── Visit Story ────────────────────────────────────────────────────
+
+interface StorybookIndexEntry {
+  id: string
+  title: string
+  name: string
+  importPath: string
+  type: string
+}
+
+let storybookIndexCache: Record<string, StorybookIndexEntry> | null = null
+let storybookIndexFetchedAt = 0
+
+async function getStorybookIndex(): Promise<
+  Record<string, StorybookIndexEntry>
+> {
+  // Cache for 30 seconds
+  if (storybookIndexCache && Date.now() - storybookIndexFetchedAt < 30_000) {
+    return storybookIndexCache
+  }
+  try {
+    const res = await fetch('/__component-highlighter/storybook-index')
+    const data = await res.json()
+    storybookIndexCache = data.entries || {}
+    storybookIndexFetchedAt = Date.now()
+    return storybookIndexCache!
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Find a story ID by matching the component's relative file path against
+ * Storybook index entries' importPath.
+ *
+ * Strategy: extract the component base name (e.g. "Button" from
+ * "src/components/Button.tsx") and match against story entries whose
+ * importPath contains that same base name in a `.stories.` file.
+ */
+async function findStoryId(relativeFilePath: string): Promise<string | null> {
+  const entries = await getStorybookIndex()
+  if (!entries || Object.keys(entries).length === 0) return null
+
+  // Strip leading ./ and file extension to get the component base path
+  const stripExt = (p: string) =>
+    p.replace(/^\.\//, '').replace(/\.(stories\.)?(tsx?|jsx?|mts|mjs)$/, '')
+
+  const componentBase = stripExt(relativeFilePath)
+  // Also extract just the filename without extension for fallback matching
+  const componentName = componentBase.split('/').pop() || componentBase
+
+  // First pass: exact base path match
+  for (const entry of Object.values(entries)) {
+    if (entry.type !== 'story') continue
+    const entryBase = stripExt(entry.importPath)
+    if (entryBase === componentBase) {
+      return entry.id
+    }
+  }
+
+  // Second pass: the story importPath ends with the component name
+  // e.g. entry "./src/components/Button.stories.tsx" → base "src/components/Button"
+  //      component "src/components/Button" → name "Button"
+  for (const entry of Object.values(entries)) {
+    if (entry.type !== 'story') continue
+    const entryBase = stripExt(entry.importPath)
+    if (entryBase.endsWith(componentName)) {
+      return entry.id
+    }
+  }
+
+  return null
+}
+
+/**
+ * Build a Storybook URL for a specific story.
+ * Returns null if no matching story is found.
+ */
+async function buildStoryUrl(relativeFilePath: string): Promise<string | null> {
+  const storyId = await findStoryId(relativeFilePath)
+  if (!storyId) return null
+  const sbUrl = getStorybookUrl()
+  return `${sbUrl}/?path=/story/${encodeURIComponent(storyId)}`
+}
+
+/**
+ * Navigate to a story in the Storybook iframe.
+ * Switches to the Storybook tab and updates the iframe src.
+ */
+async function visitStory(relativeFilePath: string) {
+  const targetUrl = await buildStoryUrl(relativeFilePath)
+  if (!targetUrl) return
+
+  // Switch to storybook tab
+  switchTab('storybook')
+
+  // Navigate the iframe if it exists, or set it up
+  const pane = document.getElementById('pane-storybook')
+  if (!pane) return
+
+  const iframe = pane.querySelector<HTMLIFrameElement>('.sb-iframe')
+  if (iframe) {
+    iframe.src = targetUrl
+  } else {
+    // Storybook is running — render the iframe pointing to the story
+    pane.innerHTML = `<iframe class="sb-iframe" src="${esc(targetUrl)}"></iframe>`
+  }
+}
+
+// Expose visitStory on the parent window so the context menu can call it directly.
+try {
+  ;(window.parent as any).__storybookDevtoolsVisitStory = (
+    relativeFilePath: string,
+  ) => {
+    visitStory(relativeFilePath)
+  }
+  // Also expose the URL builder so callers can fall back to window.open
+  ;(window.parent as any).__storybookDevtoolsBuildStoryUrl = (
+    relativeFilePath: string,
+  ) => {
+    return buildStoryUrl(relativeFilePath)
+  }
+} catch {
+  // cross-origin
+}
+
 /** Remove all coverage highlight overlays from the parent page */
 function clearAllHighlights() {
   try {
-    const els = window.parent.document.querySelectorAll('[data-coverage-highlight]')
+    const els = window.parent.document.querySelectorAll(
+      '[data-coverage-highlight]',
+    )
     els.forEach((el) => el.remove())
   } catch {
     // cross-origin or parent not available
@@ -76,8 +211,19 @@ let terminalLogOffset = 0
 let terminalUnseenCount = 0
 let terminalHasError = false
 let highlightEnabled = false
+let terminalTabVisible = false
 
-const ERROR_PATTERN = /\b(error|ERR!|fail|fatal|exception|stack\s*trace|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|Unexpected token)\b/i
+function showTerminalTab() {
+  if (terminalTabVisible) return
+  terminalTabVisible = true
+  const termTabBtn = document.querySelector(
+    '.tab-btn[data-tab="terminal"]',
+  ) as HTMLElement | null
+  if (termTabBtn) termTabBtn.style.display = ''
+}
+
+const ERROR_PATTERN =
+  /\b(error|ERR!|fail|fatal|exception|stack\s*trace|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|Unexpected token)\b/i
 
 function updateTerminalBadge() {
   const badge = document.getElementById('terminal-badge')
@@ -89,7 +235,8 @@ function updateTerminalBadge() {
   }
 
   badge.style.display = 'inline-flex'
-  badge.textContent = terminalUnseenCount > 99 ? '99+' : String(terminalUnseenCount)
+  badge.textContent =
+    terminalUnseenCount > 99 ? '99+' : String(terminalUnseenCount)
   badge.className = `tab-badge ${terminalHasError ? 'error' : 'info'}`
 }
 
@@ -166,7 +313,9 @@ function renderStorybookState(state: SbState) {
           <div class="msg">Storybook is not running at <strong>${esc(sbUrl)}</strong></div>
           <button class="start-btn" id="sb-start-btn">Start Storybook</button>
         </div>`
-      document.getElementById('sb-start-btn')?.addEventListener('click', startStorybook)
+      document
+        .getElementById('sb-start-btn')
+        ?.addEventListener('click', startStorybook)
       break
 
     case 'starting':
@@ -208,7 +357,8 @@ async function startStorybook() {
     // Server may not support terminal start; fall through to polling
   }
 
-  // Switch to the terminal tab so the user can watch the logs
+  // Show and switch to the terminal tab so the user can watch the logs
+  showTerminalTab()
   switchTab('terminal')
 
   // Poll until Storybook is ready (max ~120s)
@@ -299,7 +449,8 @@ function buildCoveragePanel(coverage: CoverageData) {
   if (coverage.entries.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'empty'
-    empty.textContent = 'No components detected yet. Navigate your app to discover components.'
+    empty.textContent =
+      'No components detected yet. Navigate your app to discover components.'
     root.appendChild(empty)
     pane.innerHTML = ''
     pane.appendChild(root)
@@ -375,6 +526,24 @@ function buildCoveragePanel(coverage: CoverageData) {
     }
     actionsDiv.appendChild(storyBtn)
 
+    // Visit story in Storybook button
+    const visitBtn = document.createElement('button')
+    visitBtn.className = 'act-btn visit'
+    visitBtn.innerHTML = EYE_ICON
+    visitBtn.title = entry.hasStory
+      ? 'View story in Storybook'
+      : 'No story to view'
+    if (!entry.hasStory) {
+      visitBtn.setAttribute('disabled', '')
+    } else {
+      const rp = entry.relativeFilePath
+      visitBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        visitStory(rp)
+      })
+    }
+    actionsDiv.appendChild(visitBtn)
+
     tdActions.appendChild(actionsDiv)
     tr.appendChild(tdActions)
 
@@ -382,7 +551,8 @@ function buildCoveragePanel(coverage: CoverageData) {
     tr.addEventListener('mouseenter', () => {
       clearHighlights()
       try {
-        const registry = (window.parent as any).__componentHighlighterRegistry as
+        const registry = (window.parent as any)
+          .__componentHighlighterRegistry as
           | Map<string, { meta: { componentName: string }; element?: Element }>
           | undefined
         if (!registry) return
@@ -442,7 +612,9 @@ function stripAnsi(s: string): string {
 
 async function pollTerminalLogs() {
   try {
-    const res = await fetch(`/__component-highlighter/terminal-logs?since=${terminalLogOffset}`)
+    const res = await fetch(
+      `/__component-highlighter/terminal-logs?since=${terminalLogOffset}`,
+    )
     const data: { lines: string[]; total: number } = await res.json()
 
     if (data.lines.length > 0) {
@@ -526,6 +698,7 @@ function init() {
   const termTab = document.createElement('button')
   termTab.className = 'tab-btn'
   termTab.setAttribute('data-tab', 'terminal')
+  termTab.style.display = 'none' // Hidden until "Start Storybook" is clicked
   termTab.innerHTML = `${TERMINAL_TAB_ICON} Terminal <span id="terminal-badge" class="tab-badge" style="display:none"></span>`
   termTab.addEventListener('click', () => switchTab('terminal'))
 
@@ -584,7 +757,8 @@ function init() {
   const covPane = document.createElement('div')
   covPane.className = 'tab-pane'
   covPane.id = 'pane-coverage'
-  covPane.innerHTML = '<div class="coverage-root"><div class="empty">Loading coverage data\u2026</div></div>'
+  covPane.innerHTML =
+    '<div class="coverage-root"><div class="empty">Loading coverage data\u2026</div></div>'
 
   const termPane = document.createElement('div')
   termPane.className = 'tab-pane'

@@ -7,7 +7,10 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import type { NotificationService } from './notifications'
-import { ConsoleNotificationService, DevToolsNotificationService } from './notifications'
+import {
+  ConsoleNotificationService,
+  DevToolsNotificationService,
+} from './notifications'
 import { computeCoverage } from './coverage-dashboard'
 
 // RPC function type declarations
@@ -205,18 +208,15 @@ export function createComponentHighlighterPlugin(
       }
 
       // ── Middleware: coverage data ──────────────────────────────────
-      srv.middlewares.use(
-        '/__component-highlighter/coverage',
-        (_req, res) => {
-          const coverage = computeCoverage(
-            transformedComponents,
-            coverageCwd || process.cwd(),
-            storiesDir,
-          )
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify(coverage))
-        },
-      )
+      srv.middlewares.use('/__component-highlighter/coverage', (_req, res) => {
+        const coverage = computeCoverage(
+          transformedComponents,
+          coverageCwd || process.cwd(),
+          storiesDir,
+        )
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify(coverage))
+      })
 
       // ── Middleware: Storybook status check ────────────────────────
       srv.middlewares.use(
@@ -235,6 +235,25 @@ export function createComponentHighlighterPlugin(
         },
       )
 
+      // ── Middleware: proxy Storybook index.json ────────────────────
+      srv.middlewares.use(
+        '/__component-highlighter/storybook-index',
+        async (_req, res) => {
+          try {
+            const indexUrl = new URL('/index.json', storybookUrl).href
+            const r = await fetch(indexUrl, {
+              signal: AbortSignal.timeout(5000),
+            })
+            const data = await r.text()
+            res.setHeader('Content-Type', 'application/json')
+            res.end(data)
+          } catch {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ v: 0, entries: {} }))
+          }
+        },
+      )
+
       // ── Middleware: start Storybook via terminals API ─────────────
       srv.middlewares.use(
         '/__component-highlighter/start-storybook',
@@ -247,7 +266,12 @@ export function createComponentHighlighterPlugin(
           }
 
           if (!devtoolsTerminals) {
-            res.end(JSON.stringify({ started: false, error: 'Terminals API not available' }))
+            res.end(
+              JSON.stringify({
+                started: false,
+                error: 'Terminals API not available',
+              }),
+            )
             return
           }
 
@@ -255,7 +279,13 @@ export function createComponentHighlighterPlugin(
             storybookSession = await devtoolsTerminals.startChildProcess(
               {
                 command: 'npx',
-                args: ['storybook', 'dev', '-p', new URL(storybookUrl).port || '6006', '--no-open'],
+                args: [
+                  'storybook',
+                  'dev',
+                  '-p',
+                  new URL(storybookUrl).port || '6006',
+                  '--no-open',
+                ],
                 cwd: coverageCwd || process.cwd(),
               },
               {
@@ -427,7 +457,8 @@ export function createComponentHighlighterPlugin(
             title: 'Storybook',
             icon: 'https://avatars.githubusercontent.com/u/22632046',
             type: 'iframe',
-            url: '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
+            url:
+              '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
           })
         }
 
@@ -506,7 +537,9 @@ export function createComponentHighlighterPlugin(
                     let existingContent: string | undefined
                     if (fs.existsSync(outputPath)) {
                       existingContent = fs.readFileSync(outputPath, 'utf-8')
-                      logDebug(`Appending to existing story file: ${outputPath}`)
+                      logDebug(
+                        `Appending to existing story file: ${outputPath}`,
+                      )
                     }
 
                     // Dynamically import the framework-specific story generator
@@ -549,7 +582,9 @@ export function createComponentHighlighterPlugin(
                     })
 
                     if (data.playFunction?.length) {
-                      logDebug(`Story includes a play function with ${data.playFunction.length} lines`)
+                      logDebug(
+                        `Story includes a play function with ${data.playFunction.length} lines`,
+                      )
                     }
 
                     // Ensure the directory exists
@@ -560,7 +595,9 @@ export function createComponentHighlighterPlugin(
 
                     // Write the story file
                     fs.writeFileSync(outputPath, story.content, 'utf-8')
-                    logDebug(`Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`)
+                    logDebug(
+                      `Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
+                    )
 
                     const verb = existingContent ? 'added to' : 'created in'
                     notifications.notify({
@@ -593,7 +630,8 @@ export function createComponentHighlighterPlugin(
                       message: `Failed to create story for ${data.meta.componentName}`,
                       level: 'error',
                       toast: true,
-                      description: error instanceof Error ? error.message : String(error),
+                      description:
+                        error instanceof Error ? error.message : String(error),
                       category: 'story-creation',
                     })
 

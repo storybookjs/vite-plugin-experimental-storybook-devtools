@@ -732,6 +732,89 @@ async function showContextMenu(
       contextMenuHandle = null
       drawAllHighlights()
     },
+    async visitStory(relativeFilePath: string) {
+      // Try the global registered by the panel iframe (works when dock is open)
+      let visitFn = (window as any).__storybookDevtoolsVisitStory
+      if (typeof visitFn === 'function') {
+        visitFn(relativeFilePath)
+        return
+      }
+
+      // Ensure Storybook is running before opening the panel
+      let sbRunning = false
+      try {
+        const statusRes = await fetch('/__component-highlighter/storybook-status')
+        const statusData = await statusRes.json()
+        sbRunning = statusData.running === true
+      } catch {
+        // assume not running
+      }
+
+      if (!sbRunning) {
+        // Start Storybook and poll until it's ready (max ~120s)
+        try {
+          await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+        } catch {
+          // Server may not support terminal start
+        }
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 1000))
+          try {
+            const r = await fetch('/__component-highlighter/storybook-status')
+            const d = await r.json()
+            if (d.running === true) {
+              sbRunning = true
+              break
+            }
+          } catch {
+            // keep polling
+          }
+        }
+        if (!sbRunning) return
+      }
+
+      // Open the panel via switchEntry, then wait for the iframe to register visitStory
+      const ctx = (window as any).__VITE_DEVTOOLS_CLIENT_CONTEXT__
+      if (ctx?.docks?.switchEntry) {
+        await ctx.docks.switchEntry('storybook-devtools-panel')
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 150))
+          visitFn = (window as any).__storybookDevtoolsVisitStory
+          if (typeof visitFn === 'function') {
+            visitFn(relativeFilePath)
+            return
+          }
+        }
+      }
+
+      // Fallback: resolve the story URL via the panel's builder and open in new tab
+      const buildUrlFn = (window as any).__storybookDevtoolsBuildStoryUrl
+      if (typeof buildUrlFn === 'function') {
+        const url = await buildUrlFn(relativeFilePath)
+        if (url) window.open(url, '_blank')
+        return
+      }
+      // Last resort: fetch the index ourselves and open in new tab
+      try {
+        const res = await fetch('/__component-highlighter/storybook-index')
+        const data = await res.json()
+        const entries = data.entries || {}
+        const stripExt = (p: string) =>
+          p.replace(/^\.\//, '').replace(/\.(stories\.)?(tsx?|jsx?|mts|mjs)$/, '')
+        const componentBase = stripExt(relativeFilePath)
+        const componentName = componentBase.split('/').pop() || componentBase
+        for (const entry of Object.values(entries) as any[]) {
+          if (entry.type !== 'story') continue
+          const entryBase = stripExt(entry.importPath)
+          if (entryBase === componentBase || entryBase.endsWith(componentName)) {
+            window.open(`http://localhost:6006/?path=/story/${encodeURIComponent(entry.id)}`, '_blank')
+            return
+          }
+        }
+      } catch {
+        // Storybook not available
+      }
+    },
   })
 }
 
@@ -1037,6 +1120,7 @@ export function invalidateStoryCache(componentPath: string) {
 function updateOpenStoriesButton(storyPath: string) {
   if (!contextMenuHandle) return
   contextMenuHandle.enableGoToStory(storyPath)
+  contextMenuHandle.enableViewStory()
 }
 
 /**
