@@ -12,6 +12,7 @@ const SB_TAB_ICON = `<svg width="14" height="14" viewBox="-31.5 0 319 319" xmlns
 const COVERAGE_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`
 const TERMINAL_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`
 const CROSSHAIR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>`
+const DOCS_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`
 const EYE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ function clearAllHighlights() {
 
 // ─── Tab management ─────────────────────────────────────────────────
 
-type TabId = 'storybook' | 'coverage' | 'terminal'
+type TabId = 'storybook' | 'coverage' | 'terminal' | 'docs'
 
 let activeTab: TabId = 'storybook'
 let coverageInterval: ReturnType<typeof setInterval> | null = null
@@ -739,9 +740,16 @@ function init() {
     // cross-origin or parent not available
   }
 
+  const docsTab = document.createElement('button')
+  docsTab.className = 'tab-btn'
+  docsTab.setAttribute('data-tab', 'docs')
+  docsTab.innerHTML = `${DOCS_TAB_ICON} Docs`
+  docsTab.addEventListener('click', () => switchTab('docs'))
+
   tabBar.appendChild(sbTab)
   tabBar.appendChild(covTab)
   tabBar.appendChild(termTab)
+  tabBar.appendChild(docsTab)
   tabBar.appendChild(spacer)
   tabBar.appendChild(highlightBtn)
   app.appendChild(tabBar)
@@ -772,9 +780,15 @@ function init() {
       <div class="term-output" id="terminal-output"></div>
     </div>`
 
+  const docsPane = document.createElement('div')
+  docsPane.className = 'tab-pane'
+  docsPane.id = 'pane-docs'
+  docsPane.innerHTML = '<iframe class="sb-iframe" src="https://storybook.js.org/docs"></iframe>'
+
   content.appendChild(sbPane)
   content.appendChild(covPane)
   content.appendChild(termPane)
+  content.appendChild(docsPane)
   app.appendChild(content)
 
   // Wire up the clear button after DOM is ready
