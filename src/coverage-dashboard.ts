@@ -28,12 +28,20 @@ export interface CoverageData {
   coveragePercent: number
 }
 
-const STORY_EXTENSIONS = ['.stories.tsx', '.stories.ts', '.stories.jsx', '.stories.js']
+const STORY_EXTENSIONS = [
+  '.stories.tsx',
+  '.stories.ts',
+  '.stories.jsx',
+  '.stories.js',
+]
 
 /**
  * Check if a component file has an associated story file.
  */
-function findStoryFile(componentPath: string, storiesDir?: string): string | null {
+function findStoryFile(
+  componentPath: string,
+  storiesDir?: string,
+): string | null {
   const dir = path.dirname(componentPath)
   const baseName = path.basename(componentPath, path.extname(componentPath))
 
@@ -87,9 +95,10 @@ export function computeCoverage(
 
   const totalComponents = entries.length
   const coveredComponents = entries.filter((e) => e.hasStory).length
-  const coveragePercent = totalComponents > 0
-    ? Math.round((coveredComponents / totalComponents) * 100)
-    : 0
+  const coveragePercent =
+    totalComponents > 0
+      ? Math.round((coveredComponents / totalComponents) * 100)
+      : 0
 
   return { entries, totalComponents, coveredComponents, coveragePercent }
 }
@@ -127,7 +136,7 @@ export function buildCoverageSpec(coverage: CoverageData): JsonRenderSpec {
         type: 'Progress',
         props: {
           value: coverage.coveragePercent,
-          label: `${coverage.coveredComponents} of ${coverage.totalComponents} components have stories`,
+          label: `${coverage.coveredComponents} of ${coverage.totalComponents} components in this page have stories`,
         },
       },
       table: {

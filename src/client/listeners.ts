@@ -140,8 +140,12 @@ function handleKeyDown(event: KeyboardEvent) {
     setHighlightAll(true)
   }
 
-  // Shift+H to toggle sticky highlight-all mode
-  if (event.key === 'H' && event.shiftKey && isDockActive) {
+  // Shift+H to toggle sticky highlight-all mode (skip when typing in an input)
+  const tag = (document.activeElement?.tagName ?? '').toLowerCase()
+  const isEditable =
+    tag === 'input' || tag === 'textarea' || tag === 'select' ||
+    (document.activeElement as HTMLElement)?.isContentEditable === true
+  if (event.key === 'H' && event.shiftKey && isDockActive && !isEditable) {
     event.preventDefault()
     const currentState = isHighlightAllEnabled()
     setHighlightAll(!currentState)
