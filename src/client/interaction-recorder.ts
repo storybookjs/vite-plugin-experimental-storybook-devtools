@@ -9,6 +9,7 @@ import {
 } from '../codegen/get-interaction-event'
 import { convertInteractionsToCode } from '../codegen/interactions-to-code'
 import type { Interaction } from '../codegen/types'
+import { debug } from './logger'
 
 // Recording state
 let isRecording = false
@@ -179,7 +180,7 @@ export function startRecording(onStop?: (interactions: Interaction[]) => void) {
   }
 
   showRecordingIndicator()
-  console.log('[component-highlighter] Interaction recording started')
+  debug('Interaction recording started')
 }
 
 /**
@@ -197,8 +198,8 @@ export function stopRecording(): Interaction[] {
   hideRecordingIndicator()
 
   const interactions = [...recordedInteractions]
-  console.log(
-    `[component-highlighter] Interaction recording stopped. ${interactions.length} interactions captured.`,
+  debug(
+    `Interaction recording stopped. ${interactions.length} interactions captured.`,
   )
 
   if (onStopCallback) {

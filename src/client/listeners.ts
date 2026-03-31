@@ -13,6 +13,7 @@ import {
   isHighlightAllEnabled,
 } from './overlay'
 import { isCurrentlyRecording } from './interaction-recorder'
+import { warn } from './logger'
 
 // Type declarations for globals
 declare global {
@@ -64,20 +65,19 @@ function debounce(func: Function, wait: number) {
 
 // Find component at pointer position
 function findComponentAtPoint(x: number, y: number): ComponentInstance | null {
-  // When highlights are showing, we need to check what's under the pointer
-  // accounting for the highlight layer
+  // Temporarily hide the highlight container so elementFromPoint hits the
+  // actual app elements. Individual highlight children have pointer-events: auto
+  // (for click handling), so they'd intercept the hit test otherwise.
   const highlightContainer = document.getElementById(
     'component-highlighter-container',
   )
 
-  // Temporarily hide the highlight container to get the actual element
   if (highlightContainer) {
     highlightContainer.style.display = 'none'
   }
 
   const elementAtPoint = document.elementFromPoint(x, y)
 
-  // Restore highlight container
   if (highlightContainer) {
     highlightContainer.style.display = ''
   }
@@ -172,8 +172,8 @@ function initialize() {
   // Prevent duplicate initialization if module is loaded multiple times
   if (typeof window === 'undefined') return
   if (window.__componentHighlighterInitialized) {
-    console.warn(
-      '[component-highlighter] Already initialized, skipping duplicate initialization',
+    warn(
+      'Already initialized, skipping duplicate initialization',
     )
     return
   }

@@ -313,7 +313,7 @@ describe('generateStory', () => {
       })
 
       expect(result.content).toContain(
-        'children: <div data-important-read-this="The component Spacing could not be used as it is not exported, so a simple div was used instead. Please fix this." /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please replace it." prop="value" />',
+        'children: <div data-important-read-this="The component Spacing could not be used as it is not exported, so a simple div was used instead. Please replace it." /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please replace it." prop="value" />',
       )
     })
 
@@ -334,7 +334,7 @@ describe('generateStory', () => {
       })
 
       expect(result.content).toContain(
-        'children: <KnownComponent /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please fix this." />',
+        'children: <KnownComponent /><div data-important-read-this="The component UnknownComponent could not be used as it is not exported, so a simple div was used instead. Please replace it." />',
       )
       expect(result.content).toContain(
         "import { KnownComponent } from './KnownComponent'",

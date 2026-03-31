@@ -117,15 +117,3 @@ export interface FrameworkConfig {
   /** Storybook framework package name */
   storybookFramework: string
 }
-
-/**
- * Provider dependency detection result
- */
-export interface ProviderDependency {
-  type: string
-  source: string
-  confidence: 'high' | 'medium' | 'low'
-  suggestedDecorator?: string
-  requiredImports?: string[]
-  docsUrl?: string
-}

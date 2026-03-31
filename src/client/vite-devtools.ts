@@ -3,30 +3,37 @@
 import type { DockClientScriptContext } from '@vitejs/devtools-kit/client'
 import { overlayEvents, showStoryCreationFeedback } from './overlay'
 import { enableHighlightMode, disableHighlightMode } from './listeners'
+import { debug, error as logError } from './logger'
+
+// Track previous subscription so we never stack duplicate listeners
+// (clientScriptSetup may be called more than once on HMR or dock reconnect)
+let unsubLogInfo: (() => void) | null = null
 
 export default function clientScriptSetup(ctx: DockClientScriptContext): void {
-  console.log('[component-highlighter] clientScriptSetup called')
+  debug('clientScriptSetup called')
 
   // When dock is activated, enable highlight mode
   ctx.current.events.on('entry:activated', () => {
-    console.log(
-      '[component-highlighter] dock activated - enabling highlight mode',
-    )
+    debug('dock activated - enabling highlight mode')
     enableHighlightMode()
   })
 
   // When dock is deactivated, disable highlight mode
   ctx.current.events.on('entry:deactivated', () => {
-    console.log(
-      '[component-highlighter] dock deactivated - disabling highlight mode',
-    )
+    debug('dock deactivated - disabling highlight mode')
     disableHighlightMode()
   })
 
+  // Clean up previous listener before adding a new one
+  if (unsubLogInfo) {
+    unsubLogInfo()
+    unsubLogInfo = null
+  }
+
   // Listen for "Create Story" button clicks from overlay
-  overlayEvents.on('log-info', async (data) => {
-    console.log(
-      '[component-highlighter] log-info event received, calling RPC:',
+  unsubLogInfo = overlayEvents.on('log-info', async (data) => {
+    debug(
+      'log-info event received, calling RPC:',
       data.meta.componentName,
       'story:',
       data.storyName,
@@ -45,10 +52,10 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
         ...(data.playImports ? { playImports: data.playImports } : {}),
       })
 
-      console.log('[component-highlighter] RPC call successful')
+      debug('RPC call successful')
       // Feedback will be shown via HMR event from server
-    } catch (error) {
-      console.error('[component-highlighter] RPC call failed:', error)
+    } catch (err) {
+      logError('RPC call failed:', err)
       // Show error feedback in overlay
       showStoryCreationFeedback('error')
     }
@@ -63,8 +70,8 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
         componentName: string
         componentPath?: string
       }) => {
-        console.log(
-          `[component-highlighter] ✅ Story created for ${data.componentName}: ${data.filePath}`,
+        debug(
+          `Story created for ${data.componentName}: ${data.filePath}`,
         )
         showStoryCreationFeedback('success', data.filePath, data.componentPath)
       },

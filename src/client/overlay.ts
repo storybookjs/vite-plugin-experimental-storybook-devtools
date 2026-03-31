@@ -1,6 +1,7 @@
 import type { ComponentInstance, SerializedProps } from '../frameworks/types'
 import type { Emitter } from 'nanoevents'
 import { createNanoEvents } from 'nanoevents'
+import { debug, warn, error as logError } from './logger'
 import {
   UI_MARKER,
   getPlayFunctionCode,
@@ -8,6 +9,40 @@ import {
   startRecording,
   stopRecording,
 } from './interaction-recorder'
+
+/**
+ * Wraps an overlay operation in a try-catch so that errors in the
+ * highlight/menu rendering never bubble up and break the host app.
+ * If something fails, the overlay is disabled and a warning is logged.
+ */
+function safeOverlayCall<T>(fn: () => T, fallback?: T): T | undefined {
+  try {
+    return fn()
+  } catch (err) {
+    logError('Overlay error — disabling to avoid breaking the host app:', err)
+    try { disableOverlaySafe() } catch { /* best effort cleanup */ }
+    return fallback
+  }
+}
+
+function disableOverlaySafe() {
+  isOverlayEnabled = false
+  isHighlightAllActive = false
+  if (highlightContainer) {
+    highlightContainer.remove()
+    highlightContainer = null
+  }
+  highlightElements.clear()
+  if (contextMenuElement) {
+    contextMenuElement.remove()
+    contextMenuElement = null
+  }
+  if (debugOverlayElement) {
+    debugOverlayElement.remove()
+    debugOverlayElement = null
+  }
+  document.body.style.cursor = ''
+}
 
 // Event emitter for overlay actions
 export interface OverlayEvents {
@@ -138,7 +173,7 @@ async function checkStoryFile(
       return result
     }
   } catch (e) {
-    console.warn('[component-highlighter] Failed to check story file:', e)
+    warn('Failed to check story file:', e)
   }
 
   const defaultResult = { hasStory: false, storyPath: null }
@@ -146,13 +181,38 @@ async function checkStoryFile(
   return defaultResult
 }
 
+// Open-in-editor availability: undefined = unchecked, true/false = result
+let openInEditorAvailable: boolean | undefined
+
+async function isOpenInEditorAvailable(): Promise<boolean> {
+  if (openInEditorAvailable !== undefined) return openInEditorAvailable
+
+  try {
+    // A HEAD request to the endpoint is enough to check availability
+    const res = await fetch('/__open-in-editor?file=__probe__', { method: 'HEAD' })
+    // The endpoint exists if the server doesn't return 404
+    openInEditorAvailable = res.status !== 404
+  } catch {
+    openInEditorAvailable = false
+  }
+  return openInEditorAvailable
+}
+
 // Open a file in the editor
 async function openInEditor(filePath: string) {
+  if (!(await isOpenInEditorAvailable())) {
+    warn(
+      'Cannot open file in editor — the /__open-in-editor endpoint is not available.',
+      'Ensure your Vite config includes a plugin that supports it (e.g. vite-plugin-open-in-editor).',
+    )
+    return
+  }
+
   try {
     await fetch(`/__open-in-editor?file=${encodeURIComponent(filePath)}`)
-    console.log('[component-highlighter] Opened file:', filePath)
+    debug('Opened file:', filePath)
   } catch (e) {
-    console.error('[component-highlighter] Failed to open file:', e)
+    logError('Failed to open file:', e)
   }
 }
 
@@ -300,6 +360,10 @@ function updateHighlightElement(
 const pendingStoryChecks = new Set<string>()
 
 function drawAllHighlights() {
+  safeOverlayCall(() => drawAllHighlightsImpl())
+}
+
+function drawAllHighlightsImpl() {
   if (!highlightContainer) return
 
   const instances = Array.from(componentRegistry.values())
@@ -482,7 +546,7 @@ function createStoriesForComponentsWithoutStories() {
     }
 
     // Emit event to create story
-    console.log(
+    debug(
       'Creating story for component:',
       instance.meta.componentName,
       componentInfo,
@@ -496,8 +560,8 @@ function createStoriesForComponentsWithoutStories() {
   }
 
   if (storiesCreated > 0) {
-    console.log(
-      `[component-highlighter] Created stories for ${storiesCreated} components without stories`,
+    debug(
+      `Created stories for ${storiesCreated} components without stories`,
     )
 
     // After story creation, wait a bit for processing and then update the UI
@@ -514,10 +578,7 @@ function createStoriesForComponentsWithoutStories() {
 }
 
 function handleHighlightClick(instance: ComponentInstance, e: MouseEvent) {
-  console.log(
-    '[component-highlighter] highlight clicked:',
-    instance.meta.componentName,
-  )
+  debug('highlight clicked:', instance.meta.componentName)
   selectComponent(instance, e.clientX, e.clientY)
 }
 
@@ -535,13 +596,10 @@ function suspendHighlightingForRecording() {
   wasOverlayEnabledBeforeRecording = isOverlayEnabled
   wasHighlightAllActiveBeforeRecording = isHighlightAllActive
 
-  console.log(
-    '[component-highlighter] Suspending highlight UI for interaction recording',
-    {
-      isOverlayEnabled,
-      isHighlightAllActive,
-    },
-  )
+  debug('Suspending highlight UI for interaction recording', {
+    isOverlayEnabled,
+    isHighlightAllActive,
+  })
 
   selectedComponentId = null
   hideHoverMenu()
@@ -550,13 +608,10 @@ function suspendHighlightingForRecording() {
 }
 
 function resumeHighlightingAfterRecording() {
-  console.log(
-    '[component-highlighter] Resuming highlight UI after interaction recording',
-    {
-      wasOverlayEnabledBeforeRecording,
-      wasHighlightAllActiveBeforeRecording,
-    },
-  )
+  debug('Resuming highlight UI after interaction recording', {
+    wasOverlayEnabledBeforeRecording,
+    wasHighlightAllActiveBeforeRecording,
+  })
 
   if (
     wasOverlayEnabledBeforeRecording ||
@@ -613,7 +668,7 @@ function emitCreateStory(
     ...(data.serializedProps ? { serializedProps: data.serializedProps } : {}),
   }
 
-  console.log('[component-highlighter] Emitting story creation payload', {
+  debug('Emitting story creation payload', {
     component: data.meta.componentName,
     storyName: data.storyName,
     includePlayFunction,
@@ -820,6 +875,13 @@ async function showContextMenu(
     openInEditor(meta.filePath)
   })
 
+  // Hide the button if the editor endpoint isn't available
+  isOpenInEditorAvailable().then((available) => {
+    if (!available && openComponentBtn) {
+      openComponentBtn.style.display = 'none'
+    }
+  })
+
   if (storyInfo.hasStory && storyInfo.storyPath) {
     openStoriesBtn.addEventListener('click', () => {
       openInEditor(storyInfo.storyPath!)
@@ -857,18 +919,13 @@ async function showContextMenu(
   })
 
   saveStoryBtn.addEventListener('click', () => {
-    console.log(
-      '[component-highlighter] Save Story clicked (without interactions)',
-      {
-        component: meta.componentName,
-      },
-    )
+    debug('Save Story clicked (without interactions)', {
+      component: meta.componentName,
+    })
 
     // Stop recording if active to avoid stale recording state
     if (isCurrentlyRecording()) {
-      console.log(
-        '[component-highlighter] Active recording detected during Save Story, stopping recording first',
-      )
+      debug('Active recording detected during Save Story, stopping recording first')
       stopRecording()
       resumeHighlightingAfterRecording()
     }
@@ -890,33 +947,25 @@ async function showContextMenu(
 
   saveStoryWithInteractionsBtn.addEventListener('click', () => {
     if (isCurrentlyRecording()) {
-      console.log(
-        '[component-highlighter] Save Story with Interactions ignored because recording is already active',
-      )
+      debug('Save Story with Interactions ignored because recording is already active')
       return
     }
 
     const storyName = storyNameInput.value.trim() || suggestedName
 
-    console.log(
-      '[component-highlighter] Save Story with Interactions clicked, starting recording session',
-      {
-        component: meta.componentName,
-        storyName,
-      },
-    )
+    debug('Save Story with Interactions clicked, starting recording session', {
+      component: meta.componentName,
+      storyName,
+    })
 
     suspendHighlightingForRecording()
 
     startRecording((interactions) => {
-      console.log(
-        '[component-highlighter] Recording callback received, creating story with recorded interactions',
-        {
-          component: meta.componentName,
-          storyName,
-          interactions: interactions.length,
-        },
-      )
+      debug('Recording callback received, creating story with recorded interactions', {
+        component: meta.componentName,
+        storyName,
+        interactions: interactions.length,
+      })
 
       const createStoryPayload2: Parameters<typeof emitCreateStory>[0] = {
         meta,
@@ -1155,13 +1204,10 @@ function updateDebugOverlay() {
 }
 
 function showDebugOverlay() {
-  console.log('[component-highlighter] showDebugOverlay called')
+  debug('showDebugOverlay called')
   createDebugOverlay()
   updateDebugOverlay()
-  console.log(
-    '[component-highlighter] Debug overlay created:',
-    !!debugOverlayElement,
-  )
+  debug('Debug overlay created:', !!debugOverlayElement)
 }
 
 function hideDebugOverlay() {
@@ -1218,9 +1264,11 @@ export function selectComponent(
   x: number,
   y: number,
 ) {
-  selectedComponentId = instance.id
-  drawAllHighlights()
-  showContextMenu(instance, x, y)
+  safeOverlayCall(() => {
+    selectedComponentId = instance.id
+    drawAllHighlights()
+    showContextMenu(instance, x, y)
+  })
 }
 
 export function clearSelection() {
@@ -1311,19 +1359,14 @@ export function showStoryCreationFeedback(
   ) as HTMLButtonElement | null
 
   if (!saveStoryBtn) {
-    console.log(
-      '[component-highlighter] No save-story button found for feedback (menu may be closed)',
-    )
+    debug('No save-story button found for feedback (menu may be closed)')
     return
   }
 
   if (status === 'success') {
     saveStoryBtn.textContent = '✓ Saved!'
     saveStoryBtn.style.background = '#16a34a'
-    console.log(
-      '[component-highlighter] Story creation success feedback shown',
-      filePath,
-    )
+    debug('Story creation success feedback shown', filePath)
 
     // Invalidate cache so the icon appears
     if (componentPath) {
@@ -1346,7 +1389,7 @@ export function showStoryCreationFeedback(
   } else {
     saveStoryBtn.textContent = '✗ Failed'
     saveStoryBtn.style.background = '#dc2626'
-    console.log('[component-highlighter] Story creation error feedback shown')
+    debug('Story creation error feedback shown')
   }
 
   // Reset button after a delay

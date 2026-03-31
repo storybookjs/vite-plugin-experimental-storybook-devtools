@@ -6,6 +6,9 @@ import { defineRpcFunction } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import type { NotificationService } from './notifications'
+import { ConsoleNotificationService, DevToolsNotificationService } from './notifications'
+import { computeCoverage, buildCoverageSpec } from './coverage-dashboard'
 
 // RPC function type declarations
 declare module '@vitejs/devtools-kit' {
@@ -108,6 +111,12 @@ export function createComponentHighlighterPlugin(
   framework: FrameworkConfig,
   options: ComponentHighlighterOptions = {},
 ): Plugin {
+  const logDebug = (...args: unknown[]) => {
+    if (options.debugMode) {
+      console.log('[component-highlighter]', ...args)
+    }
+  }
+
   const runtimeHelperVirtualId = 'virtual:component-highlighter/runtime-helpers'
   const resolvedRuntimeHelperVirtualId = `\0${runtimeHelperVirtualId}`
   const packageRoot = path.resolve(
@@ -159,6 +168,12 @@ export function createComponentHighlighterPlugin(
   const filter = createFilter(include, exclude)
   let isServe = false
   let server: ViteDevServer | undefined
+  let notifications: NotificationService = new ConsoleNotificationService()
+  // Track transformed components for coverage dashboard: componentName → filePath
+  const transformedComponents = new Map<string, string>()
+  // JsonRenderer handle for updating the coverage dashboard after transforms
+  let coverageRenderer: { updateSpec: (spec: any) => void } | null = null
+  let coverageCwd = ''
 
   return {
     name: 'vite-plugin-experimental-storybook-devtools',
@@ -167,11 +182,13 @@ export function createComponentHighlighterPlugin(
       isServe = config.command === 'serve'
     },
     config: (viteConfig) => {
-      viteConfig.optimizeDeps ??= {}
-      viteConfig.optimizeDeps.include ??= []
-      viteConfig.optimizeDeps.include.push(
-        'react-element-to-jsx-string/dist/esm/index.js',
-      )
+      if (framework.name === 'react') {
+        viteConfig.optimizeDeps ??= {}
+        viteConfig.optimizeDeps.include ??= []
+        viteConfig.optimizeDeps.include.push(
+          'react-element-to-jsx-string/dist/esm/index.js',
+        )
+      }
     },
     configureServer(srv) {
       server = srv
@@ -258,6 +275,11 @@ export function createComponentHighlighterPlugin(
     },
     devtools: {
       setup(ctx) {
+        // Upgrade to DevTools notifications when the Logs API is available
+        if (ctx.logs) {
+          notifications = new DevToolsNotificationService(ctx.logs)
+        }
+
         // Register dock entry for component highlighter UI
         ctx.docks.register({
           id: devtoolsDockId,
@@ -271,13 +293,15 @@ export function createComponentHighlighterPlugin(
           },
         })
 
-        ctx.docks.register({
-          id: 'storybook-panel',
-          title: 'Storybook',
-          icon: 'https://avatars.githubusercontent.com/u/22632046',
-          type: 'iframe',
-          url: storybookUrl,
-        })
+        if (ctx.mode === 'dev') {
+          ctx.docks.register({
+            id: 'storybook-panel',
+            title: 'Storybook',
+            icon: 'https://avatars.githubusercontent.com/u/22632046',
+            type: 'iframe',
+            url: storybookUrl,
+          })
+        }
 
         // Register RPC functions for communication with the client
         ctx.rpc.register(
@@ -286,7 +310,7 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: (data: ComponentHighlightData | null) => {
-                console.log('[DevTools] Highlight target:', data)
+                logDebug('Highlight target:', data)
               },
             }),
           }),
@@ -298,7 +322,7 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: (data: { enabled: boolean }) => {
-                console.log('[DevTools] Toggle overlay:', data.enabled)
+                logDebug('Toggle overlay:', data.enabled)
               },
             }),
           }),
@@ -310,8 +334,8 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: async (data: ComponentStoryData) => {
-                console.log(
-                  '[DevTools] Create story:',
+                logDebug(
+                  'Create story:',
                   data.meta.componentName,
                   'name:',
                   data.storyName,
@@ -354,9 +378,7 @@ export function createComponentHighlighterPlugin(
                     let existingContent: string | undefined
                     if (fs.existsSync(outputPath)) {
                       existingContent = fs.readFileSync(outputPath, 'utf-8')
-                      console.log(
-                        `[DevTools] Appending to existing story file: ${outputPath}`,
-                      )
+                      logDebug(`Appending to existing story file: ${outputPath}`)
                     }
 
                     // Dynamically import the framework-specific story generator
@@ -399,9 +421,7 @@ export function createComponentHighlighterPlugin(
                     })
 
                     if (data.playFunction?.length) {
-                      console.log(
-                        `[DevTools] Story includes a play function with ${data.playFunction.length} lines`,
-                      )
+                      logDebug(`Story includes a play function with ${data.playFunction.length} lines`)
                     }
 
                     // Ensure the directory exists
@@ -412,9 +432,17 @@ export function createComponentHighlighterPlugin(
 
                     // Write the story file
                     fs.writeFileSync(outputPath, story.content, 'utf-8')
-                    console.log(
-                      `[DevTools] Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
-                    )
+                    logDebug(`Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`)
+
+                    const verb = existingContent ? 'added to' : 'created in'
+                    notifications.notify({
+                      message: `Story "${story.storyName}" ${verb} ${path.basename(outputPath)}`,
+                      level: 'success',
+                      toast: true,
+                      autoDismissMs: 4000,
+                      filePosition: { file: outputPath, line: 1 },
+                      category: 'story-creation',
+                    })
 
                     // Notify the client about the created file
                     if (server) {
@@ -430,14 +458,82 @@ export function createComponentHighlighterPlugin(
                         },
                       })
                     }
+
+                    // Refresh coverage dashboard to reflect new story
+                    if (coverageRenderer) {
+                      coverageRenderer.updateSpec(
+                        buildCoverageSpec(
+                          computeCoverage(transformedComponents, coverageCwd, storiesDir),
+                        ),
+                      )
+                    }
                   } catch (error) {
-                    console.error('[DevTools] Failed to create story:', error)
+                    notifications.notify({
+                      message: `Failed to create story for ${data.meta.componentName}`,
+                      level: 'error',
+                      toast: true,
+                      description: error instanceof Error ? error.message : String(error),
+                      category: 'story-creation',
+                    })
+
+                    // Still try to notify the client so the button resets
+                    if (server) {
+                      server.ws.send({
+                        type: 'custom',
+                        event: 'component-highlighter:story-created',
+                        data: {
+                          filePath: '',
+                          componentName: data.meta.componentName,
+                          componentPath: data.meta.filePath,
+                          storyName: data.storyName ?? 'Unknown',
+                          isAppend: false,
+                        },
+                      })
+                    }
                   }
                 }
               },
             }),
           }),
         )
+
+        // Coverage dashboard — RPC to fetch coverage data
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:get-coverage',
+            type: 'query',
+            setup: () => ({
+              handler: () => {
+                const coverage = computeCoverage(
+                  transformedComponents,
+                  ctx.cwd,
+                  storiesDir,
+                )
+                return coverage
+              },
+            }),
+          }),
+        )
+
+        // Register coverage dashboard dock (json-render, zero client code).
+        // The spec starts empty and is refreshed after transforms populate the map.
+        coverageCwd = ctx.cwd
+        if (ctx.createJsonRenderer) {
+          const renderer = ctx.createJsonRenderer(
+            buildCoverageSpec(
+              computeCoverage(transformedComponents, ctx.cwd, storiesDir),
+            ),
+          )
+          coverageRenderer = renderer
+
+          ctx.docks.register({
+            id: 'component-highlighter-coverage',
+            title: 'Story Coverage',
+            icon: 'ph:chart-bar-duotone',
+            type: 'json-render',
+            ui: renderer,
+          })
+        }
       },
     },
     resolveId(id) {
@@ -540,11 +636,27 @@ export function createComponentHighlighterPlugin(
         return
       }
 
-      if (options.debugMode) {
-        console.log(`[component-highlighter] Transforming ${id}`)
+      logDebug(`Transforming ${id}`)
+
+      const result = framework.transform(code, id)
+
+      // Track transformed components for coverage
+      if (result) {
+        const componentName = path.basename(id, path.extname(id))
+        const isNew = !transformedComponents.has(componentName)
+        transformedComponents.set(componentName, id)
+
+        // Refresh the coverage dashboard when new components are discovered
+        if (isNew && coverageRenderer) {
+          coverageRenderer.updateSpec(
+            buildCoverageSpec(
+              computeCoverage(transformedComponents, coverageCwd, storiesDir),
+            ),
+          )
+        }
       }
 
-      return framework.transform(code, id)
+      return result
     },
     handleHotUpdate(ctx) {
       if (ctx.file === runtimeHelperSourcePath) {
