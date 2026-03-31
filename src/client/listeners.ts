@@ -23,6 +23,8 @@ declare global {
     __componentHighlighterDraw?: () => void
     __componentHighlighterInitialized?: boolean
     __componentHighlighterEnable?: () => void
+    __componentHighlighterDisable?: () => void
+    __componentHighlighterIsActive?: () => boolean
   }
 }
 
@@ -249,6 +251,12 @@ function initialize() {
     () => {
       enableHighlightMode()
     }
+  ;(window as unknown as { __componentHighlighterDisable?: () => void }).__componentHighlighterDisable =
+    () => {
+      disableHighlightMode()
+    }
+  ;(window as unknown as { __componentHighlighterIsActive?: () => boolean }).__componentHighlighterIsActive =
+    () => isDockActive
 }
 
 // Run initialization

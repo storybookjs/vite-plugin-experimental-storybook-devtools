@@ -41,8 +41,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown",
-    "dev": "tsdown --watch",
+    "build": "tsdown && pnpm build:panel",
+    "build:panel": "vite build --config vite.config.panel.ts",
+    "dev": "trap 'kill 0' EXIT; tsdown --watch & vite build --watch --config vite.config.panel.ts & wait",
+    "dev:panel": "vite build --watch --config vite.config.panel.ts",
     "play": "vite",
     "test": "vitest",
     "e2e": "playwright test",

@@ -8,7 +8,7 @@ import * as path from 'path'
 import { fileURLToPath } from 'url'
 import type { NotificationService } from './notifications'
 import { ConsoleNotificationService, DevToolsNotificationService } from './notifications'
-import { computeCoverage, buildCoverageSpec } from './coverage-dashboard'
+import { computeCoverage } from './coverage-dashboard'
 
 // RPC function type declarations
 declare module '@vitejs/devtools-kit' {
@@ -171,9 +171,13 @@ export function createComponentHighlighterPlugin(
   let notifications: NotificationService = new ConsoleNotificationService()
   // Track transformed components for coverage dashboard: componentName → filePath
   const transformedComponents = new Map<string, string>()
-  // JsonRenderer handle for updating the coverage dashboard after transforms
-  let coverageRenderer: { updateSpec: (spec: any) => void } | null = null
   let coverageCwd = ''
+
+  // Terminal-based Storybook launcher state
+  let devtoolsTerminals: any = null // ctx.terminals reference from devtools.setup
+  let storybookSession: any = null
+  const terminalLogs: string[] = []
+  const MAX_LOG_LINES = 2000
 
   return {
     name: 'vite-plugin-experimental-storybook-devtools',
@@ -200,7 +204,124 @@ export function createComponentHighlighterPlugin(
         srv.watcher.add(runtimeModuleSourcePath)
       }
 
-      // Add middleware to check if story files exist
+      // ── Middleware: coverage data ──────────────────────────────────
+      srv.middlewares.use(
+        '/__component-highlighter/coverage',
+        (_req, res) => {
+          const coverage = computeCoverage(
+            transformedComponents,
+            coverageCwd || process.cwd(),
+            storiesDir,
+          )
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(coverage))
+        },
+      )
+
+      // ── Middleware: Storybook status check ────────────────────────
+      srv.middlewares.use(
+        '/__component-highlighter/storybook-status',
+        async (_req, res) => {
+          try {
+            const r = await fetch(storybookUrl, {
+              signal: AbortSignal.timeout(3000),
+            })
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ running: r.ok }))
+          } catch {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ running: false }))
+          }
+        },
+      )
+
+      // ── Middleware: start Storybook via terminals API ─────────────
+      srv.middlewares.use(
+        '/__component-highlighter/start-storybook',
+        async (_req, res) => {
+          res.setHeader('Content-Type', 'application/json')
+
+          if (storybookSession) {
+            res.end(JSON.stringify({ started: true, alreadyRunning: true }))
+            return
+          }
+
+          if (!devtoolsTerminals) {
+            res.end(JSON.stringify({ started: false, error: 'Terminals API not available' }))
+            return
+          }
+
+          try {
+            storybookSession = await devtoolsTerminals.startChildProcess(
+              {
+                command: 'npx',
+                args: ['storybook', 'dev', '-p', new URL(storybookUrl).port || '6006', '--no-open'],
+                cwd: coverageCwd || process.cwd(),
+              },
+              {
+                id: 'storybook-dev',
+                title: 'Storybook',
+                icon: 'ph:book-duotone',
+              },
+            )
+
+            // Capture stdout/stderr into the log buffer
+            const cp = storybookSession.getChildProcess()
+            if (cp?.stdout) {
+              cp.stdout.on('data', (chunk: Buffer) => {
+                const lines = chunk.toString().split('\n')
+                for (const line of lines) {
+                  if (line) {
+                    terminalLogs.push(line)
+                    if (terminalLogs.length > MAX_LOG_LINES) {
+                      terminalLogs.shift()
+                    }
+                  }
+                }
+              })
+            }
+            if (cp?.stderr) {
+              cp.stderr.on('data', (chunk: Buffer) => {
+                const lines = chunk.toString().split('\n')
+                for (const line of lines) {
+                  if (line) {
+                    terminalLogs.push(line)
+                    if (terminalLogs.length > MAX_LOG_LINES) {
+                      terminalLogs.shift()
+                    }
+                  }
+                }
+              })
+            }
+            if (cp) {
+              cp.on('exit', (code: number | null) => {
+                terminalLogs.push(`[process exited with code ${code}]`)
+                storybookSession = null
+              })
+            }
+
+            res.end(JSON.stringify({ started: true }))
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            terminalLogs.push(`[error] Failed to start Storybook: ${msg}`)
+            res.end(JSON.stringify({ started: false, error: msg }))
+          }
+        },
+      )
+
+      // ── Middleware: terminal log output ────────────────────────────
+      srv.middlewares.use(
+        '/__component-highlighter/terminal-logs',
+        (req, res) => {
+          const url = new URL(req.url || '', 'http://localhost')
+          const since = parseInt(url.searchParams.get('since') || '0', 10)
+          const lines = terminalLogs.slice(since)
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ lines, total: terminalLogs.length }))
+        },
+      )
+
+      // ── Middleware: check if story files exist ─────────────────────
       srv.middlewares.use(
         '/__component-highlighter/check-story',
         (req, res) => {
@@ -280,6 +401,9 @@ export function createComponentHighlighterPlugin(
           notifications = new DevToolsNotificationService(ctx.logs)
         }
 
+        // Store terminals reference for use by middleware
+        devtoolsTerminals = ctx.terminals
+
         // Register dock entry for component highlighter UI
         ctx.docks.register({
           id: devtoolsDockId,
@@ -293,13 +417,17 @@ export function createComponentHighlighterPlugin(
           },
         })
 
+        // Merged Storybook + Coverage panel (iframe dock served via hostStatic)
         if (ctx.mode === 'dev') {
+          const panelDist = path.join(packageRoot, 'dist', 'panel')
+          ctx.views.hostStatic('/.storybook-devtools/', panelDist)
+
           ctx.docks.register({
-            id: 'storybook-panel',
+            id: 'storybook-devtools-panel',
             title: 'Storybook',
             icon: 'https://avatars.githubusercontent.com/u/22632046',
             type: 'iframe',
-            url: storybookUrl,
+            url: '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
           })
         }
 
@@ -459,14 +587,7 @@ export function createComponentHighlighterPlugin(
                       })
                     }
 
-                    // Refresh coverage dashboard to reflect new story
-                    if (coverageRenderer) {
-                      coverageRenderer.updateSpec(
-                        buildCoverageSpec(
-                          computeCoverage(transformedComponents, coverageCwd, storiesDir),
-                        ),
-                      )
-                    }
+                    // Coverage dashboard auto-refreshes via client-side RPC polling
                   } catch (error) {
                     notifications.notify({
                       message: `Failed to create story for ${data.meta.componentName}`,
@@ -515,25 +636,8 @@ export function createComponentHighlighterPlugin(
           }),
         )
 
-        // Register coverage dashboard dock (json-render, zero client code).
-        // The spec starts empty and is refreshed after transforms populate the map.
+        // Store cwd for coverage computation
         coverageCwd = ctx.cwd
-        if (ctx.createJsonRenderer) {
-          const renderer = ctx.createJsonRenderer(
-            buildCoverageSpec(
-              computeCoverage(transformedComponents, ctx.cwd, storiesDir),
-            ),
-          )
-          coverageRenderer = renderer
-
-          ctx.docks.register({
-            id: 'component-highlighter-coverage',
-            title: 'Story Coverage',
-            icon: 'ph:chart-bar-duotone',
-            type: 'json-render',
-            ui: renderer,
-          })
-        }
       },
     },
     resolveId(id) {
@@ -646,14 +750,7 @@ export function createComponentHighlighterPlugin(
         const isNew = !transformedComponents.has(componentName)
         transformedComponents.set(componentName, id)
 
-        // Refresh the coverage dashboard when new components are discovered
-        if (isNew && coverageRenderer) {
-          coverageRenderer.updateSpec(
-            buildCoverageSpec(
-              computeCoverage(transformedComponents, coverageCwd, storiesDir),
-            ),
-          )
-        }
+        // Coverage dashboard auto-refreshes via client-side RPC polling
       }
 
       return result
