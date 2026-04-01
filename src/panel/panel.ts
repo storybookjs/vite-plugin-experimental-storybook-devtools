@@ -148,16 +148,54 @@ async function buildStoryUrl(relativeFilePath: string): Promise<string | null> {
 
 /**
  * Navigate to a story in the Storybook iframe.
- * Switches to the Storybook tab and updates the iframe src.
+ * If Storybook isn't running, starts it first (showing the terminal tab),
+ * then navigates once it's ready.
  */
 async function visitStory(relativeFilePath: string) {
-  const targetUrl = await buildStoryUrl(relativeFilePath)
-  if (!targetUrl) return
+  const running = await checkStorybook()
+  if (running) {
+    // Fast path: Storybook is already running, index is available
+    const targetUrl = await buildStoryUrl(relativeFilePath)
+    if (!targetUrl) return
+    switchTab('storybook')
+    navigateStorybookPane(targetUrl)
+    return
+  }
 
-  // Switch to storybook tab
-  switchTab('storybook')
+  // Start Storybook, show terminal, then navigate once ready
+  renderStorybookState('starting')
+  try {
+    await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+  } catch {
+    // Server may not support terminal start
+  }
 
-  // Navigate the iframe if it exists, or set it up
+  showTerminalTab()
+  switchTab('terminal')
+
+  // Poll until Storybook is ready, then build the URL and navigate
+  let attempts = 0
+  const poll = setInterval(async () => {
+    attempts++
+    const isRunning = await checkStorybook()
+    if (isRunning) {
+      clearInterval(poll)
+      renderStorybookState('running')
+      // Now that Storybook is up, the index is available
+      const targetUrl = await buildStoryUrl(relativeFilePath)
+      if (targetUrl) {
+        switchTab('storybook')
+        navigateStorybookPane(targetUrl)
+      }
+    } else if (attempts > 120) {
+      clearInterval(poll)
+      renderStorybookState('not-running')
+    }
+  }, 1000)
+}
+
+/** Set the Storybook iframe to a given URL, creating it if needed. */
+function navigateStorybookPane(targetUrl: string) {
   const pane = document.getElementById('pane-storybook')
   if (!pane) return
 
@@ -165,7 +203,6 @@ async function visitStory(relativeFilePath: string) {
   if (iframe) {
     iframe.src = targetUrl
   } else {
-    // Storybook is running — render the iframe pointing to the story
     pane.innerHTML = `<iframe class="sb-iframe" src="${esc(targetUrl)}"></iframe>`
   }
 }

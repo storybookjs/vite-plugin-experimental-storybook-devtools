@@ -1,6 +1,7 @@
 import type { ComponentInstance, SerializedProps } from '../frameworks/types'
 import type { Emitter } from 'nanoevents'
 import { createNanoEvents } from 'nanoevents'
+import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
 import { debug, warn, error as logError } from './logger'
 import {
   UI_MARKER,
@@ -740,41 +741,9 @@ async function showContextMenu(
         return
       }
 
-      // Ensure Storybook is running before opening the panel
-      let sbRunning = false
-      try {
-        const statusRes = await fetch('/__component-highlighter/storybook-status')
-        const statusData = await statusRes.json()
-        sbRunning = statusData.running === true
-      } catch {
-        // assume not running
-      }
-
-      if (!sbRunning) {
-        // Start Storybook and poll until it's ready (max ~120s)
-        try {
-          await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
-        } catch {
-          // Server may not support terminal start
-        }
-        for (let i = 0; i < 120; i++) {
-          await new Promise((r) => setTimeout(r, 1000))
-          try {
-            const r = await fetch('/__component-highlighter/storybook-status')
-            const d = await r.json()
-            if (d.running === true) {
-              sbRunning = true
-              break
-            }
-          } catch {
-            // keep polling
-          }
-        }
-        if (!sbRunning) return
-      }
-
-      // Open the panel via switchEntry, then wait for the iframe to register visitStory
-      const ctx = (window as any).__VITE_DEVTOOLS_CLIENT_CONTEXT__
+      // Open the panel immediately — the panel's visitStory handles
+      // starting Storybook if needed and showing the terminal tab
+      const ctx = getDevToolsClientContext()
       if (ctx?.docks?.switchEntry) {
         await ctx.docks.switchEntry('storybook-devtools-panel')
         for (let i = 0; i < 20; i++) {
