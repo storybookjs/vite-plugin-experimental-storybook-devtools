@@ -16,6 +16,7 @@ const SB_ICON = `<svg width="16" height="16" viewBox="-31.5 0 319 319" xmlns="ht
 
 const CODE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`
 const EYE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
+const COPY_PROMPT_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`
 
 // ─── Stylesheet (injected into the shadow root) ────────────────────────────
 const STYLES = /* css */ `
@@ -189,6 +190,15 @@ const STYLES = /* css */ `
   }
   .icon-btn.view-btn:hover:not([disabled]) {
     background: rgba(59, 130, 246, 0.1);
+  }
+  .icon-btn.copy-prompt-btn {
+    color: #a78bfa;
+  }
+  .icon-btn.copy-prompt-btn:hover:not([disabled]) {
+    background: rgba(167, 139, 250, 0.1);
+  }
+  .icon-btn.copy-prompt-btn.copied {
+    color: #a5d6a7;
   }
   .action-label {
     font-size: 9px;
@@ -728,6 +738,48 @@ function renderObjectTree(obj: unknown, depth = 0, maxDepth = 6): string {
   return esc(String(obj))
 }
 
+// ─── LLM prompt builder ─────────────────────────────────────────────────────
+
+function buildLLMPrompt(
+  instance: ComponentInstance,
+  hasStory: boolean,
+  storyPath: string | null,
+): string {
+  const { componentName, filePath, relativeFilePath } = instance.meta
+  const relativePath = relativeFilePath || filePath
+  const displayProps = instance.serializedProps || instance.props
+
+  // Strip non-serializable props (functions, JSX, slots)
+  const meaningfulProps: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(displayProps)) {
+    if (value && typeof value === 'object') {
+      const v = value as Record<string, unknown>
+      if (v.__isFunction || v.__isJSX || v.__isVueSlot) continue
+    }
+    if (typeof value === 'function') continue
+    meaningfulProps[key] = value
+  }
+
+  const hasProps = Object.keys(meaningfulProps).length > 0
+  const propsBlock = hasProps
+    ? '```json\n' + JSON.stringify(meaningfulProps, null, 2) + '\n```'
+    : '*(none)*'
+
+  const storyLine =
+    hasStory && storyPath
+      ? `It has an existing Storybook story at \`${storyPath}\`.`
+      : `It doesn't have a Storybook story yet.`
+
+  return [
+    `I'm working on the \`${componentName}\` component located at \`${relativePath}\`.`,
+    '',
+    `**Current props:**`,
+    propsBlock,
+    '',
+    storyLine,
+  ].join('\n')
+}
+
 // ─── Suggest a story name from props ────────────────────────────────────────
 
 export function suggestStoryName(props: Record<string, unknown>): string {
@@ -875,11 +927,12 @@ export function createContextMenu(
   const actions = document.createElement('div')
   actions.className = 'header-actions'
 
-  // Open Code button
+  // 1. Open Code button
   const openCodeWrap = document.createElement('div')
   openCodeWrap.className = 'action-btn-wrap'
   const openCodeBtn = document.createElement('button')
   openCodeBtn.className = 'icon-btn'
+  openCodeBtn.id = 'open-component-btn'
   openCodeBtn.innerHTML = CODE_ICON
   openCodeBtn.title = 'Open component file in editor'
   openCodeBtn.addEventListener('click', () =>
@@ -895,7 +948,40 @@ export function createContextMenu(
   openCodeWrap.appendChild(openCodeLabel)
   actions.appendChild(openCodeWrap)
 
-  // Go to Story button (pink Storybook icon)
+  // 2. Copy Prompt button — copies LLM-friendly context about this component
+  const copyPromptWrap = document.createElement('div')
+  copyPromptWrap.className = 'action-btn-wrap'
+  const copyPromptBtn = document.createElement('button')
+  copyPromptBtn.className = 'icon-btn copy-prompt-btn'
+  copyPromptBtn.innerHTML = COPY_PROMPT_ICON
+  copyPromptBtn.title = 'Copy component context as a prompt for an LLM'
+  const copyPromptLabel = document.createElement('span')
+  copyPromptLabel.className = 'action-label'
+  copyPromptLabel.textContent = 'Copy Prompt'
+  copyPromptBtn.addEventListener('click', () => {
+    const prompt = buildLLMPrompt(
+      instance,
+      storyInfo.hasStory,
+      storyInfo.storyPath,
+    )
+    navigator.clipboard.writeText(prompt).then(() => {
+      copyPromptBtn.classList.add('copied')
+      copyPromptBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+      copyPromptLabel.textContent = 'Copied!'
+      setTimeout(() => {
+        if (copyPromptBtn.isConnected) {
+          copyPromptBtn.classList.remove('copied')
+          copyPromptBtn.innerHTML = COPY_PROMPT_ICON
+          copyPromptLabel.textContent = 'Copy Prompt'
+        }
+      }, 1500)
+    })
+  })
+  copyPromptWrap.appendChild(copyPromptBtn)
+  copyPromptWrap.appendChild(copyPromptLabel)
+  actions.appendChild(copyPromptWrap)
+
+  // 3. Open Story button (pink Storybook icon)
   const storyBtnWrap = document.createElement('div')
   storyBtnWrap.className = 'action-btn-wrap'
   let goToStoryBtn = document.createElement('button')
@@ -906,7 +992,7 @@ export function createContextMenu(
     : 'No story file yet'
   let storyBtnLabel = document.createElement('span')
   storyBtnLabel.className = 'action-label'
-  storyBtnLabel.textContent = storyInfo.hasStory ? 'Go to Story' : 'No Story'
+  storyBtnLabel.textContent = storyInfo.hasStory ? 'Open Story' : 'No Story'
   if (!storyInfo.hasStory) {
     goToStoryBtn.setAttribute('disabled', '')
   } else {
@@ -918,7 +1004,7 @@ export function createContextMenu(
   storyBtnWrap.appendChild(storyBtnLabel)
   actions.appendChild(storyBtnWrap)
 
-  // View Story in Storybook panel button
+  // 4. View Story in Storybook panel button
   let viewStoryWrap: HTMLDivElement | undefined
   let viewStoryBtn: HTMLButtonElement | undefined
   let viewStoryLabel: HTMLSpanElement | undefined
@@ -1194,6 +1280,7 @@ export function createContextMenu(
 
   const storyInput = document.createElement('input')
   storyInput.className = 'story-input'
+  storyInput.id = 'story-name-input'
   storyInput.type = 'text'
   storyInput.value = suggestedName
   storyInput.placeholder = 'Enter story name…'
@@ -1208,11 +1295,13 @@ export function createContextMenu(
 
   const saveBtn = document.createElement('button')
   saveBtn.className = 'btn btn-save'
+  saveBtn.id = 'save-story-btn'
   saveBtn.textContent = 'Create'
   saveBtn.title = 'Save a story with the current props'
 
   const interactionsBtn = document.createElement('button')
   interactionsBtn.className = 'btn btn-interactions'
+  interactionsBtn.id = 'save-story-with-interactions-btn'
   interactionsBtn.textContent = 'Create with Interactions'
   interactionsBtn.title =
     'Record interactions then save as a story with a play function'
@@ -1319,7 +1408,7 @@ export function createContextMenu(
       newBtn.addEventListener('click', () => callbacks.openInEditor(storyPath))
       storyBtnWrap.replaceChild(newBtn, goToStoryBtn)
       goToStoryBtn = newBtn
-      storyBtnLabel.textContent = 'Go to Story'
+      storyBtnLabel.textContent = 'Open Story'
     },
     enableViewStory() {
       if (!viewStoryBtn || !viewStoryLabel || !callbacks.visitStory) return

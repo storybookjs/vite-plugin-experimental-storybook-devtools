@@ -62,7 +62,7 @@ export function registerCommonHighlighterSuite(test: TestLike) {
       await expect(page.locator('#open-component-btn')).toBeVisible()
       await expect(page.locator('#save-story-btn')).toBeVisible()
       await expect(page.locator('#story-name-input')).toBeVisible()
-      await expect(page.locator('text=Props:')).toBeVisible()
+      await expect(page.locator('text=Properties')).toBeVisible()
     })
 
     test('supports context menu close interactions', async ({ page }) => {

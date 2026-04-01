@@ -8,7 +8,7 @@
 // ─── Icons ──────────────────────────────────────────────────────────
 const CODE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`
 const SB_ICON_SMALL = `<svg width="12" height="12" viewBox="-31.5 0 319 319" xmlns="http://www.w3.org/2000/svg"><path fill="#FF4785" d="M9.87,293.32L0.01,30.57C-0.31,21.9,6.34,14.54,15.01,14L238.49,0.03C247.32,-0.52,254.91,6.18,255.47,15.01C255.49,15.34,255.5,15.67,255.5,16V302.32C255.5,311.16,248.33,318.32,239.49,318.32C239.25,318.32,239.01,318.32,238.77,318.31L25.15,308.71C16.83,308.34,10.18,301.65,9.87,293.32Z"/><path fill="#FFF" d="M188.67,39.13L190.19,2.41L220.88,0L222.21,37.86C222.25,39.18,221.22,40.29,219.9,40.33C219.34,40.35,218.79,40.17,218.34,39.82L206.51,30.5L192.49,41.13C191.44,41.93,189.95,41.72,189.15,40.67C188.81,40.23,188.64,39.68,188.67,39.13ZM149.41,119.98C149.41,126.21,191.36,123.22,196.99,118.85C196.99,76.45,174.23,54.17,132.57,54.17C90.91,54.17,67.57,76.79,67.57,110.74C67.57,169.85,147.35,170.98,147.35,203.23C147.35,212.28,142.91,217.65,133.16,217.65C120.46,217.65,115.43,211.17,116.02,189.1C116.02,184.32,67.57,182.82,66.09,189.1C62.33,242.57,95.64,257.99,133.75,257.99C170.69,257.99,199.65,238.3,199.65,202.66C199.65,139.3,118.68,141,118.68,109.6C118.68,96.88,128.14,95.18,133.75,95.18C139.66,95.18,150.3,96.22,149.41,119.98Z"/></svg>`
-const SB_TAB_ICON = `<svg width="14" height="14" viewBox="-31.5 0 319 319" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M9.87,293.32L0.01,30.57C-0.31,21.9,6.34,14.54,15.01,14L238.49,0.03C247.32,-0.52,254.91,6.18,255.47,15.01C255.49,15.34,255.5,15.67,255.5,16V302.32C255.5,311.16,248.33,318.32,239.49,318.32C239.25,318.32,239.01,318.32,238.77,318.31L25.15,308.71C16.83,308.34,10.18,301.65,9.87,293.32Z"/><path fill="currentColor" fill-opacity="0.3" d="M188.67,39.13L190.19,2.41L220.88,0L222.21,37.86C222.25,39.18,221.22,40.29,219.9,40.33C219.34,40.35,218.79,40.17,218.34,39.82L206.51,30.5L192.49,41.13C191.44,41.93,189.95,41.72,189.15,40.67C188.81,40.23,188.64,39.68,188.67,39.13ZM149.41,119.98C149.41,126.21,191.36,123.22,196.99,118.85C196.99,76.45,174.23,54.17,132.57,54.17C90.91,54.17,67.57,76.79,67.57,110.74C67.57,169.85,147.35,170.98,147.35,203.23C147.35,212.28,142.91,217.65,133.16,217.65C120.46,217.65,115.43,211.17,116.02,189.1C116.02,184.32,67.57,182.82,66.09,189.1C62.33,242.57,95.64,257.99,133.75,257.99C170.69,257.99,199.65,238.3,199.65,202.66C199.65,139.3,118.68,141,118.68,109.6C118.68,96.88,128.14,95.18,133.75,95.18C139.66,95.18,150.3,96.22,149.41,119.98Z"/></svg>`
+const SB_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="m16.71.243l-.12 2.71a.18.18 0 0 0 .29.15l1.06-.8l.9.7a.18.18 0 0 0 .28-.14l-.1-2.76l1.33-.1a1.2 1.2 0 0 1 1.279 1.2v21.596a1.2 1.2 0 0 1-1.26 1.2l-16.096-.72a1.2 1.2 0 0 1-1.15-1.16l-.75-19.797a1.2 1.2 0 0 1 1.13-1.27L16.7.222zM13.64 9.3c0 .47 3.16.24 3.59-.08c0-3.2-1.72-4.89-4.859-4.89c-3.15 0-4.899 1.72-4.899 4.29c0 4.45 5.999 4.53 5.999 6.959c0 .7-.32 1.1-1.05 1.1c-.96 0-1.35-.49-1.3-2.16c0-.36-3.649-.48-3.769 0c-.27 4.03 2.23 5.2 5.099 5.2c2.79 0 4.969-1.49 4.969-4.18c0-4.77-6.099-4.64-6.099-6.999c0-.97.72-1.1 1.13-1.1c.45 0 1.25.07 1.19 1.87z"/></svg>`
 const COVERAGE_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`
 const TERMINAL_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`
 const CROSSHAIR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>`
@@ -143,9 +143,7 @@ async function findStoryId(
   // If the caller knows which story name was just created, prefer it
   if (preferredStoryName) {
     const needle = normaliseStoryName(preferredStoryName)
-    const match = candidates.find(
-      (e) => normaliseStoryName(e.name) === needle,
-    )
+    const match = candidates.find((e) => normaliseStoryName(e.name) === needle)
     if (match) return match.id
   }
 
@@ -193,7 +191,10 @@ async function visitStory(
         storybookIndexCache = null
         await new Promise((r) => setTimeout(r, 500))
       }
-      const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+      const targetUrl = await buildStoryUrl(
+        relativeFilePath,
+        preferredStoryName,
+      )
       if (targetUrl) {
         switchTab('storybook')
         navigateStorybookPane(targetUrl)
@@ -223,7 +224,10 @@ async function visitStory(
       clearInterval(poll)
       renderStorybookState('running')
       // Now that Storybook is up, the index is available
-      const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+      const targetUrl = await buildStoryUrl(
+        relativeFilePath,
+        preferredStoryName,
+      )
       if (targetUrl) {
         switchTab('storybook')
         navigateStorybookPane(targetUrl)
@@ -506,6 +510,35 @@ function collectUniqueInstances(filePath: string): any[] {
 }
 
 /**
+ * Collect all unique instances currently visible in the registry across ALL
+ * components. Deduplicates globally by (filePath + propsFingerprint) so that
+ * two mounts of the same component with identical props produce a single entry.
+ */
+function collectAllVisibleInstances(): any[] {
+  try {
+    const registry = (window.parent as any).__componentHighlighterRegistry as
+      | Map<string, any>
+      | undefined
+    if (!registry) return []
+
+    const seen = new Map<string, any>()
+    for (const instance of registry.values()) {
+      const filePath = instance.meta?.filePath
+      if (!filePath) continue
+      const sp = instance.serializedProps
+      const fp = sp ? propsFingerprint(sp) : '{}'
+      const key = `${filePath}::${fp}`
+      if (!seen.has(key)) {
+        seen.set(key, instance)
+      }
+    }
+    return Array.from(seen.values())
+  } catch {
+    return []
+  }
+}
+
+/**
  * Create stories for a component by delegating to the client overlay's
  * story creation flow (same RPC path as the context menu "Save Story").
  * Finds all live instances, deduplicates by props, and creates one story
@@ -628,20 +661,26 @@ function buildCoveragePanel(coverage: CoverageData) {
   bar.appendChild(fill)
   barRow.appendChild(bar)
 
-  // "Create all missing" button — only for visible (currently rendered) components
-  const missingEntries = coverage.entries.filter(
-    (e) => !e.hasStory && isComponentVisible(e.filePath),
-  )
-  if (missingEntries.length > 0) {
+  // "Create all" button — creates stories for every visible instance on screen,
+  // deduplicated by (filePath + props fingerprint) so identical mounts are skipped.
+  const allVisibleInstances = collectAllVisibleInstances()
+  if (allVisibleInstances.length > 0) {
     const createAllBtn = document.createElement('button')
     createAllBtn.className = 'create-all-btn'
-    createAllBtn.textContent = `Create all (${missingEntries.length})`
-    createAllBtn.title = `Create default stories for ${missingEntries.length} visible uncovered components`
+    createAllBtn.textContent = `Create all (${allVisibleInstances.length})`
+    createAllBtn.title = `Create stories for ${allVisibleInstances.length} visible component instance${allVisibleInstances.length === 1 ? '' : 's'} on screen`
     createAllBtn.addEventListener('click', () => {
       createAllBtn.disabled = true
       createAllBtn.textContent = 'Creating\u2026'
-      for (const entry of missingEntries) {
-        createStoryForComponent(entry.filePath)
+      const createFn = (window.parent as any).__componentHighlighterCreateStory
+      if (typeof createFn === 'function') {
+        for (const instance of allVisibleInstances) {
+          createFn({
+            meta: instance.meta,
+            props: instance.props,
+            serializedProps: instance.serializedProps,
+          })
+        }
       }
       // Wait for the RPC story creation to complete, then refresh
       setTimeout(() => {
@@ -765,7 +804,8 @@ function buildCoveragePanel(coverage: CoverageData) {
       createBtn.className = 'act-btn create'
       createBtn.innerHTML = PLUS_ICON
       if (!visible) {
-        createBtn.title = 'Component not visible — navigate to a page where it renders first'
+        createBtn.title =
+          'Component not visible — navigate to a page where it renders first'
         createBtn.setAttribute('disabled', '')
       } else {
         createBtn.title = 'Create story from current props'
