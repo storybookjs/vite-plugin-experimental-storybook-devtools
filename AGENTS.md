@@ -28,21 +28,24 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
    - Keep framework-specific specs focused on true framework differences only.
 
 4. **Verify both save flows**
-   - `Save Story`
-   - `Save Story with Interactions`
+   - `Create` (story with current props)
+   - `Create with Interactions` (story with recorded play function)
    - Ensure interaction recording is exercised with real form input/select actions.
 
 5. **Make CI reliable**
    - Avoid relying on manual Vite DevTools authorization in CI.
    - Keep E2E activation deterministic (automation hooks + config).
 
-6. **Do not leave docs stale**
-   - If you change architecture, testing strategy, workflow, or framework behavior, update:
-     - `AGENTS.md`
-     - `docs/AGENT_PLAYBOOK.md`
-     - `docs/ARCHITECTURE.md`
-     - `docs/SUPPORTED_FRAMEWORKS.md` (if framework list changed)
-     - PR checklist/template if needed
+6. **Keep documentation up to date**
+   - If you change architecture, features, testing strategy, workflow, or framework behavior, update the relevant documentation **in the same change**. Do not defer doc updates.
+   - Required docs to review and update when applicable:
+     - `README.md` - User-facing feature descriptions, configuration, usage guides
+     - `AGENTS.md` - Agent working rules and validation steps
+     - `docs/ARCHITECTURE.md` - Module responsibilities, endpoints, window globals, key IDs
+     - `docs/AGENT_PLAYBOOK.md` - Operational workflow and definition of done
+     - `docs/SUPPORTED_FRAMEWORKS.md` - If framework list changed
+     - `.github/pull_request_template.md` - If PR process changed
+   - When in doubt, update the docs. Stale documentation causes compounding errors for future agents and contributors.
 
 ## Required Validation Before Handoff
 
