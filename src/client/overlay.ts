@@ -653,6 +653,18 @@ function emitCreateStory(
   window.dispatchEvent(createStoryEvent)
 }
 
+// Expose story creation so the panel iframe can trigger the same RPC flow.
+// The panel passes a ComponentInstance-like object from the shared registry.
+;(window as any).__componentHighlighterCreateStory = (instanceData: {
+  meta: ComponentInstance['meta']
+  props: Record<string, unknown>
+  serializedProps?: SerializedProps
+  storyName?: string
+}) => {
+  const name = instanceData.storyName ?? suggestStoryName(instanceData.props)
+  emitCreateStory({ ...instanceData, storyName: name }, false)
+}
+
 // Context menu management — delegates to the Shadow DOM context-menu module
 async function showContextMenu(
   instance: ComponentInstance,
@@ -723,14 +735,25 @@ async function showContextMenu(
         if (serializedProps) {
           payload.serializedProps = serializedProps
         }
+
         emitCreateStory(payload, true)
 
         resumeHighlightingAfterRecording()
       })
     },
     onClose() {
-      selectedComponentId = null
+      // Capture and null the handle BEFORE calling destroy so that if destroy
+      // somehow re-enters onClose the guard below is already set.
+      const h = contextMenuHandle
       contextMenuHandle = null
+      selectedComponentId = null
+      // Always destroy the DOM element and remove document-level listeners.
+      // destroy() is idempotent so calling it even when click-outside/Escape
+      // already called it is safe.  Without this, a menu closed via
+      // callbacks.onClose() (e.g. the View Story button) would leave a zombie
+      // element in the DOM whose onClickOutside handler could later fire and
+      // null contextMenuHandle at the wrong time.
+      h?.destroy()
       drawAllHighlights()
     },
     async visitStory(relativeFilePath: string) {
@@ -776,7 +799,7 @@ async function showContextMenu(
           if (entry.type !== 'story') continue
           const entryBase = stripExt(entry.importPath)
           if (entryBase === componentBase || entryBase.endsWith(componentName)) {
-            window.open(`http://localhost:6006/?path=/story/${encodeURIComponent(entry.id)}`, '_blank')
+            window.open(`http://localhost:6006/?path=/story/${encodeURIComponent(entry.id)}&nav=0`, '_blank')
             return
           }
         }
@@ -793,6 +816,8 @@ function hideContextMenu() {
     contextMenuHandle = null
   }
 }
+
+export { hideContextMenu }
 
 // Hover menu management
 let hoverMenuElement: HTMLDivElement | null = null
@@ -1093,24 +1118,27 @@ function updateOpenStoriesButton(storyPath: string) {
 }
 
 /**
- * Show feedback for story creation (success or error)
+ * Show feedback for story creation (success or error).
+ * Always performs cache invalidation and highlight refresh so that the
+ * Storybook icon appears even when the context menu was closed (e.g.
+ * during the "Create with Interactions" recording flow).
  */
 export function showStoryCreationFeedback(
   status: 'success' | 'error',
   filePath?: string,
   componentPath?: string,
 ): void {
-  if (!contextMenuHandle) {
-    debug('No context menu open for feedback (menu may be closed)')
-    return
+  if (contextMenuHandle) {
+    // Menu is still open (normal "Create" flow) — show inline feedback
+    contextMenuHandle.showSaveFeedback(status)
+  } else {
+    debug('No context menu open for feedback (menu closed during recording)')
   }
 
-  contextMenuHandle.showSaveFeedback(status)
-
   if (status === 'success') {
-    debug('Story creation success feedback shown', filePath)
+    debug('Story creation success feedback', filePath)
 
-    // Invalidate cache so the icon appears
+    // Always invalidate cache so the Storybook icon appears on the highlight
     if (componentPath) {
       invalidateStoryCache(componentPath)
       checkStoryFile(componentPath).then((storyInfo) => {
@@ -1126,6 +1154,6 @@ export function showStoryCreationFeedback(
 
     drawAllHighlights()
   } else {
-    debug('Story creation error feedback shown')
+    debug('Story creation error feedback')
   }
 }

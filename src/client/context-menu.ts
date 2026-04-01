@@ -55,6 +55,14 @@ const STYLES = /* css */ `
   }
 
   /* ── Breadcrumb ────────────────────────── */
+  .breadcrumb-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 6px;
+    min-width: 0;
+  }
   .breadcrumb {
     display: flex;
     align-items: center;
@@ -62,10 +70,11 @@ const STYLES = /* css */ `
     gap: 2px;
     font-size: 12px;
     color: #8892a4;
-    margin-bottom: 6px;
     overflow: hidden;
     white-space: nowrap;
     font-family: inherit;
+    min-width: 0;
+    flex: 1;
   }
   .breadcrumb span {
     flex-shrink: 0;
@@ -187,6 +196,25 @@ const STYLES = /* css */ `
     text-align: center;
     line-height: 1.1;
     white-space: nowrap;
+  }
+  .close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: #64748b;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+    flex-shrink: 0;
+  }
+  .close-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
   }
 
   /* ── Properties section ────────────────── */
@@ -338,13 +366,13 @@ const STYLES = /* css */ `
     color: #6ee7b7;
   }
   .badge.obj {
-    background: rgba(255, 255, 255, 0.08);
-    color: #e2e8f0;
+    background: rgba(139, 92, 246, 0.15);
+    color: #c4b5fd;
     cursor: pointer;
     transition: background 0.15s ease;
   }
   .badge.obj:hover {
-    background: rgba(255, 255, 255, 0.14);
+    background: rgba(139, 92, 246, 0.25);
   }
   .badge.null {
     background: rgba(255, 255, 255, 0.04);
@@ -422,6 +450,7 @@ const STYLES = /* css */ `
   .obj-tree-num { color: #90caf9; }
   .obj-tree-bool { color: #ce93d8; }
   .obj-tree-null { color: #78909c; font-style: italic; }
+  .obj-tree-punct { color: #94a3b8; }
   .obj-tree-toggle {
     cursor: pointer;
     user-select: none;
@@ -595,11 +624,21 @@ function classifyProp(
 ): { typeClass: string; display: string; viewable: boolean; raw: unknown } {
   if (value && typeof value === 'object' && '__isJSX' in value) {
     const jsx = value as { __isJSX: true; source: string }
-    return { typeClass: 'jsx', display: '<JSX>', viewable: true, raw: jsx.source }
+    return {
+      typeClass: 'jsx',
+      display: '<View JSX>',
+      viewable: true,
+      raw: jsx.source,
+    }
   }
   if (value && typeof value === 'object' && '__isVueSlot' in value) {
     const slot = value as { __isVueSlot: true; source: string }
-    return { typeClass: 'slot', display: '<slot>', viewable: true, raw: slot.source }
+    return {
+      typeClass: 'slot',
+      display: '<View slot>',
+      viewable: true,
+      raw: slot.source,
+    }
   }
   if (value && typeof value === 'object' && '__isFunction' in value) {
     return { typeClass: 'fn', display: '<fn>', viewable: false, raw: null }
@@ -611,50 +650,79 @@ function classifyProp(
     return { typeClass: 'str', display: value, viewable: false, raw: value }
   }
   if (typeof value === 'number') {
-    return { typeClass: 'num', display: String(value), viewable: false, raw: value }
+    return {
+      typeClass: 'num',
+      display: String(value),
+      viewable: false,
+      raw: value,
+    }
   }
   if (typeof value === 'boolean') {
-    return { typeClass: 'bool', display: String(value), viewable: false, raw: value }
+    return {
+      typeClass: 'bool',
+      display: String(value),
+      viewable: false,
+      raw: value,
+    }
   }
   if (value === null || value === undefined) {
-    return { typeClass: 'null', display: String(value), viewable: false, raw: null }
+    return {
+      typeClass: 'null',
+      display: String(value),
+      viewable: false,
+      raw: null,
+    }
   }
   if (typeof value === 'object') {
-    return { typeClass: 'obj', display: 'View Details', viewable: true, raw: value }
+    return {
+      typeClass: 'obj',
+      display: 'View object',
+      viewable: true,
+      raw: value,
+    }
   }
-  return { typeClass: 'str', display: String(value), viewable: false, raw: value }
+  return {
+    typeClass: 'str',
+    display: String(value),
+    viewable: false,
+    raw: value,
+  }
 }
 
 /** Render JSON-like tree for the object viewer popover. */
+const P = (s: string) => `<span class="obj-tree-punct">${s}</span>`
+
 function renderObjectTree(obj: unknown, depth = 0, maxDepth = 6): string {
   const indent = '  '.repeat(depth)
   if (depth > maxDepth) return `${indent}<span class="obj-tree-null">…</span>\n`
 
   if (obj === null) return `<span class="obj-tree-null">null</span>`
   if (obj === undefined) return `<span class="obj-tree-null">undefined</span>`
-  if (typeof obj === 'string') return `<span class="obj-tree-str">"${esc(obj)}"</span>`
+  if (typeof obj === 'string')
+    return `${P('"')}<span class="obj-tree-str">${esc(obj)}</span>${P('"')}`
   if (typeof obj === 'number') return `<span class="obj-tree-num">${obj}</span>`
-  if (typeof obj === 'boolean') return `<span class="obj-tree-bool">${obj}</span>`
+  if (typeof obj === 'boolean')
+    return `<span class="obj-tree-bool">${obj}</span>`
 
   if (Array.isArray(obj)) {
-    if (obj.length === 0) return `<span class="obj-tree-null">[]</span>`
+    if (obj.length === 0) return `${P('[')}${P(']')}`
     const lines = obj.map((item, i) => {
       const val = renderObjectTree(item, depth + 1, maxDepth)
-      const comma = i < obj.length - 1 ? ',' : ''
+      const comma = i < obj.length - 1 ? P(',') : ''
       return `${'  '.repeat(depth + 1)}${val}${comma}`
     })
-    return `[\n${lines.join('\n')}\n${indent}]`
+    return `${P('[')}\n${lines.join('\n')}\n${indent}${P(']')}`
   }
 
   if (typeof obj === 'object') {
     const entries = Object.entries(obj)
-    if (entries.length === 0) return `<span class="obj-tree-null">{}</span>`
+    if (entries.length === 0) return `${P('{')}${P('}')}`
     const lines = entries.map(([k, v], i) => {
       const val = renderObjectTree(v, depth + 1, maxDepth)
-      const comma = i < entries.length - 1 ? ',' : ''
-      return `${'  '.repeat(depth + 1)}<span class="obj-tree-key">"${esc(k)}"</span>: ${val}${comma}`
+      const comma = i < entries.length - 1 ? P(',') : ''
+      return `${'  '.repeat(depth + 1)}${P('"')}<span class="obj-tree-key">${esc(k)}</span>${P('"')}${P(':')} ${val}${comma}`
     })
-    return `{\n${lines.join('\n')}\n${indent}}`
+    return `${P('{')}\n${lines.join('\n')}\n${indent}${P('}')}`
   }
 
   return esc(String(obj))
@@ -664,8 +732,15 @@ function renderObjectTree(obj: unknown, depth = 0, maxDepth = 6): string {
 
 export function suggestStoryName(props: Record<string, unknown>): string {
   const meaningfulProps = [
-    'variant', 'type', 'size', 'mode', 'status',
-    'kind', 'color', 'intent', 'appearance',
+    'variant',
+    'type',
+    'size',
+    'mode',
+    'status',
+    'kind',
+    'color',
+    'intent',
+    'appearance',
   ]
 
   for (const propName of meaningfulProps) {
@@ -750,7 +825,10 @@ export function createContextMenu(
   const body = document.createElement('div')
   body.className = 'panel-body'
 
-  // Breadcrumb
+  // Breadcrumb row: path on the left, close (×) button on the right
+  const breadcrumbRow = document.createElement('div')
+  breadcrumbRow.className = 'breadcrumb-row'
+
   const breadcrumb = document.createElement('div')
   breadcrumb.className = 'breadcrumb'
   breadcrumb.innerHTML = toBreadcrumbs(relativePath)
@@ -774,7 +852,16 @@ export function createContextMenu(
   })
   breadcrumb.appendChild(breadcrumbCopyBtn)
 
-  body.appendChild(breadcrumb)
+  // Close (×) button — top-right, same row as the breadcrumb
+  const closeBtn = document.createElement('button')
+  closeBtn.className = 'close-btn'
+  closeBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+  closeBtn.title = 'Close'
+  closeBtn.addEventListener('click', () => callbacks.onClose())
+
+  breadcrumbRow.appendChild(breadcrumb)
+  breadcrumbRow.appendChild(closeBtn)
+  body.appendChild(breadcrumbRow)
 
   // Header row: component name + action buttons
   const header = document.createElement('div')
@@ -794,7 +881,10 @@ export function createContextMenu(
   const openCodeBtn = document.createElement('button')
   openCodeBtn.className = 'icon-btn'
   openCodeBtn.innerHTML = CODE_ICON
-  openCodeBtn.addEventListener('click', () => callbacks.openInEditor(meta.filePath))
+  openCodeBtn.title = 'Open component file in editor'
+  openCodeBtn.addEventListener('click', () =>
+    callbacks.openInEditor(meta.filePath),
+  )
   callbacks.isOpenInEditorAvailable().then((avail) => {
     if (!avail) openCodeWrap.style.display = 'none'
   })
@@ -811,6 +901,9 @@ export function createContextMenu(
   let goToStoryBtn = document.createElement('button')
   goToStoryBtn.className = 'icon-btn sb-btn'
   goToStoryBtn.innerHTML = SB_ICON
+  goToStoryBtn.title = storyInfo.hasStory
+    ? 'Open story file in editor'
+    : 'No story file yet'
   let storyBtnLabel = document.createElement('span')
   storyBtnLabel.className = 'action-label'
   storyBtnLabel.textContent = storyInfo.hasStory ? 'Go to Story' : 'No Story'
@@ -835,6 +928,9 @@ export function createContextMenu(
     viewStoryBtn = document.createElement('button')
     viewStoryBtn.className = 'icon-btn view-btn'
     viewStoryBtn.innerHTML = EYE_ICON
+    viewStoryBtn.title = storyInfo.hasStory
+      ? 'View story in Storybook panel'
+      : 'No story to view'
     viewStoryLabel = document.createElement('span')
     viewStoryLabel.className = 'action-label'
     viewStoryLabel.textContent = storyInfo.hasStory ? 'View Story' : 'No Story'
@@ -843,7 +939,10 @@ export function createContextMenu(
     } else {
       const relPath = meta.relativeFilePath || meta.filePath
       const visitCb = callbacks.visitStory
-      viewStoryBtn.addEventListener('click', () => visitCb(relPath))
+      viewStoryBtn.addEventListener('click', () => {
+        visitCb(relPath)
+        callbacks.onClose()
+      })
     }
     viewStoryWrap.appendChild(viewStoryBtn)
     viewStoryWrap.appendChild(viewStoryLabel)
@@ -875,6 +974,7 @@ export function createContextMenu(
   const collapseBtn = document.createElement('button')
   collapseBtn.className = 'collapse-btn'
   collapseBtn.textContent = 'Collapse'
+  collapseBtn.title = 'Toggle props visibility'
   if (propEntries.length > 0) {
     propsHeaderRow.appendChild(collapseBtn)
   }
@@ -897,7 +997,8 @@ export function createContextMenu(
   if (propEntries.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'empty-props'
-    empty.style.cssText = 'grid-column: 1/-1; padding: 12px; text-align: center;'
+    empty.style.cssText =
+      'grid-column: 1/-1; padding: 12px; text-align: center;'
     empty.textContent = 'No props'
     propsTable.appendChild(empty)
   }
@@ -968,7 +1069,8 @@ export function createContextMenu(
       let left = badgeRect.right + 6
       let top = badgeRect.top
 
-      if (left + popRect.width > vw - 10) left = badgeRect.left - popRect.width - 6
+      if (left + popRect.width > vw - 10)
+        left = badgeRect.left - popRect.width - 6
       if (top + popRect.height > vh - 10) top = vh - popRect.height - 10
       if (left < 10) left = 10
       if (top < 10) top = 10
@@ -1036,7 +1138,10 @@ export function createContextMenu(
       propCopyBtn.title = 'Copy value'
       propCopyBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        const text = typeof info.raw === 'string' ? info.raw : JSON.stringify(info.raw, null, 2)
+        const text =
+          typeof info.raw === 'string'
+            ? info.raw
+            : JSON.stringify(info.raw, null, 2)
         navigator.clipboard.writeText(text).then(() => {
           propCopyBtn.classList.add('copied')
           propCopyBtn.innerHTML = CHECK_ICON_SVG
@@ -1104,10 +1209,13 @@ export function createContextMenu(
   const saveBtn = document.createElement('button')
   saveBtn.className = 'btn btn-save'
   saveBtn.textContent = 'Create'
+  saveBtn.title = 'Save a story with the current props'
 
   const interactionsBtn = document.createElement('button')
   interactionsBtn.className = 'btn btn-interactions'
   interactionsBtn.textContent = 'Create with Interactions'
+  interactionsBtn.title =
+    'Record interactions then save as a story with a play function'
   if (recording) {
     interactionsBtn.disabled = true
   }
@@ -1220,7 +1328,10 @@ export function createContextMenu(
       const newBtn = document.createElement('button')
       newBtn.className = 'icon-btn view-btn'
       newBtn.innerHTML = EYE_ICON
-      newBtn.addEventListener('click', () => visitCb(relPath))
+      newBtn.addEventListener('click', () => {
+        visitCb(relPath)
+        callbacks.onClose()
+      })
       viewStoryWrap!.replaceChild(newBtn, viewStoryBtn)
       viewStoryBtn = newBtn
       viewStoryLabel.textContent = 'View Story'

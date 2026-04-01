@@ -14,6 +14,7 @@ const TERMINAL_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill=
 const CROSSHAIR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>`
 const DOCS_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`
 const EYE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
+const PLUS_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -93,14 +94,28 @@ async function getStorybookIndex(): Promise<
 }
 
 /**
+ * Normalise a story name for loose comparison: lower-case and strip spaces.
+ * Storybook derives display names from export names by inserting spaces
+ * (e.g. export `TaskForm` → name `"Task Form"`).  When we want to match the
+ * name we used during creation we normalise both sides so that
+ * "Secondary" === "secondary", "Task Form" === "taskform", etc.
+ */
+function normaliseStoryName(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, '')
+}
+
+/**
  * Find a story ID by matching the component's relative file path against
  * Storybook index entries' importPath.
  *
- * Strategy: extract the component base name (e.g. "Button" from
- * "src/components/Button.tsx") and match against story entries whose
- * importPath contains that same base name in a `.stories.` file.
+ * When `preferredStoryName` is supplied the function first looks for a story
+ * whose `name` matches (normalised); only if that fails does it fall back to
+ * the first story found for the component file.
  */
-async function findStoryId(relativeFilePath: string): Promise<string | null> {
+async function findStoryId(
+  relativeFilePath: string,
+  preferredStoryName?: string,
+): Promise<string | null> {
   const entries = await getStorybookIndex()
   if (!entries || Object.keys(entries).length === 0) return null
 
@@ -112,53 +127,79 @@ async function findStoryId(relativeFilePath: string): Promise<string | null> {
   // Also extract just the filename without extension for fallback matching
   const componentName = componentBase.split('/').pop() || componentBase
 
-  // First pass: exact base path match
+  // Collect all candidate entries for this component file (preserving order)
+  const candidates: StorybookIndexEntry[] = []
+
   for (const entry of Object.values(entries)) {
     if (entry.type !== 'story') continue
     const entryBase = stripExt(entry.importPath)
-    if (entryBase === componentBase) {
-      return entry.id
+    if (entryBase === componentBase || entryBase.endsWith(componentName)) {
+      candidates.push(entry)
     }
   }
 
-  // Second pass: the story importPath ends with the component name
-  // e.g. entry "./src/components/Button.stories.tsx" → base "src/components/Button"
-  //      component "src/components/Button" → name "Button"
-  for (const entry of Object.values(entries)) {
-    if (entry.type !== 'story') continue
-    const entryBase = stripExt(entry.importPath)
-    if (entryBase.endsWith(componentName)) {
-      return entry.id
-    }
+  if (candidates.length === 0) return null
+
+  // If the caller knows which story name was just created, prefer it
+  if (preferredStoryName) {
+    const needle = normaliseStoryName(preferredStoryName)
+    const match = candidates.find(
+      (e) => normaliseStoryName(e.name) === needle,
+    )
+    if (match) return match.id
   }
 
-  return null
+  // Fall back to the first candidate
+  return candidates[0].id
 }
 
 /**
  * Build a Storybook URL for a specific story.
  * Returns null if no matching story is found.
  */
-async function buildStoryUrl(relativeFilePath: string): Promise<string | null> {
-  const storyId = await findStoryId(relativeFilePath)
+async function buildStoryUrl(
+  relativeFilePath: string,
+  preferredStoryName?: string,
+): Promise<string | null> {
+  const storyId = await findStoryId(relativeFilePath, preferredStoryName)
   if (!storyId) return null
   const sbUrl = getStorybookUrl()
-  return `${sbUrl}/?path=/story/${encodeURIComponent(storyId)}`
+  return `${sbUrl}/?path=/story/${encodeURIComponent(storyId)}&nav=0`
 }
 
 /**
  * Navigate to a story in the Storybook iframe.
- * If Storybook isn't running, starts it first (showing the terminal tab),
- * then navigates once it's ready.
+ *
+ * @param relativeFilePath - Component's relative file path.
+ * @param preferredStoryName - Optional story name to prefer when multiple
+ *   stories exist for the component (e.g. the name used during creation).
+ *   When provided, the function will also retry index lookups with cache
+ *   invalidation so that a story that was just written to disk is found even
+ *   before Storybook's HMR cycle finishes.
  */
-async function visitStory(relativeFilePath: string) {
+async function visitStory(
+  relativeFilePath: string,
+  preferredStoryName?: string,
+) {
   const running = await checkStorybook()
   if (running) {
-    // Fast path: Storybook is already running, index is available
-    const targetUrl = await buildStoryUrl(relativeFilePath)
-    if (!targetUrl) return
-    switchTab('storybook')
-    navigateStorybookPane(targetUrl)
+    // Fast path: Storybook is already running, index is available.
+    // For newly created stories the index cache may be stale — bust it and
+    // retry until the story appears (Storybook needs a moment to process HMR).
+    const maxAttempts = preferredStoryName ? 20 : 1
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        // Bust the index cache so we re-fetch on the next iteration
+        storybookIndexCache = null
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+      if (targetUrl) {
+        switchTab('storybook')
+        navigateStorybookPane(targetUrl)
+        return
+      }
+    }
     return
   }
 
@@ -182,7 +223,7 @@ async function visitStory(relativeFilePath: string) {
       clearInterval(poll)
       renderStorybookState('running')
       // Now that Storybook is up, the index is available
-      const targetUrl = await buildStoryUrl(relativeFilePath)
+      const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
       if (targetUrl) {
         switchTab('storybook')
         navigateStorybookPane(targetUrl)
@@ -211,8 +252,9 @@ function navigateStorybookPane(targetUrl: string) {
 try {
   ;(window.parent as any).__storybookDevtoolsVisitStory = (
     relativeFilePath: string,
+    preferredStoryName?: string,
   ) => {
-    visitStory(relativeFilePath)
+    visitStory(relativeFilePath, preferredStoryName)
   }
   // Also expose the URL builder so callers can fall back to window.open
   ;(window.parent as any).__storybookDevtoolsBuildStoryUrl = (
@@ -416,9 +458,101 @@ async function startStorybook() {
   }, 1000)
 }
 
+// ─── Story creation from coverage ───────────────────────────────────
+
+/**
+ * Build a fingerprint string for serialized props, ignoring functions and JSX.
+ * Used to deduplicate component instances that represent the same variant.
+ */
+function propsFingerprint(props: Record<string, unknown>): string {
+  const meaningful: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(props)) {
+    if (value && typeof value === 'object') {
+      const v = value as Record<string, unknown>
+      if (v.__isFunction || v.__isJSX) continue
+    }
+    if (typeof value === 'function') continue
+    meaningful[key] = value
+  }
+  return JSON.stringify(meaningful, Object.keys(meaningful).sort())
+}
+
+/**
+ * Collect unique instances of a component from the live registry,
+ * deduplicated by their serialized props fingerprint.
+ * Matches by filePath since coverage uses the filename as componentName
+ * which may differ from the actual component display name in the registry.
+ */
+function collectUniqueInstances(filePath: string): any[] {
+  try {
+    const registry = (window.parent as any).__componentHighlighterRegistry as
+      | Map<string, any>
+      | undefined
+    if (!registry) return []
+
+    const seen = new Map<string, any>()
+    for (const instance of registry.values()) {
+      if (instance.meta?.filePath !== filePath) continue
+      const sp = instance.serializedProps
+      const fp = sp ? propsFingerprint(sp) : '{}'
+      if (!seen.has(fp)) {
+        seen.set(fp, instance)
+      }
+    }
+    return Array.from(seen.values())
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Create stories for a component by delegating to the client overlay's
+ * story creation flow (same RPC path as the context menu "Save Story").
+ * Finds all live instances, deduplicates by props, and creates one story
+ * per unique variant.
+ */
+function createStoryForComponent(filePath: string): boolean {
+  const createFn = (window.parent as any).__componentHighlighterCreateStory
+  if (typeof createFn !== 'function') return false
+
+  const instances = collectUniqueInstances(filePath)
+  if (instances.length === 0) return false
+
+  for (const instance of instances) {
+    createFn({
+      meta: instance.meta,
+      props: instance.props,
+      serializedProps: instance.serializedProps,
+    })
+  }
+  return true
+}
+
+/**
+ * Check whether a component is currently rendered (has live instances in the
+ * registry). A component is considered rendered if at least one instance with a
+ * matching filePath exists — regardless of dimensions or CSS visibility.
+ * Components that return null or are never mounted won't be in the registry at all.
+ */
+function isComponentVisible(filePath: string): boolean {
+  try {
+    const registry = (window.parent as any).__componentHighlighterRegistry as
+      | Map<string, any>
+      | undefined
+    if (!registry) return false
+    for (const instance of registry.values()) {
+      if (instance.meta?.filePath === filePath) return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 // ─── Coverage tab ───────────────────────────────────────────────────
 
 let lastCoverageJson = ''
+let lastVisibilityKey = ''
 
 async function fetchCoverage(): Promise<CoverageData | null> {
   try {
@@ -429,14 +563,23 @@ async function fetchCoverage(): Promise<CoverageData | null> {
   }
 }
 
+/** Build a string key representing which file paths are currently visible. */
+function computeVisibilityKey(entries: CoverageEntry[]): string {
+  return entries
+    .map((e) => `${e.filePath}:${isComponentVisible(e.filePath) ? '1' : '0'}`)
+    .join('|')
+}
+
 async function refreshCoverage() {
   const coverage = await fetchCoverage()
   if (!coverage) return
 
-  // Only rebuild the DOM when coverage data actually changes
+  // Rebuild when either server-side coverage data or client-side visibility changes
   const json = JSON.stringify(coverage)
-  if (json === lastCoverageJson) return
+  const visKey = computeVisibilityKey(coverage.entries)
+  if (json === lastCoverageJson && visKey === lastVisibilityKey) return
   lastCoverageJson = json
+  lastVisibilityKey = visKey
 
   clearAllHighlights()
   buildCoveragePanel(coverage)
@@ -454,7 +597,7 @@ function buildCoveragePanel(coverage: CoverageData) {
   hdr.className = 'cov-hdr'
 
   const title = document.createElement('h2')
-  title.textContent = 'Story Coverage'
+  title.textContent = 'Story Coverage (in this page)'
   hdr.appendChild(title)
 
   const pct = document.createElement('span')
@@ -471,8 +614,11 @@ function buildCoveragePanel(coverage: CoverageData) {
 
   const pl = document.createElement('div')
   pl.className = 'progress-label'
-  pl.textContent = `${coverage.coveredComponents} of ${coverage.totalComponents} components have stories`
+  pl.textContent = `${coverage.coveredComponents} of ${coverage.totalComponents} components have story files`
   pw.appendChild(pl)
+
+  const barRow = document.createElement('div')
+  barRow.className = 'progress-row'
 
   const bar = document.createElement('div')
   bar.className = 'progress-bar'
@@ -480,7 +626,33 @@ function buildCoveragePanel(coverage: CoverageData) {
   fill.className = `progress-fill ${cc}`
   fill.style.width = `${coverage.coveragePercent}%`
   bar.appendChild(fill)
-  pw.appendChild(bar)
+  barRow.appendChild(bar)
+
+  // "Create all missing" button — only for visible (currently rendered) components
+  const missingEntries = coverage.entries.filter(
+    (e) => !e.hasStory && isComponentVisible(e.filePath),
+  )
+  if (missingEntries.length > 0) {
+    const createAllBtn = document.createElement('button')
+    createAllBtn.className = 'create-all-btn'
+    createAllBtn.textContent = `Create all (${missingEntries.length})`
+    createAllBtn.title = `Create default stories for ${missingEntries.length} visible uncovered components`
+    createAllBtn.addEventListener('click', () => {
+      createAllBtn.disabled = true
+      createAllBtn.textContent = 'Creating\u2026'
+      for (const entry of missingEntries) {
+        createStoryForComponent(entry.filePath)
+      }
+      // Wait for the RPC story creation to complete, then refresh
+      setTimeout(() => {
+        lastCoverageJson = ''
+        refreshCoverage()
+      }, 1500)
+    })
+    barRow.appendChild(createAllBtn)
+  }
+
+  pw.appendChild(barRow)
   root.appendChild(pw)
 
   // Table
@@ -514,8 +686,9 @@ function buildCoveragePanel(coverage: CoverageData) {
   }
 
   for (const entry of coverage.entries) {
+    const visible = isComponentVisible(entry.filePath)
     const tr = document.createElement('tr')
-    tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}`
+    tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}${!visible ? ' invisible' : ''}`
 
     // Component name + file
     const tdName = document.createElement('td')
@@ -527,9 +700,13 @@ function buildCoveragePanel(coverage: CoverageData) {
 
     // Status badge
     const tdStatus = document.createElement('td')
-    tdStatus.innerHTML = entry.hasStory
-      ? `<span class="status covered"><span class="status-dot"></span>Covered</span>`
-      : `<span class="status missing"><span class="status-dot"></span>Missing</span>`
+    if (entry.hasStory) {
+      tdStatus.innerHTML = `<span class="status covered"><span class="status-dot"></span>Covered</span>`
+    } else if (!visible) {
+      tdStatus.innerHTML = `<span class="status not-visible"><span class="status-dot"></span>Not visible</span>`
+    } else {
+      tdStatus.innerHTML = `<span class="status missing"><span class="status-dot"></span>Missing</span>`
+    }
     tr.appendChild(tdStatus)
 
     // Action buttons
@@ -581,6 +758,36 @@ function buildCoveragePanel(coverage: CoverageData) {
       })
     }
     actionsDiv.appendChild(visitBtn)
+
+    // Create story button (only for uncovered components)
+    if (!entry.hasStory) {
+      const createBtn = document.createElement('button')
+      createBtn.className = 'act-btn create'
+      createBtn.innerHTML = PLUS_ICON
+      if (!visible) {
+        createBtn.title = 'Component not visible — navigate to a page where it renders first'
+        createBtn.setAttribute('disabled', '')
+      } else {
+        createBtn.title = 'Create story from current props'
+        createBtn.addEventListener('click', (e) => {
+          e.stopPropagation()
+          createBtn.disabled = true
+          createBtn.style.opacity = '0.5'
+          const created = createStoryForComponent(entry.filePath)
+          if (created) {
+            // Wait for the RPC story creation to complete, then refresh
+            setTimeout(() => {
+              lastCoverageJson = ''
+              refreshCoverage()
+            }, 1500)
+          } else {
+            createBtn.disabled = false
+            createBtn.style.opacity = ''
+          }
+        })
+      }
+      actionsDiv.appendChild(createBtn)
+    }
 
     tdActions.appendChild(actionsDiv)
     tr.appendChild(tdActions)
@@ -820,7 +1027,8 @@ function init() {
   const docsPane = document.createElement('div')
   docsPane.className = 'tab-pane'
   docsPane.id = 'pane-docs'
-  docsPane.innerHTML = '<iframe class="sb-iframe" src="https://storybook.js.org/docs"></iframe>'
+  docsPane.innerHTML =
+    '<iframe class="sb-iframe" src="https://storybook.js.org/docs"></iframe>'
 
   content.appendChild(sbPane)
   content.appendChild(covPane)

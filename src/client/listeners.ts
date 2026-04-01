@@ -37,12 +37,20 @@ let isDockActive = false
 // Track Option key state
 let isOptionHeld = false
 
+// Double-Escape to exit highlight mode
+let lastEscapeTime = 0
+const DOUBLE_ESCAPE_MS = 600
+
 /**
  * Enable highlight mode (called when dock is activated)
  */
 export function enableHighlightMode() {
   isDockActive = true
   enableOverlay()
+  // TODO: hide/fade the DevTools panel so components beneath it are reachable.
+  // Targeting `vite-devtools-dock-embedded` with opacity+pointer-events works
+  // technically but the UX isn't great — find a better approach (e.g. slide
+  // the panel out, shrink it, or use a dedicated DevTools API if one exists).
 }
 
 /**
@@ -54,6 +62,7 @@ export function disableHighlightMode() {
   clearSelection()
   disableOverlay()
   hideHoverMenu()
+  // TODO: restore the DevTools panel once the approach above is settled.
 }
 
 // Debounce function for performance
@@ -153,9 +162,33 @@ function handleKeyDown(event: KeyboardEvent) {
     setHighlightAll(!currentState)
   }
 
-  // Escape to close selection
-  if (event.key === 'Escape' && isDockActive && hasSelection()) {
-    clearSelection()
+  // Escape handling:
+  //   First press  → clear current selection (if any)
+  //   Second press within DOUBLE_ESCAPE_MS → exit highlight mode entirely
+  //   (the DevTools panel is automatically restored by disableHighlightMode)
+  if (event.key === 'Escape' && isDockActive) {
+    const now = Date.now()
+
+    if (now - lastEscapeTime < DOUBLE_ESCAPE_MS) {
+      // Second Escape — toggle the dock off via the DevTools API so the button
+      // state updates correctly. This fires entry:deactivated which in turn
+      // calls disableHighlightMode() (overlay off + panel restored).
+      lastEscapeTime = 0
+      const deactivate = (window as any).__componentHighlighterDeactivateDock
+      if (typeof deactivate === 'function') {
+        deactivate()
+      } else {
+        // Fallback if the dock script hasn't registered the function yet
+        disableHighlightMode()
+      }
+    } else {
+      // First Escape — record the time and clear any active selection
+      lastEscapeTime = now
+      if (hasSelection()) {
+        clearSelection()
+      }
+    }
+    return
   }
 }
 

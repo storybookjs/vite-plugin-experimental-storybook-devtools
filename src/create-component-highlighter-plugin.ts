@@ -176,6 +176,7 @@ export function createComponentHighlighterPlugin(
   const transformedComponents = new Map<string, string>()
   let coverageCwd = ''
 
+
   // Terminal-based Storybook launcher state
   let devtoolsTerminals: any = null // ctx.terminals reference from devtools.setup
   let storybookSession: any = null
@@ -423,6 +424,7 @@ export function createComponentHighlighterPlugin(
           )
         },
       )
+
     },
     devtools: {
       setup(ctx) {
@@ -618,6 +620,9 @@ export function createComponentHighlighterPlugin(
                           filePath: outputPath,
                           componentName: data.meta.componentName,
                           componentPath: data.meta.filePath,
+                          relativeFilePath:
+                            data.meta.relativeFilePath ??
+                            path.relative(process.cwd(), data.meta.filePath),
                           storyName: story.storyName,
                           isAppend: !!existingContent,
                         },

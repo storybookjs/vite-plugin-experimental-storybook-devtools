@@ -1,7 +1,7 @@
 /// <reference types="@vitejs/devtools-kit" />
 /// <reference types="vite/client" />
 import type { DockClientScriptContext } from '@vitejs/devtools-kit/client'
-import { overlayEvents, showStoryCreationFeedback } from './overlay'
+import { overlayEvents, showStoryCreationFeedback, hideContextMenu } from './overlay'
 import { enableHighlightMode, disableHighlightMode } from './listeners'
 import { debug, error as logError } from './logger'
 
@@ -23,6 +23,12 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
     debug('dock deactivated - disabling highlight mode')
     disableHighlightMode()
   })
+
+  // Expose a function so the double-Escape handler in listeners.ts can
+  // programmatically toggle the dock off (updates the DevTools button state).
+  ;(window as any).__componentHighlighterDeactivateDock = () => {
+    ctx.docks.toggleEntry(ctx.current.entryMeta.id)
+  }
 
   // Clean up previous listener before adding a new one
   if (unsubLogInfo) {
@@ -65,15 +71,59 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
   if (import.meta.hot) {
     import.meta.hot.on(
       'component-highlighter:story-created',
-      (data: {
+      async (data: {
         filePath: string
         componentName: string
         componentPath?: string
+        relativeFilePath?: string
+        storyName?: string
+        isAppend?: boolean
       }) => {
         debug(
           `Story created for ${data.componentName}: ${data.filePath}`,
         )
         showStoryCreationFeedback('success', data.filePath, data.componentPath)
+
+        // If Storybook is already running, open the panel and navigate to the
+        // newly created story so the user can see it immediately.
+        const relPath = data.relativeFilePath
+        if (!relPath) return
+
+        try {
+          const statusRes = await fetch(
+            '/__component-highlighter/storybook-status',
+          )
+          if (!statusRes.ok) return
+          const status = await statusRes.json()
+          if (!status.running) return
+        } catch {
+          return
+        }
+
+        const storyName = data.storyName
+
+        // Close the context menu now that we're navigating to the story
+        hideContextMenu()
+
+        // Panel already open → navigate directly
+        let visitFn = (window as any).__storybookDevtoolsVisitStory
+        if (typeof visitFn === 'function') {
+          visitFn(relPath, storyName)
+          return
+        }
+
+        // Panel not open yet — switch to it and wait for the panel to register
+        if (ctx.docks?.switchEntry) {
+          await ctx.docks.switchEntry('storybook-devtools-panel')
+          for (let i = 0; i < 20; i++) {
+            await new Promise((r) => setTimeout(r, 150))
+            visitFn = (window as any).__storybookDevtoolsVisitStory
+            if (typeof visitFn === 'function') {
+              visitFn(relPath, storyName)
+              return
+            }
+          }
+        }
       },
     )
   }
