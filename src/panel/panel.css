@@ -9,7 +9,7 @@ html, body, #app {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   color: #e2e8f0;
-  background: transparent;
+  background: #13141e;
 }
 
 /* ── Tab bar ─────────────────────── */
@@ -541,6 +541,7 @@ tr.row.invisible {
 @media (prefers-color-scheme: light) {
   html, body, #app {
     color: #1e293b;
+    background: white;
   }
 
   /* Tab bar */
