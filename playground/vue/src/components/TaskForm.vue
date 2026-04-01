@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useAttrs, ref } from 'vue'
+import { ref } from 'vue'
 import Input from './Input.vue'
 import Select from './Select.vue'
 
@@ -11,13 +11,14 @@ export interface TaskFormData {
   status: 'pending' | 'in-progress' | 'completed'
 }
 
+defineProps<{
+  showCancel?: boolean
+}>()
+
 const emit = defineEmits<{
   submit: [data: TaskFormData]
   cancel: []
 }>()
-
-const attrs = useAttrs()
-const hasCancelListener = computed(() => Boolean(attrs.onCancel))
 
 const title = ref('')
 const priority = ref('')
@@ -100,7 +101,7 @@ function handleSubmit() {
 
     <div class="task-form-actions">
       <button
-        v-if="hasCancelListener"
+        v-if="showCancel"
         type="button"
         class="btn btn-secondary"
         @click="emit('cancel')"

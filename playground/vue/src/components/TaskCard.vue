@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, useAttrs } from 'vue'
 import Button from './Button.vue'
 import Badge from './Badge.vue'
 
-interface Task {
+export interface Task {
   id: string
   title: string
   status: 'pending' | 'in-progress' | 'completed'
@@ -19,6 +18,7 @@ interface Task {
 
 interface TaskCardProps {
   task: Task
+  showAction?: boolean
 }
 
 defineProps<TaskCardProps>()
@@ -26,9 +26,6 @@ defineProps<TaskCardProps>()
 defineEmits<{
   action: []
 }>()
-
-const attrs = useAttrs()
-const hasActionListener = computed(() => Boolean(attrs.onAction))
 </script>
 
 <template>
@@ -45,7 +42,7 @@ const hasActionListener = computed(() => Boolean(attrs.onAction))
       <span class="task-card-due">📅 {{ task.metadata.dueDate }}</span>
       <span>👤 {{ task.metadata.assignee.name }}</span>
     </div>
-    <div v-if="hasActionListener" style="margin-top: 0.75rem">
+    <div v-if="showAction" style="margin-top: 0.75rem">
       <Button variant="secondary" size="small" @click="$emit('action')">
         View Details
       </Button>

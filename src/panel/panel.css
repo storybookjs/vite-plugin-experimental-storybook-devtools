@@ -18,7 +18,7 @@ html, body, #app {
   align-items: center;
   gap: 0;
   padding: 0 8px;
-  background: rgba(15, 17, 22, 0.92);
+  background: rgb(15, 17, 22);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   height: 36px;
   flex-shrink: 0;
@@ -328,7 +328,7 @@ th {
   letter-spacing: 0.04em;
   color: #64748b;
   text-align: left;
-  background: rgba(15, 17, 22, 0.9);
+  background: rgb(15, 17, 22);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 

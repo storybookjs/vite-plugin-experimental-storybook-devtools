@@ -41,7 +41,7 @@ const STYLES = /* css */ `
     font-size: 13px;
     color: #e2e8f0;
     line-height: 1.4;
-    background: rgba(15, 17, 22, 0.58);
+    background: rgba(15, 17, 22, 0.85);
     backdrop-filter: blur(32px) saturate(180%);
     -webkit-backdrop-filter: blur(32px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.08);
