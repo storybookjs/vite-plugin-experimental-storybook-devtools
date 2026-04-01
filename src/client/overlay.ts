@@ -30,6 +30,7 @@ function safeOverlayCall<T>(fn: () => T, fallback?: T): T | undefined {
 function disableOverlaySafe() {
   isOverlayEnabled = false
   isHighlightAllActive = false
+  isClickThroughActive = false
   if (highlightContainer) {
     highlightContainer.remove()
     highlightContainer = null
@@ -38,10 +39,6 @@ function disableOverlaySafe() {
   if (contextMenuHandle) {
     contextMenuHandle.destroy()
     contextMenuHandle = null
-  }
-  if (debugOverlayElement) {
-    debugOverlayElement.remove()
-    debugOverlayElement = null
   }
   document.body.style.cursor = ''
 }
@@ -91,9 +88,9 @@ const COLORS = {
 let highlightContainer: HTMLDivElement | null = null
 let highlightElements: Map<string, HTMLDivElement> = new Map()
 let contextMenuHandle: ContextMenuHandle | null = null
-let debugOverlayElement: HTMLDivElement | null = null
 let isOverlayEnabled = false
 let isHighlightAllActive = false
+let isClickThroughActive = false
 let currentHoveredId: string | null = null
 let selectedComponentId: string | null = null
 // (click-outside and escape handlers are now managed by the context-menu module)
@@ -251,7 +248,7 @@ function createHighlightElement(instance: ComponentInstance): HTMLDivElement {
   el.style.cssText = `
     position: fixed;
     box-sizing: border-box;
-    pointer-events: ${isHighlightAllActive ? 'none' : 'auto'};
+    pointer-events: ${isHighlightAllActive || isClickThroughActive ? 'none' : 'auto'};
     cursor: pointer;
   `
   return el
@@ -430,16 +427,12 @@ function drawAllHighlightsImpl() {
     }
   }
 
-  // Update pointer-events for all highlight elements based on highlight-all state
-  const pointerEvents = isHighlightAllActive ? 'none' : 'auto'
+  // Update pointer-events based on highlight-all or click-through state
+  const pointerEvents = (isHighlightAllActive || isClickThroughActive) ? 'none' : 'auto'
   for (const el of highlightElements.values()) {
     el.style.pointerEvents = pointerEvents
   }
 
-  // Update debug overlay if visible
-  if (debugOverlayElement) {
-    updateDebugOverlay()
-  }
 }
 
 // Create stories for all components that don't have stories
@@ -888,146 +881,13 @@ export function disableOverlay() {
   currentHoveredId = null
   hideHoverMenu()
   removeHighlightContainer()
-  hideDebugOverlay()
-}
-
-// Debug overlay functions
-function createDebugOverlay(): HTMLDivElement {
-  if (debugOverlayElement) return debugOverlayElement
-
-  debugOverlayElement = document.createElement('div')
-  debugOverlayElement.id = 'component-highlighter-debug'
-  debugOverlayElement.setAttribute(UI_MARKER, 'true')
-  debugOverlayElement.style.cssText = `
-    position: fixed;
-    bottom: 12px;
-    right: 12px;
-    opacity: 0.9;
-    background: rgba(0, 0, 0, 0.85);
-    color: white;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    z-index: 2147483647;
-    pointer-events: none;
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    min-width: 180px;
-  `
-  document.body.appendChild(debugOverlayElement)
-  return debugOverlayElement
-}
-
-function updateDebugOverlay() {
-  if (!debugOverlayElement) return
-
-  // Count unique components by sourceId (same component definition)
-  const uniqueSourceIds = new Set<string>()
-  const componentsWithStories = new Set<string>()
-  let totalComponents = 0
-
-  if (componentRegistry) {
-    for (const instance of componentRegistry.values()) {
-      if (
-        !instance.element.isConnected ||
-        instance.element.nodeType !== Node.ELEMENT_NODE
-      )
-        continue
-      totalComponents++
-      uniqueSourceIds.add(instance.meta.sourceId)
-
-      // Check if this component has a story
-      const storyInfo = storyFileCache.get(instance.meta.filePath)
-      if (storyInfo?.hasStory) {
-        componentsWithStories.add(instance.meta.sourceId)
-      }
-    }
-  }
-
-  const uniqueCount = uniqueSourceIds.size
-  const withStoriesCount = componentsWithStories.size
-  const coverage =
-    uniqueCount > 0 ? Math.round((withStoriesCount / uniqueCount) * 100) : 0
-
-  // Color coding for coverage
-  let coverageColor = '#ef4444' // red
-  if (coverage >= 80) {
-    coverageColor = '#22c55e' // green
-  } else if (coverage >= 50) {
-    coverageColor = '#eab308' // yellow
-  } else if (coverage >= 25) {
-    coverageColor = '#f97316' // orange
-  }
-
-  debugOverlayElement.innerHTML = `
-    <div style="font-weight: 600; margin-bottom: 8px; color: #ec4899; display: flex; align-items: center; gap: 6px;">
-      <div id="storybook-logo" style="cursor: pointer; padding: 2px; border-radius: 3px; transition: background-color 0.2s; pointer-events: auto;" title="Improve coverage">
-        ${STORYBOOK_ICON_SVG}
-      </div>
-      Component Stats
-    </div>
-    <div style="display: grid; gap: 4px;">
-      <div style="display: flex; justify-content: space-between;">
-        <span style="color: #9ca3af;">Total components:</span>
-        <span style="font-weight: 500; color: white;">${totalComponents}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between;">
-        <span style="color: #9ca3af;">Unique components:</span>
-        <span style="font-weight: 500; color: white;">${uniqueCount}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between;">
-        <span style="color: #9ca3af;">With stories:</span>
-        <span style="font-weight: 500; color: white;">${withStoriesCount}</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.1);">
-        <span style="color: #9ca3af;">Coverage:</span>
-        <span style="font-weight: 600; color: ${coverageColor};">${coverage}%</span>
-      </div>
-    </div>
-  `
-
-  // Add click handler for the storybook logo
-  const storybookLogo = debugOverlayElement.querySelector(
-    '#storybook-logo',
-  ) as HTMLDivElement
-  if (storybookLogo) {
-    storybookLogo.addEventListener('click', () =>
-      createStoriesForComponentsWithoutStories(),
-    )
-    storybookLogo.addEventListener('mouseenter', () => {
-      storybookLogo.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
-    })
-    storybookLogo.addEventListener('mouseleave', () => {
-      storybookLogo.style.backgroundColor = 'transparent'
-    })
-  }
-}
-
-function showDebugOverlay() {
-  debug('showDebugOverlay called')
-  createDebugOverlay()
-  updateDebugOverlay()
-  debug('Debug overlay created:', !!debugOverlayElement)
-}
-
-function hideDebugOverlay() {
-  if (debugOverlayElement) {
-    debugOverlayElement.remove()
-    debugOverlayElement = null
-  }
 }
 
 export function setHighlightAll(enabled: boolean) {
   isHighlightAllActive = enabled
   if (enabled) {
     createHighlightContainer()
-    showDebugOverlay()
-    // Set cursor to crosshair when overlay is enabled
     document.body.style.cursor = 'crosshair'
-  } else {
-    hideDebugOverlay()
   }
   drawAllHighlights()
 }
@@ -1037,14 +897,10 @@ export function toggleHighlightAll() {
   if (isHighlightAllActive) {
     isOverlayEnabled = true
     createHighlightContainer()
-    showDebugOverlay()
-    // Set cursor to crosshair when overlay is enabled
     document.body.style.cursor = 'crosshair'
   } else {
     isOverlayEnabled = false
-    // Reset cursor when overlay is disabled
     document.body.style.cursor = ''
-    hideDebugOverlay()
     clearAllHighlights()
     currentHoveredId = null
     hideHoverMenu()
@@ -1052,6 +908,20 @@ export function toggleHighlightAll() {
   }
   drawAllHighlights()
   return isHighlightAllActive
+}
+
+export function setClickThrough(enabled: boolean) {
+  isClickThroughActive = enabled
+  const pointerEvents = enabled ? 'none' : (isHighlightAllActive ? 'none' : 'auto')
+  for (const el of highlightElements.values()) {
+    el.style.pointerEvents = pointerEvents
+  }
+  // Restore default cursor so users can interact normally
+  if (enabled) {
+    document.body.style.cursor = ''
+  } else if (isOverlayEnabled) {
+    document.body.style.cursor = 'crosshair'
+  }
 }
 
 export function updateHover(instanceId: string | null) {

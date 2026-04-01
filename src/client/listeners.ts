@@ -2,7 +2,7 @@ import type { ComponentInstance } from '../frameworks/types'
 import {
   enableOverlay,
   disableOverlay,
-  setHighlightAll,
+  toggleHighlightAll,
   updateHover,
   updateInstanceRects,
   setComponentRegistry,
@@ -10,7 +10,7 @@ import {
   hideHoverMenu,
   hasSelection,
   clearSelection,
-  isHighlightAllEnabled,
+  setClickThrough,
 } from './overlay'
 import { isCurrentlyRecording } from './interaction-recorder'
 import { warn } from './logger'
@@ -145,21 +145,10 @@ const handleMouseMove = debounce((event: MouseEvent) => {
 function handleKeyDown(event: KeyboardEvent) {
   if (isCurrentlyRecording()) return
 
-  // Option/Alt key handling
+  // Option/Alt key: enable click-through so users can interact while highlighting is on
   if (event.key === 'Alt' && isDockActive && !isOptionHeld) {
     isOptionHeld = true
-    setHighlightAll(true)
-  }
-
-  // Shift+H to toggle sticky highlight-all mode (skip when typing in an input)
-  const tag = (document.activeElement?.tagName ?? '').toLowerCase()
-  const isEditable =
-    tag === 'input' || tag === 'textarea' || tag === 'select' ||
-    (document.activeElement as HTMLElement)?.isContentEditable === true
-  if (event.key === 'H' && event.shiftKey && isDockActive && !isEditable) {
-    event.preventDefault()
-    const currentState = isHighlightAllEnabled()
-    setHighlightAll(!currentState)
+    setClickThrough(true)
   }
 
   // Escape handling:
@@ -195,11 +184,10 @@ function handleKeyDown(event: KeyboardEvent) {
 function handleKeyUp(event: KeyboardEvent) {
   if (isCurrentlyRecording()) return
 
-  // Option/Alt key release
+  // Option/Alt key release: disable click-through
   if (event.key === 'Alt' && isOptionHeld) {
     isOptionHeld = false
-    // Only disable highlight-all if it wasn't toggled sticky with Shift+H
-    setHighlightAll(false)
+    setClickThrough(false)
   }
 }
 
@@ -270,9 +258,7 @@ function initialize() {
   // Export for debugging
   window.__componentHighlighterRegistry = componentRegistry
   window.__componentHighlighterToggle = () => {
-    const currentState = isHighlightAllEnabled()
-    setHighlightAll(!currentState)
-    return !currentState
+    return toggleHighlightAll()
   }
   window.__componentHighlighterDraw = () => {
     enableOverlay()

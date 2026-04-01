@@ -15,6 +15,7 @@ const CROSSHAIR_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="no
 const DOCS_TAB_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`
 const EYE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
 const PLUS_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`
+const BULLSEYE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -724,6 +725,45 @@ function buildCoveragePanel(coverage: CoverageData) {
     activeHighlights = []
   }
 
+  const highlightInstances = (componentName: string, hasStory: boolean) => {
+    clearHighlights()
+    try {
+      const registry = (window.parent as any)
+        .__componentHighlighterRegistry as
+        | Map<string, { meta: { componentName: string }; element?: Element }>
+        | undefined
+      if (!registry) return
+      const color = hasStory ? '#22c55e' : '#ef4444'
+      for (const instance of registry.values()) {
+        if (
+          instance.meta.componentName === componentName &&
+          instance.element?.isConnected &&
+          instance.element.nodeType === Node.ELEMENT_NODE
+        ) {
+          const rect = instance.element.getBoundingClientRect()
+          const box = window.parent.document.createElement('div')
+          box.style.cssText = `
+            position: fixed;
+            left: ${rect.left}px;
+            top: ${rect.top}px;
+            width: ${rect.width}px;
+            height: ${rect.height}px;
+            outline: 2px solid ${color};
+            outline-offset: -1px;
+            background: ${color}22;
+            pointer-events: none;
+            z-index: 999999;
+            transition: opacity 0.2s ease;
+            border-radius: 2px;
+          `
+          box.setAttribute('data-coverage-highlight', 'true')
+          window.parent.document.body.appendChild(box)
+          activeHighlights.push(box)
+        }
+      }
+    } catch { /* cross-origin */ }
+  }
+
   for (const entry of coverage.entries) {
     const visible = isComponentVisible(entry.filePath)
     const tr = document.createElement('tr')
@@ -752,6 +792,43 @@ function buildCoveragePanel(coverage: CoverageData) {
     const tdActions = document.createElement('td')
     const actionsDiv = document.createElement('div')
     actionsDiv.className = 'actions'
+
+    // Scroll to component button
+    const locateBtn = document.createElement('button')
+    locateBtn.className = 'act-btn locate'
+    locateBtn.innerHTML = BULLSEYE_ICON
+    if (!visible) {
+      locateBtn.title = 'Component not visible on this page'
+      locateBtn.setAttribute('disabled', '')
+    } else {
+      locateBtn.title = 'Scroll to component'
+      locateBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        try {
+          const registry = (window.parent as any)
+            .__componentHighlighterRegistry as
+            | Map<string, { meta: { componentName: string }; element?: Element }>
+            | undefined
+          if (!registry) return
+          for (const instance of registry.values()) {
+            if (
+              instance.meta.componentName === entry.componentName &&
+              instance.element?.isConnected
+            ) {
+              // Clear stale highlights before scrolling
+              clearHighlights()
+              instance.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              // Re-highlight once scroll finishes so boxes match new viewport positions
+              window.parent.addEventListener('scrollend', () => {
+                highlightInstances(entry.componentName, entry.hasStory)
+              }, { once: true })
+              break
+            }
+          }
+        } catch { /* cross-origin */ }
+      })
+    }
+    actionsDiv.appendChild(locateBtn)
 
     // Open code button
     const codeBtn = document.createElement('button')
@@ -834,45 +911,7 @@ function buildCoveragePanel(coverage: CoverageData) {
 
     // Hover → highlight matching component instances on the parent page
     tr.addEventListener('mouseenter', () => {
-      clearHighlights()
-      try {
-        const registry = (window.parent as any)
-          .__componentHighlighterRegistry as
-          | Map<string, { meta: { componentName: string }; element?: Element }>
-          | undefined
-        if (!registry) return
-
-        const color = entry.hasStory ? '#22c55e' : '#ef4444'
-        for (const instance of registry.values()) {
-          if (
-            instance.meta.componentName === entry.componentName &&
-            instance.element?.isConnected &&
-            instance.element.nodeType === Node.ELEMENT_NODE
-          ) {
-            const rect = instance.element.getBoundingClientRect()
-            const box = window.parent.document.createElement('div')
-            box.style.cssText = `
-              position: fixed;
-              left: ${rect.left}px;
-              top: ${rect.top}px;
-              width: ${rect.width}px;
-              height: ${rect.height}px;
-              outline: 2px solid ${color};
-              outline-offset: -1px;
-              background: ${color}22;
-              pointer-events: none;
-              z-index: 999999;
-              transition: opacity 0.2s ease;
-              border-radius: 2px;
-            `
-            box.setAttribute('data-coverage-highlight', 'true')
-            window.parent.document.body.appendChild(box)
-            activeHighlights.push(box)
-          }
-        }
-      } catch {
-        // Cross-origin or parent not available
-      }
+      highlightInstances(entry.componentName, entry.hasStory)
     })
 
     tr.addEventListener('mouseleave', clearHighlights)

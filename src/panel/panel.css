@@ -459,6 +459,11 @@ tr.row.invisible {
   background: rgba(34, 197, 94, 0.1);
 }
 
+.act-btn.locate:hover {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+
 .act-btn[disabled] {
   opacity: 0.25;
   cursor: not-allowed;
