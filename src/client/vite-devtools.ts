@@ -20,10 +20,18 @@ let unsubLogInfo: (() => void) | null = null
 export default function clientScriptSetup(ctx: DockClientScriptContext): void {
   debug('clientScriptSetup called')
 
-  // Inject RPC call function into listeners.ts so it can push registry diffs
-  setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
-    return (ctx.rpc.call as any)(method, ...args)
-  })
+  // Inject RPC call function into listeners.ts so it can push registry diffs.
+  // Wait for trust first to avoid "Unauthorized access" errors.
+  ctx.rpc
+    .ensureTrusted()
+    .then(() => {
+      setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
+        return (ctx.rpc.call as any)(method, ...args)
+      })
+    })
+    .catch(() => {
+      // Trust denied or timed out
+    })
 
   // ─── Dock activation/deactivation ─────────────────────────────────
 
