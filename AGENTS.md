@@ -126,3 +126,29 @@ If you touch broader behavior, run the full test set impacted by your changes.
   - Exact commands run
   - Any caveats/follow-ups
 - Keep test additions and implementation changes together in one PR whenever practical.
+
+---
+
+## UI Styling — Storybook Design System
+
+The DevTools panel UI uses vanilla JS + Shadow DOM. Do **not** introduce React or Emotion just for styling. Instead, use Storybook's design tokens as CSS custom properties injected at the Shadow DOM root.
+
+### Full token reference
+See `/Users/m/projects/storybook/DESIGN_SYSTEM_REPORT.md` (local checkout of storybookjs/storybook).
+
+### In-repo skill
+See `.agents/skills/storybook-ui/SKILL.md` for implementation guidance.
+
+### Token injection pattern
+
+```js
+const style = document.createElement('style');
+style.textContent = getSbTokenStyles(); // see skill for full block
+shadowRoot.prepend(style);
+```
+
+### Key rules
+- Use `--sb-*` CSS custom properties for all colors, typography, and spacing
+- Always include both light (`:host {}`) and dark (`@media (prefers-color-scheme: dark)`) blocks
+- Never hardcode hex colors — use the `--sb-*` variables
+- The Shadow DOM root is `<vite-devtools-dock-embedded>`'s `shadowRoot`

@@ -11,14 +11,13 @@ import { buildLLMPrompt } from './utils/html-preview'
 import { toBreadcrumbs, suggestStoryName } from './utils/format-utils'
 
 // ─── Storybook logo SVG (pink) ──────────────────────────────────────────────
-const SB_ICON = `<svg width="16" height="16" viewBox="-31.5 0 319 319" xmlns="http://www.w3.org/2000/svg">
-  <path fill="#FF4785" d="M9.87,293.32L0.01,30.57C-0.31,21.9,6.34,14.54,15.01,14L238.49,0.03C247.32,-0.52,254.91,6.18,255.47,15.01C255.49,15.34,255.5,15.67,255.5,16V302.32C255.5,311.16,248.33,318.32,239.49,318.32C239.25,318.32,239.01,318.32,238.77,318.31L25.15,308.71C16.83,308.34,10.18,301.65,9.87,293.32Z"/>
-  <path fill="#FFF" d="M188.67,39.13L190.19,2.41L220.88,0L222.21,37.86C222.25,39.18,221.22,40.29,219.9,40.33C219.34,40.35,218.79,40.17,218.34,39.82L206.51,30.5L192.49,41.13C191.44,41.93,189.95,41.72,189.15,40.67C188.81,40.23,188.64,39.68,188.67,39.13ZM149.41,119.98C149.41,126.21,191.36,123.22,196.99,118.85C196.99,76.45,174.23,54.17,132.57,54.17C90.91,54.17,67.57,76.79,67.57,110.74C67.57,169.85,147.35,170.98,147.35,203.23C147.35,212.28,142.91,217.65,133.16,217.65C120.46,217.65,115.43,211.17,116.02,189.1C116.02,184.32,67.57,182.82,66.09,189.1C62.33,242.57,95.64,257.99,133.75,257.99C170.69,257.99,199.65,238.3,199.65,202.66C199.65,139.3,118.68,141,118.68,109.6C118.68,96.88,128.14,95.18,133.75,95.18C139.66,95.18,150.3,96.22,149.41,119.98Z"/>
-</svg>`
-
-const CODE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`
-const EYE_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`
+const CODE_ICON = `<svg width="14" height="14" viewBox="0 0 14 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.53613 4.31055C7.63877 4.05443 7.92931 3.92987 8.18555 4.03223C8.44167 4.13483 8.56617 4.4254 8.46387 4.68164L6.46387 9.68164C6.36117 9.93761 6.07062 10.0623 5.81445 9.95996C5.55837 9.85739 5.43397 9.56674 5.53613 9.31055L7.53613 4.31055Z" fill="currentColor"/><path d="M3.64648 5.14258C3.84175 4.94762 4.15834 4.94747 4.35352 5.14258C4.5486 5.33775 4.54846 5.65435 4.35352 5.84961L3.20703 6.99609L4.35352 8.14258C4.5486 8.33775 4.54846 8.65435 4.35352 8.84961C4.15826 9.04458 3.84166 9.0447 3.64648 8.84961L2.14648 7.34961C2.04896 7.25205 2.00006 7.12393 2 6.99609C2.00001 6.93207 2.01266 6.86784 2.03711 6.80762C2.04931 6.77763 2.06475 6.74834 2.08301 6.7207L2.14648 6.64258L3.64648 5.14258Z" fill="currentColor"/><path d="M9.64648 5.14258C9.84174 4.94763 10.1583 4.9475 10.3535 5.14258L11.8535 6.64258L11.918 6.7207C11.9363 6.7484 11.9517 6.77755 11.9639 6.80762C11.9883 6.86782 12 6.93209 12 6.99609C11.9999 7.12383 11.9509 7.25208 11.8535 7.34961L10.3535 8.84961C10.1583 9.04455 9.84166 9.0447 9.64648 8.84961C9.45144 8.65443 9.45155 8.33782 9.64648 8.14258L10.793 6.99609L9.64648 5.84961C9.45142 5.65445 9.45158 5.33784 9.64648 5.14258Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M13.5 0C13.7761 0 14 0.223858 14 0.5V11.5L13.9902 11.6006C13.9503 11.7961 13.7961 11.9503 13.6006 11.9902L13.5 12H0.5L0.399414 11.9902C0.203918 11.9503 0.0496648 11.7961 0.00976562 11.6006L0 11.5V0.5C1.28852e-07 0.223858 0.223858 1.20798e-08 0.5 0H13.5ZM1 11H13V3H1V11ZM1.5 1C1.22386 1 1 1.22386 1 1.5C1 1.77614 1.22386 2 1.5 2C1.77614 2 2 1.77614 2 1.5C2 1.22386 1.77614 1 1.5 1ZM3.5 1C3.22386 1 3 1.22386 3 1.5C3 1.77614 3.22386 2 3.5 2C3.77614 2 4 1.77614 4 1.5C4 1.22386 3.77614 1 3.5 1ZM5.5 1C5.22386 1 5 1.22386 5 1.5C5 1.77614 5.22386 2 5.5 2C5.77614 2 6 1.77614 6 1.5C6 1.22386 5.77614 1 5.5 1Z" fill="currentColor"/></svg>`
+const EYE_ICON = `<svg width="14" height="14" viewBox="0 0 11.2368 13.9999" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0.659982 0.615712C0.278813 0.639535 -0.013819 0.962974 0.000504064 1.34462L0.434194 12.9005C0.447931 13.2665 0.740084 13.5608 1.106 13.5773L10.5014 13.9992C10.5119 13.9997 10.5224 13.9999 10.533 13.9999C10.9217 13.9999 11.2368 13.6848 11.2368 13.2961V0.703904C11.2368 0.689258 11.2364 0.674615 11.2355 0.659997C11.2112 0.272012 10.877 -0.0228544 10.4891 0.00139464L9.71642 0.0497456L9.77284 1.6653C9.77487 1.72325 9.72953 1.77187 9.67157 1.7739C9.64676 1.77476 9.62244 1.76681 9.60293 1.75144L9.08239 1.34138L8.46609 1.80888C8.41989 1.84393 8.35402 1.83489 8.31898 1.78869C8.30422 1.76924 8.29671 1.74526 8.29772 1.72087L8.36369 0.134291L0.659982 0.615712ZM8.66356 5.36294C8.41593 5.5553 6.57131 5.68655 6.57131 5.4127C6.6103 4.36774 6.14247 4.32193 5.88256 4.32193C5.63565 4.32193 5.2198 4.39657 5.2198 4.95637C5.2198 5.52683 5.82752 5.84888 6.54082 6.22689C7.55413 6.76387 8.78051 7.41377 8.78051 9.04913C8.78051 10.6166 7.50697 11.4824 5.88256 11.4824C4.20616 11.4824 2.74118 10.8042 2.90663 8.45275C2.97161 8.17663 5.10284 8.24225 5.10284 8.45275C5.07685 9.42307 5.29777 9.70845 5.85657 9.70845C6.28541 9.70845 6.48034 9.47209 6.48034 9.07401C6.48034 8.47157 5.84715 8.11607 5.11874 7.7071C4.13246 7.15336 2.97161 6.50161 2.97161 5.00613C2.97161 3.51333 3.99824 2.51813 5.83058 2.51813C7.66292 2.51813 8.66356 3.49808 8.66356 5.36294Z" fill="currentColor"/></svg>`
 const COPY_PROMPT_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>`
+const CHEVRON_PATH = `M0.853553 0.146447C0.658291 -0.0488155 0.341709 -0.0488155 0.146447 0.146447C-0.0488155 0.341709 -0.0488155 0.658291 0.146447 0.853553L3.64645 4.35355C3.84171 4.54882 4.15829 4.54882 4.35355 4.35355L7.85355 0.853554C8.04882 0.658292 8.04882 0.341709 7.85355 0.146447C7.65829 -0.0488153 7.34171 -0.0488153 7.14645 0.146447L4 3.29289L0.853553 0.146447Z`
+const CHEVRON_DOWN_ICON = `<svg width="14" height="14" viewBox="-3 -4.75 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="${CHEVRON_PATH}" fill="currentColor"/></svg>`
+const CHEVRON_LEFT_ICON = `<svg width="14" height="14" viewBox="-3 -4.75 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(90deg)"><path d="${CHEVRON_PATH}" fill="currentColor"/></svg>`
+const CLOSE_ICON = `<svg width="14" height="14" viewBox="-2 -2 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9.14645 0.146447C9.34171 -0.0488153 9.65821 -0.0488153 9.85348 0.146447C10.0487 0.341712 10.0487 0.658228 9.85348 0.853478L5.70699 4.99996L9.85348 9.14645C10.0487 9.34171 10.0487 9.65823 9.85348 9.85348C9.65823 10.0487 9.34171 10.0487 9.14645 9.85348L4.99996 5.70699L0.853478 9.85348C0.658228 10.0487 0.341712 10.0487 0.146447 9.85348C-0.0488153 9.65821 -0.0488153 9.34171 0.146447 9.14645L4.29293 4.99996L0.146447 0.853478C-0.0488155 0.658216 -0.0488155 0.341709 0.146447 0.146447C0.341709 -0.0488155 0.658216 -0.0488155 0.853478 0.146447L4.99996 4.29293L9.14645 0.146447Z" fill="currentColor"/></svg>`
 
 // ─── Stylesheet (injected into the shadow root) ────────────────────────────
 const STYLES = /* css */ `
@@ -26,6 +25,70 @@ const STYLES = /* css */ `
     all: initial;
     display: block;
     pointer-events: none;
+
+    /* ── Storybook design tokens ── */
+    --sb-color-brand: #FF4785;
+    --sb-color-secondary: #006DEB;
+    --sb-fgcolor-default: #2E3338;
+    --sb-fgcolor-muted: #5C6570;
+    --sb-fgcolor-accent: #006DEB;
+    --sb-fgcolor-inverse: #FFFFFF;
+    --sb-fgcolor-positive: #427C27;
+    --sb-fgcolor-warning: #7A4100;
+    --sb-fgcolor-negative: #C23400;
+    --sb-bgcolor-app: #F6F9FC;
+    --sb-bgcolor-default: #FFFFFF;
+    --sb-bgcolor-muted: #F6F9FC;
+    --sb-bgcolor-hover: #DBECFF;
+    --sb-bgcolor-positive: #F1FFEB;
+    --sb-bgcolor-warning: #FFF7EB;
+    --sb-bgcolor-negative: #FFF0EB;
+    --sb-bordercolor-default: hsl(212 50% 30% / 0.15);
+    --sb-bordercolor-muted: hsl(0 0% 0% / 0.1);
+    --sb-bordercolor-positive: #BFE7AC;
+    --sb-font-sans: "Nunito Sans", -apple-system, ".SFNSText-Regular", "San Francisco", BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --sb-font-mono: ui-monospace, Menlo, Monaco, "Roboto Mono", "Oxygen Mono", "Ubuntu Monospace", "Source Code Pro", "Droid Sans Mono", "Courier New", monospace;
+    --sb-font-size-s1: 12px;
+    --sb-font-size-s2: 14px;
+    --sb-font-size-m1: 20px;
+    --sb-border-radius: 4px;
+
+    /* ── Syntax highlight tokens ── */
+    --sb-syntax-string: rgb(196, 26, 22);
+    --sb-syntax-number: rgb(28, 0, 207);
+    --sb-syntax-boolean: rgb(28, 0, 207);
+    --sb-syntax-function: rgb(13, 34, 170);
+    --sb-syntax-key: rgb(136, 19, 145);
+    --sb-syntax-null: rgb(128, 128, 128);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :host {
+      --sb-color-secondary: #479DFF;
+      --sb-fgcolor-default: #C9CCCF;
+      --sb-fgcolor-muted: #95999D;
+      --sb-fgcolor-accent: #479DFF;
+      --sb-fgcolor-inverse: #1B1C1D;
+      --sb-fgcolor-positive: #86CE64;
+      --sb-fgcolor-warning: #FFAD33;
+      --sb-fgcolor-negative: #FF6933;
+      --sb-bgcolor-app: #1B1C1D;
+      --sb-bgcolor-default: #222325;
+      --sb-bgcolor-muted: #1B1C1D;
+      --sb-bgcolor-hover: #233952;
+      --sb-bgcolor-positive: transparent;
+      --sb-bgcolor-warning: transparent;
+      --sb-bgcolor-negative: transparent;
+      --sb-bordercolor-default: hsl(0 0% 100% / 0.1);
+      --sb-bordercolor-muted: hsl(0 0% 100% / 0.5);
+      --sb-bordercolor-positive: hsl(101 52% 64% / 0.15);
+      --sb-syntax-string: rgb(233, 63, 59);
+      --sb-syntax-number: hsl(252, 100%, 75%);
+      --sb-syntax-boolean: hsl(252, 100%, 75%);
+      --sb-syntax-function: rgb(85, 106, 242);
+      --sb-syntax-key: rgb(227, 110, 236);
+      --sb-syntax-null: rgb(127, 127, 127);
+    }
   }
 
   *, *::before, *::after {
@@ -37,20 +100,15 @@ const STYLES = /* css */ `
   .panel {
     position: fixed;
     pointer-events: auto;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 13px;
-    color: #e2e8f0;
+    font-family: var(--sb-font-sans);
+    font-size: var(--sb-font-size-s1);
+    color: var(--sb-fgcolor-default);
     line-height: 1.4;
-    background: rgba(15, 17, 22, 0.85);
-    backdrop-filter: blur(32px) saturate(180%);
-    -webkit-backdrop-filter: blur(32px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    background: var(--sb-bgcolor-default);
+    border-radius: 8px;
     width: 400px;
     max-width: 400px;
-    box-shadow:
-      0 24px 48px rgba(0, 0, 0, 0.45),
-      0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   }
 
   .panel-body {
@@ -71,8 +129,8 @@ const STYLES = /* css */ `
     align-items: center;
     flex-wrap: nowrap;
     gap: 2px;
-    font-size: 12px;
-    color: #8892a4;
+    font-size: var(--sb-font-size-s1);
+    color: var(--sb-fgcolor-muted);
     overflow: hidden;
     white-space: nowrap;
     font-family: inherit;
@@ -83,12 +141,12 @@ const STYLES = /* css */ `
     flex-shrink: 0;
   }
   .breadcrumb .sep {
-    color: #5a6478;
+    color: var(--sb-fgcolor-muted);
     font-size: 10px;
     margin: 0 1px;
   }
   .breadcrumb .file {
-    color: #a0aec0;
+    color: var(--sb-fgcolor-muted);
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -103,23 +161,23 @@ const STYLES = /* css */ `
     padding: 0;
     background: none;
     border: none;
-    color: #5a6478;
+    color: var(--sb-fgcolor-muted);
     cursor: pointer;
     transition: all 0.15s ease;
     opacity: 0;
     pointer-events: none;
-    border-radius: 3px;
+    border-radius: var(--sb-border-radius);
   }
   .breadcrumb:hover .breadcrumb-copy {
     opacity: 1;
     pointer-events: auto;
   }
   .breadcrumb-copy:hover {
-    color: #e2e8f0;
-    background: rgba(255,255,255,0.08);
+    color: var(--sb-fgcolor-default);
+    background: var(--sb-bgcolor-hover);
   }
   .breadcrumb-copy.copied {
-    color: #a5d6a7;
+    color: var(--sb-fgcolor-positive);
   }
 
   /* ── Header row ────────────────────────── */
@@ -131,9 +189,9 @@ const STYLES = /* css */ `
     margin-bottom: 16px;
   }
   .component-name {
-    font-size: 24px;
+    font-size: var(--sb-font-size-s2);
     font-weight: 700;
-    color: #f1f5f9;
+    color: var(--sb-fgcolor-default);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -147,86 +205,30 @@ const STYLES = /* css */ `
     gap: 6px;
     flex-shrink: 0;
   }
-  .action-btn-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
+
   .icon-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: #e2e8f0;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: inherit;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  }
-  .icon-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
-  }
-  .icon-btn[disabled] {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-  .icon-btn[disabled]:hover {
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
-  }
-  .icon-btn.sb-btn {
-    color: #FF4785;
-  }
-  .icon-btn.sb-btn:hover:not([disabled]) {
-    background: rgba(255, 71, 133, 0.1);
-  }
-  .icon-btn.view-btn {
-    color: #3b82f6;
-  }
-  .icon-btn.view-btn:hover:not([disabled]) {
-    background: rgba(59, 130, 246, 0.1);
-  }
-  .icon-btn.copy-prompt-btn {
-    color: #a78bfa;
-  }
-  .icon-btn.copy-prompt-btn:hover:not([disabled]) {
-    background: rgba(167, 139, 250, 0.1);
-  }
-  .icon-btn.copy-prompt-btn.copied {
-    color: #a5d6a7;
-  }
-  .action-label {
-    font-size: 9px;
-    color: #cbd5e1;
-    text-align: center;
-    line-height: 1.1;
-    white-space: nowrap;
-  }
-  .close-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     background: transparent;
     border: none;
-    border-radius: 4px;
-    color: #64748b;
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-muted);
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
-    flex-shrink: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+    font-family: inherit;
   }
-  .close-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #e2e8f0;
+  .icon-btn:hover {
+    background: var(--sb-bgcolor-hover);
+    color: var(--sb-fgcolor-default);
+  }
+
+
+  .icon-btn.copy-prompt-btn.copied {
+    color: var(--sb-fgcolor-positive);
   }
 
   /* ── Properties section ────────────────── */
@@ -240,32 +242,17 @@ const STYLES = /* css */ `
     margin-bottom: 10px;
   }
   .props-title {
-    font-weight: 600;
-    font-size: 14px;
-    color: #cbd5e1;
+    font-weight: 700;
+    font-size: var(--sb-font-size-s2);
+    color: var(--sb-fgcolor-default);
     display: flex;
     align-items: center;
     gap: 6px;
   }
   .props-count {
     font-weight: 400;
-    color: #64748b;
-    font-size: 12px;
-  }
-  .collapse-btn {
-    background: none;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    color: #94a3b8;
-    cursor: pointer;
-    padding: 3px 10px;
-    font-size: 11px;
-    transition: all 0.15s ease;
-    font-family: inherit;
-  }
-  .collapse-btn:hover {
-    background: rgba(255,255,255,0.06);
-    color: #e2e8f0;
+    color: var(--sb-fgcolor-muted);
+    font-size: var(--sb-font-size-s2);
   }
 
   /* ── Props grid (scrollable 2-column table) ─── */
@@ -275,9 +262,9 @@ const STYLES = /* css */ `
     gap: 1px;
     max-height: 200px;
     overflow-y: auto;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--sb-border-radius);
+    background: var(--sb-bgcolor-app);
+    border: 1px solid var(--sb-bordercolor-default);
   }
   .props-table::-webkit-scrollbar {
     width: 4px;
@@ -286,22 +273,22 @@ const STYLES = /* css */ `
     background: transparent;
   }
   .props-table::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
+    background: var(--sb-bordercolor-muted);
     border-radius: 2px;
   }
   .prop-key {
     padding: 6px 12px;
-    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
-    font-size: 13px;
-    color: #94a3b8;
+    font-family: var(--sb-font-mono);
+    font-size: var(--sb-font-size-s1);
+    color: var(--sb-fgcolor-muted);
     white-space: nowrap;
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--sb-bgcolor-app);
     display: flex;
     align-items: center;
   }
   .prop-val {
     padding: 5px 8px;
-    background: rgba(0, 0, 0, 0.08);
+    background: var(--sb-bgcolor-default);
     display: flex;
     align-items: center;
     gap: 4px;
@@ -317,12 +304,12 @@ const STYLES = /* css */ `
     width: 22px;
     height: 22px;
     padding: 0;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 4px;
-    color: #64748b;
+    background: transparent;
+    border: none;
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-muted);
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease;
     opacity: 0;
     pointer-events: none;
   }
@@ -331,21 +318,20 @@ const STYLES = /* css */ `
     pointer-events: auto;
   }
   .prop-copy-btn:hover {
-    background: rgba(255,255,255,0.14);
-    color: #e2e8f0;
+    background: var(--sb-bgcolor-hover);
+    color: var(--sb-fgcolor-default);
   }
   .prop-copy-btn.copied {
-    color: #a5d6a7;
-    border-color: rgba(165, 214, 167, 0.3);
+    color: var(--sb-fgcolor-positive);
   }
 
   /* ── Value badge (the colored chip) ──── */
   .badge {
     display: inline-block;
-    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
-    font-size: 12px;
+    font-family: var(--sb-font-mono);
+    font-size: var(--sb-font-size-s1);
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--sb-border-radius);
     white-space: nowrap;
     max-width: 100%;
     overflow: hidden;
@@ -354,41 +340,41 @@ const STYLES = /* css */ `
     vertical-align: middle;
   }
   .badge.str {
-    background: rgba(26, 58, 42, 0.7);
-    color: #a5d6a7;
+    color: var(--sb-syntax-string);
+    background: color-mix(in srgb, var(--sb-syntax-string) 12%, var(--sb-bgcolor-muted));
   }
   .badge.num {
-    background: rgba(26, 42, 58, 0.7);
-    color: #90caf9;
+    color: var(--sb-syntax-number);
+    background: color-mix(in srgb, var(--sb-syntax-number) 12%, var(--sb-bgcolor-muted));
   }
   .badge.bool {
-    background: rgba(42, 26, 58, 0.7);
-    color: #ce93d8;
+    color: var(--sb-syntax-boolean);
+    background: color-mix(in srgb, var(--sb-syntax-boolean) 12%, var(--sb-bgcolor-muted));
   }
   .badge.fn {
-    background: rgba(58, 42, 26, 0.7);
-    color: #fbbf24;
+    color: var(--sb-syntax-function);
+    background: color-mix(in srgb, var(--sb-syntax-function) 12%, var(--sb-bgcolor-muted));
   }
   .badge.jsx {
-    background: rgba(30, 58, 95, 0.7);
-    color: #93c5fd;
+    color: var(--sb-syntax-function);
+    background: color-mix(in srgb, var(--sb-syntax-function) 12%, var(--sb-bgcolor-muted));
   }
   .badge.slot {
-    background: rgba(6, 78, 59, 0.7);
-    color: #6ee7b7;
+    color: var(--sb-fgcolor-positive);
+    background: var(--sb-bgcolor-positive);
   }
   .badge.obj {
-    background: rgba(139, 92, 246, 0.15);
-    color: #c4b5fd;
+    color: var(--sb-syntax-key);
+    background: color-mix(in srgb, var(--sb-syntax-key) 12%, var(--sb-bgcolor-muted));
     cursor: pointer;
     transition: background 0.15s ease;
   }
   .badge.obj:hover {
-    background: rgba(139, 92, 246, 0.25);
+    background: color-mix(in srgb, var(--sb-syntax-key) 20%, var(--sb-bgcolor-muted));
   }
   .badge.null {
-    background: rgba(255, 255, 255, 0.04);
-    color: #78909c;
+    color: var(--sb-syntax-null);
+    background: var(--sb-bgcolor-muted);
     font-style: italic;
   }
 
@@ -397,15 +383,13 @@ const STYLES = /* css */ `
     position: fixed;
     min-width: 260px;
     max-width: 360px;
-    background: rgba(15, 17, 22, 0.8);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 10px;
+    background: var(--sb-bgcolor-default);
+    border: 1px solid var(--sb-bordercolor-default);
+    border-radius: var(--sb-border-radius);
     z-index: 100;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.55);
-    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
-    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    font-family: var(--sb-font-mono);
+    font-size: var(--sb-font-size-s1);
     line-height: 1.6;
     overflow: hidden;
     pointer-events: auto;
@@ -415,35 +399,35 @@ const STYLES = /* css */ `
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--sb-bordercolor-default);
   }
   .obj-popover-header .obj-title {
-    font-weight: 600;
-    color: #e2e8f0;
-    font-size: 13px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 700;
+    color: var(--sb-fgcolor-default);
+    font-size: var(--sb-font-size-s2);
+    font-family: var(--sb-font-sans);
   }
   .copy-btn {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 5px;
-    color: #94a3b8;
+    background: var(--sb-bgcolor-muted);
+    border: 1px solid var(--sb-bordercolor-default);
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-muted);
     cursor: pointer;
     padding: 3px 8px;
-    font-size: 11px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    transition: all 0.15s ease;
+    font-size: var(--sb-font-size-s1);
+    font-family: var(--sb-font-sans);
+    transition: background 0.15s ease, color 0.15s ease;
   }
   .copy-btn:hover {
-    background: rgba(255,255,255,0.1);
-    color: #e2e8f0;
+    background: var(--sb-bgcolor-hover);
+    color: var(--sb-fgcolor-default);
   }
   .copy-btn.copied {
-    color: #a5d6a7;
-    border-color: rgba(165, 214, 167, 0.3);
+    color: var(--sb-fgcolor-positive);
+    border-color: var(--sb-bordercolor-positive);
   }
   .obj-popover-body {
     max-height: 260px;
@@ -454,34 +438,28 @@ const STYLES = /* css */ `
     width: 4px;
   }
   .obj-popover-body::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
+    background: var(--sb-bordercolor-muted);
     border-radius: 2px;
   }
-  .obj-tree-key { color: #93c5fd; }
-  .obj-tree-str { color: #a5d6a7; }
-  .obj-tree-num { color: #90caf9; }
-  .obj-tree-bool { color: #ce93d8; }
-  .obj-tree-null { color: #78909c; font-style: italic; }
-  .obj-tree-punct { color: #94a3b8; }
+  .obj-tree-key { color: var(--sb-syntax-key); }
+  .obj-tree-str { color: var(--sb-syntax-string); }
+  .obj-tree-num { color: var(--sb-syntax-number); }
+  .obj-tree-bool { color: var(--sb-syntax-boolean); }
+  .obj-tree-null { color: var(--sb-syntax-null); font-style: italic; }
+  .obj-tree-punct { color: var(--sb-fgcolor-muted); }
   .obj-tree-toggle {
     cursor: pointer;
     user-select: none;
   }
   .obj-tree-toggle:hover {
-    color: #bfdbfe;
+    color: var(--sb-fgcolor-default);
   }
 
-  /* ── Divider ───────────────────────────── */
-  .divider {
-    border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    margin: 14px 0;
-  }
 
   /* ── Recording warning ─────────────────── */
   .recording-warning {
-    color: #f87171;
-    font-size: 11px;
+    color: var(--sb-fgcolor-negative);
+    font-size: var(--sb-font-size-s1);
     margin-bottom: 10px;
     display: flex;
     align-items: center;
@@ -491,7 +469,7 @@ const STYLES = /* css */ `
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #ef4444;
+    background: var(--sb-fgcolor-negative);
     flex-shrink: 0;
     animation: blink 1s step-start infinite;
   }
@@ -501,9 +479,9 @@ const STYLES = /* css */ `
 
   /* ── Create Story section ──────────────── */
   .create-story-title {
-    font-weight: 600;
-    font-size: 14px;
-    color: #cbd5e1;
+    font-weight: 700;
+    font-size: var(--sb-font-size-s2);
+    color: var(--sb-fgcolor-default);
     margin-bottom: 12px;
   }
   .story-input-wrapper {
@@ -513,35 +491,35 @@ const STYLES = /* css */ `
   .story-input {
     width: 100%;
     padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    color: #e2e8f0;
-    font-size: 14px;
+    background: var(--sb-bgcolor-muted);
+    border: 1px solid var(--sb-bordercolor-default);
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-default);
+    font-size: var(--sb-font-size-s2);
     font-family: inherit;
     outline: none;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .story-input:focus {
-    border-color: rgba(168, 85, 247, 0.5);
-    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.15);
+    border-color: var(--sb-color-brand);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sb-color-brand) 20%, transparent);
   }
   .story-input::placeholder {
-    color: #475569;
+    color: var(--sb-fgcolor-muted);
   }
   .story-label {
     position: absolute;
     top: -9px;
     left: 10px;
-    background: rgba(15, 17, 22, 0.85);
+    background: var(--sb-bgcolor-default);
     padding: 1px 6px;
-    font-size: 11px;
-    color: #a78bfa;
+    font-size: var(--sb-font-size-s1);
+    color: var(--sb-color-secondary);
     letter-spacing: 0.02em;
     line-height: 1.3;
     pointer-events: none;
     z-index: 1;
-    border-radius: 2px;
+    border-radius: var(--sb-border-radius);
   }
 
   .btn-row {
@@ -552,11 +530,11 @@ const STYLES = /* css */ `
     flex: 1;
     padding: 10px 14px;
     border: none;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
+    border-radius: var(--sb-border-radius);
+    font-size: var(--sb-font-size-s1);
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     font-family: inherit;
   }
   .btn:disabled {
@@ -564,32 +542,39 @@ const STYLES = /* css */ `
     cursor: not-allowed;
   }
   .btn-save {
-    background: linear-gradient(135deg, #FF4785, #e73370);
-    color: white;
+    background: var(--sb-color-secondary);
+    color: var(--sb-fgcolor-inverse);
   }
   .btn-save:hover:not(:disabled) {
-    background: linear-gradient(135deg, #ff5a94, #FF4785);
-    box-shadow: 0 4px 12px rgba(255, 71, 133, 0.3);
+    background: color-mix(in srgb, white 12%, var(--sb-color-secondary));
+  }
+  .btn-save:focus-visible {
+    outline: 2px solid var(--sb-color-secondary);
+    outline-offset: 2px;
   }
   .btn-save.success {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
+    background: var(--sb-fgcolor-positive);
   }
   .btn-save.error {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
+    background: var(--sb-fgcolor-negative);
   }
   .btn-interactions {
-    background: linear-gradient(135deg, #a855f7, #7c3aed);
-    color: white;
+    background: transparent;
+    border: 1px solid var(--sb-color-secondary);
+    color: var(--sb-color-secondary);
   }
   .btn-interactions:hover:not(:disabled) {
-    background: linear-gradient(135deg, #b87afc, #a855f7);
-    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.3);
+    background: var(--sb-bgcolor-hover);
+  }
+  .btn-interactions:focus-visible {
+    outline: 2px solid var(--sb-color-secondary);
+    outline-offset: 2px;
   }
 
   /* ── Empty state ───────────────────────── */
   .empty-props {
-    color: #475569;
-    font-size: 12px;
+    color: var(--sb-fgcolor-muted);
+    font-size: var(--sb-font-size-s1);
     padding: 4px 0;
     font-style: italic;
   }
@@ -695,8 +680,8 @@ export function createContextMenu(
 
   // Close (×) button — top-right, same row as the breadcrumb
   const closeBtn = document.createElement('button')
-  closeBtn.className = 'close-btn'
-  closeBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`
+  closeBtn.className = 'icon-btn'
+  closeBtn.innerHTML = CLOSE_ICON
   closeBtn.title = 'Close'
   closeBtn.addEventListener('click', () => callbacks.onClose())
 
@@ -717,36 +702,24 @@ export function createContextMenu(
   actions.className = 'header-actions'
 
   // 1. Open Code button
-  const openCodeWrap = document.createElement('div')
-  openCodeWrap.className = 'action-btn-wrap'
   const openCodeBtn = document.createElement('button')
   openCodeBtn.className = 'icon-btn'
   openCodeBtn.id = 'open-component-btn'
   openCodeBtn.innerHTML = CODE_ICON
-  openCodeBtn.title = 'Open component file in editor'
+  openCodeBtn.title = 'Open component in editor'
   openCodeBtn.addEventListener('click', () =>
     callbacks.openInEditor(meta.filePath),
   )
   callbacks.isOpenInEditorAvailable().then((avail) => {
-    if (!avail) openCodeWrap.style.display = 'none'
+    if (!avail) openCodeBtn.style.display = 'none'
   })
-  const openCodeLabel = document.createElement('span')
-  openCodeLabel.className = 'action-label'
-  openCodeLabel.textContent = 'Open Code'
-  openCodeWrap.appendChild(openCodeBtn)
-  openCodeWrap.appendChild(openCodeLabel)
-  actions.appendChild(openCodeWrap)
+  actions.appendChild(openCodeBtn)
 
   // 2. Copy Prompt button — copies LLM-friendly context about this component
-  const copyPromptWrap = document.createElement('div')
-  copyPromptWrap.className = 'action-btn-wrap'
   const copyPromptBtn = document.createElement('button')
   copyPromptBtn.className = 'icon-btn copy-prompt-btn'
   copyPromptBtn.innerHTML = COPY_PROMPT_ICON
   copyPromptBtn.title = 'Copy component context as a prompt for an LLM'
-  const copyPromptLabel = document.createElement('span')
-  copyPromptLabel.className = 'action-label'
-  copyPromptLabel.textContent = 'Copy Prompt'
   copyPromptBtn.addEventListener('click', () => {
     const prompt = buildLLMPrompt(
       instance,
@@ -756,81 +729,48 @@ export function createContextMenu(
     navigator.clipboard.writeText(prompt).then(() => {
       copyPromptBtn.classList.add('copied')
       copyPromptBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
-      copyPromptLabel.textContent = 'Copied!'
       setTimeout(() => {
         if (copyPromptBtn.isConnected) {
           copyPromptBtn.classList.remove('copied')
           copyPromptBtn.innerHTML = COPY_PROMPT_ICON
-          copyPromptLabel.textContent = 'Copy Prompt'
         }
       }, 1500)
     })
   })
-  copyPromptWrap.appendChild(copyPromptBtn)
-  copyPromptWrap.appendChild(copyPromptLabel)
-  actions.appendChild(copyPromptWrap)
+  actions.appendChild(copyPromptBtn)
 
-  // 3. Open Story button (pink Storybook icon)
-  const storyBtnWrap = document.createElement('div')
-  storyBtnWrap.className = 'action-btn-wrap'
-  let goToStoryBtn = document.createElement('button')
-  goToStoryBtn.className = 'icon-btn sb-btn'
-  goToStoryBtn.innerHTML = SB_ICON
-  goToStoryBtn.title = storyInfo.hasStory
-    ? 'Open story file in editor'
-    : 'No story file yet'
-  let storyBtnLabel = document.createElement('span')
-  storyBtnLabel.className = 'action-label'
-  storyBtnLabel.textContent = storyInfo.hasStory ? 'Open Story' : 'No Story'
-  if (!storyInfo.hasStory) {
-    goToStoryBtn.setAttribute('disabled', '')
-  } else {
+  // 3. Open Story button (pink Storybook icon) — only when story exists
+  let goToStoryBtn: HTMLButtonElement | undefined
+  if (storyInfo.hasStory) {
+    goToStoryBtn = document.createElement('button')
+    goToStoryBtn.className = 'icon-btn'
+    goToStoryBtn.innerHTML = CODE_ICON
+    goToStoryBtn.title = 'Open story in editor'
     goToStoryBtn.addEventListener('click', () =>
       callbacks.openInEditor(storyInfo.storyPath!),
     )
+    actions.appendChild(goToStoryBtn)
   }
-  storyBtnWrap.appendChild(goToStoryBtn)
-  storyBtnWrap.appendChild(storyBtnLabel)
-  actions.appendChild(storyBtnWrap)
 
-  // 4. View Story in Storybook panel button
-  let viewStoryWrap: HTMLDivElement | undefined
+  // 4. View Story in Storybook panel button — only when story exists
   let viewStoryBtn: HTMLButtonElement | undefined
-  let viewStoryLabel: HTMLSpanElement | undefined
-  if (callbacks.visitStory) {
-    viewStoryWrap = document.createElement('div')
-    viewStoryWrap.className = 'action-btn-wrap'
+  if (callbacks.visitStory && storyInfo.hasStory) {
     viewStoryBtn = document.createElement('button')
-    viewStoryBtn.className = 'icon-btn view-btn'
+    viewStoryBtn.className = 'icon-btn'
     viewStoryBtn.innerHTML = EYE_ICON
-    viewStoryBtn.title = storyInfo.hasStory
-      ? 'View story in Storybook panel'
-      : 'No story to view'
-    viewStoryLabel = document.createElement('span')
-    viewStoryLabel.className = 'action-label'
-    viewStoryLabel.textContent = storyInfo.hasStory ? 'View Story' : 'No Story'
-    if (!storyInfo.hasStory) {
-      viewStoryBtn.setAttribute('disabled', '')
-    } else {
-      const relPath = meta.relativeFilePath || meta.filePath
-      const visitCb = callbacks.visitStory
-      viewStoryBtn.addEventListener('click', () => {
-        visitCb(relPath)
-        callbacks.onClose()
-      })
-    }
-    viewStoryWrap.appendChild(viewStoryBtn)
-    viewStoryWrap.appendChild(viewStoryLabel)
-    actions.appendChild(viewStoryWrap)
+    viewStoryBtn.title = 'View story in Storybook'
+    const relPath = meta.relativeFilePath || meta.filePath
+    const visitCb = callbacks.visitStory
+    viewStoryBtn.addEventListener('click', () => {
+      visitCb(relPath)
+      callbacks.onClose()
+    })
+    actions.appendChild(viewStoryBtn)
   }
 
   header.appendChild(actions)
   body.appendChild(header)
 
-  // Divider between header and props
-  const headerDivider = document.createElement('hr')
-  headerDivider.className = 'divider'
-  body.appendChild(headerDivider)
 
   // ── Properties section ────────────────────────────────────────────────
   let propsCollapsed = false
@@ -847,8 +787,8 @@ export function createContextMenu(
   propsHeaderRow.appendChild(propsTitle)
 
   const collapseBtn = document.createElement('button')
-  collapseBtn.className = 'collapse-btn'
-  collapseBtn.textContent = 'Collapse'
+  collapseBtn.className = 'icon-btn'
+  collapseBtn.innerHTML = CHEVRON_DOWN_ICON
   collapseBtn.title = 'Toggle props visibility'
   if (propEntries.length > 0) {
     propsHeaderRow.appendChild(collapseBtn)
@@ -1040,15 +980,11 @@ export function createContextMenu(
   collapseBtn.addEventListener('click', () => {
     propsCollapsed = !propsCollapsed
     propsTable.style.display = propsCollapsed ? 'none' : ''
-    collapseBtn.textContent = propsCollapsed ? 'Expand' : 'Collapse'
+    collapseBtn.innerHTML = propsCollapsed ? CHEVRON_LEFT_ICON : CHEVRON_DOWN_ICON
   })
 
   body.appendChild(propsSection)
 
-  // Divider
-  const divider = document.createElement('hr')
-  divider.className = 'divider'
-  body.appendChild(divider)
 
   // Recording warning
   if (recording) {
@@ -1191,28 +1127,30 @@ export function createContextMenu(
       }, 2000)
     },
     enableGoToStory(storyPath) {
-      const newBtn = document.createElement('button')
-      newBtn.className = 'icon-btn sb-btn'
-      newBtn.innerHTML = SB_ICON
-      newBtn.addEventListener('click', () => callbacks.openInEditor(storyPath))
-      storyBtnWrap.replaceChild(newBtn, goToStoryBtn)
-      goToStoryBtn = newBtn
-      storyBtnLabel.textContent = 'Open Story'
+      if (goToStoryBtn) {
+        goToStoryBtn.onclick = () => callbacks.openInEditor(storyPath)
+        return
+      }
+      goToStoryBtn = document.createElement('button')
+      goToStoryBtn.className = 'icon-btn'
+      goToStoryBtn.innerHTML = CODE_ICON
+      goToStoryBtn.title = 'Open story in editor'
+      goToStoryBtn.addEventListener('click', () => callbacks.openInEditor(storyPath))
+      actions.appendChild(goToStoryBtn)
     },
     enableViewStory() {
-      if (!viewStoryBtn || !viewStoryLabel || !callbacks.visitStory) return
+      if (viewStoryBtn || !callbacks.visitStory) return
+      viewStoryBtn = document.createElement('button')
+      viewStoryBtn.className = 'icon-btn'
+      viewStoryBtn.innerHTML = EYE_ICON
+      viewStoryBtn.title = 'View story in Storybook'
       const relPath = meta.relativeFilePath || meta.filePath
       const visitCb = callbacks.visitStory
-      const newBtn = document.createElement('button')
-      newBtn.className = 'icon-btn view-btn'
-      newBtn.innerHTML = EYE_ICON
-      newBtn.addEventListener('click', () => {
+      viewStoryBtn.addEventListener('click', () => {
         visitCb(relPath)
         callbacks.onClose()
       })
-      viewStoryWrap!.replaceChild(newBtn, viewStoryBtn)
-      viewStoryBtn = newBtn
-      viewStoryLabel.textContent = 'View Story'
+      actions.appendChild(viewStoryBtn)
     },
     destroy() {
       dismissPopover()

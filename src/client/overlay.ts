@@ -71,15 +71,17 @@ const OVERLAY_Z_INDEX = {
   menu: 2147483647,
 } as const
 
-// Colors for highlights - simplified color scheme
+// Colors for highlights — hardcoded hex because these are inline styles on the
+// host page DOM where CSS custom properties aren't available.
+// Values match SB design tokens: #006DEB = --sb-color-secondary (light), #FF4785 = --sb-color-brand
 const COLORS = {
-  // Blue for non-hovered elements when Option is held
+  // Blue for non-hovered elements when Option is held (--sb-color-secondary)
   other: { stroke: '#006DEB', bg: 'rgba(0, 109, 235, 0.05)' },
-  // Pink for hovered element (solid stroke)
+  // Pink for hovered element (--sb-color-brand)
   hovered: { stroke: '#FF4785', bg: 'rgba(255, 71, 133, 0.05)' },
-  // Same type means same component instance as the one you're hovering
+  // Same type means same component instance as the one you're hovering (--sb-color-brand)
   sameType: { stroke: '#FF4785', bg: 'rgba(255, 71, 133, 0.05)', dashed: true },
-  // Pink for selected element (higher opacity)
+  // Pink for selected element (--sb-color-brand, higher opacity)
   selected: { stroke: '#FF4785', bg: 'rgba(255, 71, 133, 0.2)' },
 }
 

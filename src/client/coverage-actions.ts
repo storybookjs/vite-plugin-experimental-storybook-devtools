@@ -27,7 +27,9 @@ export function showCoverageHighlights(
   clearCoverageHighlights()
   if (!componentRegistry) return
 
-  const color = hasStory ? '#22c55e' : '#ef4444'
+  // Hardcoded hex — inline styles on the host page, CSS vars not available.
+  // #86CE64 = --sb-fgcolor-positive (dark), #FF6933 = --sb-fgcolor-negative (dark)
+  const color = hasStory ? '#86CE64' : '#FF6933'
 
   for (const instance of componentRegistry.values()) {
     if (
