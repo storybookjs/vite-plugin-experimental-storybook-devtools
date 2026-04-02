@@ -7,10 +7,11 @@
 import { esc } from './prop-utils'
 
 /** Turn a file path into breadcrumb segments. */
-export function toBreadcrumbs(relPath: string): string {
+export function toBreadcrumbs(relPath: string | undefined): string {
+  if (!relPath) return ''
   const parts = relPath.replace(/\\/g, '/').split('/')
   if (parts.length > 4) {
-    const first = parts[0]
+    const first = parts[0]!
     const last2 = parts.slice(-2)
     return [first, '...', ...last2]
       .map((p, i, arr) =>

@@ -955,7 +955,7 @@ export function createContextMenu(
     })
 
     // Close on click outside
-    const closeHandler = (ev: MouseEvent) => {
+    const closeHandler = (ev: Event) => {
       const path = ev.composedPath()
       if (!path.includes(popover) && ev.target !== badge) {
         popover.remove()

@@ -38,7 +38,8 @@ export function getHTMLPreview(element: HTMLElement): string {
   // Collect and prioritize attributes
   const attrMap = new Map<string, string>()
   for (let i = 0; i < attrs.length; i++) {
-    const attr = attrs[i]
+    const attr = attrs.item(i)
+    if (!attr) continue
     // Skip internal/framework attributes
     if (
       attr.name.startsWith('data-storybook') ||
@@ -124,7 +125,7 @@ export function buildLLMPrompt(
   for (const [key, value] of Object.entries(displayProps)) {
     if (value && typeof value === 'object') {
       const v = value as Record<string, unknown>
-      if (v.__isFunction || v.__isJSX || v.__isVueSlot) continue
+      if (v['__isFunction'] || v['__isJSX'] || v['__isVueSlot']) continue
     }
     if (typeof value === 'function') continue
     meaningfulProps[key] = value

@@ -176,13 +176,16 @@ function autoInitRpc() {
 function serializeInstance(
   instance: ComponentInstance,
 ): SerializedRegistryInstance {
-  return {
+  const result: SerializedRegistryInstance = {
     id: instance.id,
     meta: { ...instance.meta },
     props: instance.props,
-    serializedProps: instance.serializedProps,
     isConnected: instance.element?.isConnected ?? false,
   }
+  if (instance.serializedProps !== undefined) {
+    result.serializedProps = instance.serializedProps
+  }
+  return result
 }
 
 function scheduleRegistryPush() {

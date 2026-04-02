@@ -241,7 +241,7 @@ async function findStoryId(
   }
 
   // Fall back to the first candidate
-  return candidates[0].id
+  return candidates[0]!.id
 }
 
 /**
@@ -601,7 +601,7 @@ function propsFingerprint(props: Record<string, unknown>): string {
   for (const [key, value] of Object.entries(props)) {
     if (value && typeof value === 'object') {
       const v = value as Record<string, unknown>
-      if (v.__isFunction || v.__isJSX) continue
+      if (v['__isFunction'] || v['__isJSX']) continue
     }
     if (typeof value === 'function') continue
     meaningful[key] = value

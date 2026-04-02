@@ -936,7 +936,7 @@ export function createComponentHighlighterPlugin(
                   seen.add(fp)
 
                   // Invoke the create-story handler directly
-                  await ctx.rpc.invokeLocal('component-highlighter:create-story', {
+                  await (ctx.rpc.invokeLocal as any)('component-highlighter:create-story', {
                     meta: inst.meta,
                     props: inst.props,
                     serializedProps: inst.serializedProps,
@@ -1104,7 +1104,6 @@ export function createComponentHighlighterPlugin(
       // Track transformed components for coverage
       if (result) {
         const componentName = path.basename(id, path.extname(id))
-        const isNew = !transformedComponents.has(componentName)
         transformedComponents.set(componentName, id)
 
         // Coverage dashboard auto-refreshes via client-side RPC polling

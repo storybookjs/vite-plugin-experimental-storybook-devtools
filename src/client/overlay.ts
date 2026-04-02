@@ -10,7 +10,7 @@ import {
   startRecording,
   stopRecording,
 } from './interaction-recorder'
-import { createContextMenu, suggestStoryName, type ContextMenuHandle } from './context-menu'
+import { createContextMenu, type ContextMenuHandle } from './context-menu'
 
 /**
  * Wraps an overlay operation in a try-catch so that errors in the
@@ -108,8 +108,6 @@ export function setComponentRegistry(registry: Map<string, ComponentInstance>) {
 }
 
 // escapeHtml moved into context-menu module (Shadow DOM)
-
-// suggestStoryName is imported from './context-menu'
 
 // Check if a component has a story file
 async function checkStoryFile(
@@ -424,103 +422,6 @@ function drawAllHighlightsImpl() {
 
 }
 
-// Create stories for all components that don't have stories
-function createStoriesForComponentsWithoutStories() {
-  if (!componentRegistry) return
-
-  // Get the component registry for import resolution
-  const getRegistry = (
-    window as unknown as {
-      __componentHighlighterGetRegistry?: () => Map<string, string>
-    }
-  ).__componentHighlighterGetRegistry
-  let componentRegistryObj: Record<string, string> = {}
-  if (getRegistry) {
-    const registry = getRegistry()
-    componentRegistryObj = Object.fromEntries(registry)
-  }
-
-  // Track components that already have stories
-  const componentsWithStories = new Set<string>()
-
-  // Find components that have stories
-  for (const instance of componentRegistry.values()) {
-    if (
-      !instance.element.isConnected ||
-      instance.element.nodeType !== Node.ELEMENT_NODE
-    )
-      continue
-    const storyInfo = storyFileCache.get(instance.meta.filePath)
-    if (storyInfo?.hasStory) {
-      componentsWithStories.add(instance.meta.sourceId)
-    }
-  }
-
-  // Find components without stories and create stories for them
-  const componentsProcessed = new Set<string>()
-  const filePathsToInvalidate: string[] = []
-  let storiesCreated = 0
-
-  for (const instance of componentRegistry.values()) {
-    if (
-      !instance.element.isConnected ||
-      instance.element.nodeType !== Node.ELEMENT_NODE
-    )
-      continue
-
-    // Skip if we've already processed this component type
-    if (componentsProcessed.has(instance.meta.sourceId)) continue
-
-    // Skip if this component already has stories
-    if (componentsWithStories.has(instance.meta.sourceId)) continue
-
-    // Mark as processed
-    componentsProcessed.add(instance.meta.sourceId)
-    filePathsToInvalidate.push(instance.meta.filePath)
-
-    // Get suggested story name
-    const suggestedName = suggestStoryName(instance.props)
-
-    const componentInfo = {
-      meta: instance.meta,
-      props: instance.props,
-      serializedProps: instance.serializedProps,
-      componentRegistry: componentRegistryObj,
-      storyName: suggestedName,
-    }
-
-    // Emit event to create story
-    debug(
-      'Creating story for component:',
-      instance.meta.componentName,
-      componentInfo,
-    )
-    overlayEvents.emit(
-      'log-info',
-      componentInfo as Parameters<typeof overlayEvents.emit<'log-info'>>[1],
-    )
-
-    storiesCreated++
-  }
-
-  if (storiesCreated > 0) {
-    debug(
-      `Created stories for ${storiesCreated} components without stories`,
-    )
-
-    // After story creation, wait a bit for processing and then update the UI
-    setTimeout(() => {
-      // Invalidate cache for all components that had stories created
-      for (const filePath of filePathsToInvalidate) {
-        storyFileCache.delete(filePath)
-      }
-
-      // Re-render highlights and debug overlay to show updated story status
-      drawAllHighlights()
-    }, 1000) // Wait 1 second for story creation to complete
-  }
-}
-
 function handleHighlightClick(instance: ComponentInstance, e: MouseEvent) {
   debug('highlight clicked:', instance.meta.componentName)
   selectComponent(instance, e.clientX, e.clientY)
@@ -638,8 +539,6 @@ async function showContextMenu(
   // Check if story file exists
   const storyInfo = await checkStoryFile(meta.filePath)
 
-  const suggestedName = suggestStoryName(props)
-
   contextMenuHandle = createContextMenu(instance, x, y, storyInfo, {
     openInEditor,
     isOpenInEditorAvailable,
@@ -717,7 +616,7 @@ async function showContextMenu(
     async visitStory(relativeFilePath: string) {
       // Switch to the panel dock and tell it to visit the story via RPC
       // (works whether panel is inline or popped out into a separate window)
-      const ctx = getDevToolsClientContext()
+      const ctx = getDevToolsClientContext() as any
       if (ctx?.docks?.switchEntry) {
         await ctx.docks.switchEntry('storybook-devtools-panel')
       }

@@ -45,7 +45,7 @@ const getInputEvent = (event: Event): InteractionEvent | null => {
   ) {
     return {
       type: 'upload',
-      files: [...((target as HTMLInputElement).files ?? [])].map(
+      files: Array.from((target as HTMLInputElement).files ?? []).map(
         (file) => file.name,
       ),
     }
@@ -84,7 +84,7 @@ const getInputEvent = (event: Event): InteractionEvent | null => {
 
     return {
       type: 'select',
-      options: [...selectElement.selectedOptions].map((option) => option.value),
+      options: Array.from(selectElement.selectedOptions).map((option) => option.value),
     }
   }
 
