@@ -24,4 +24,6 @@ export interface RegistryDiff {
   added: SerializedRegistryInstance[]
   removed: string[]
   updated: SerializedRegistryInstance[]
+  /** When true, `added` replaces the entire registry (not appended). */
+  fullSync?: boolean
 }

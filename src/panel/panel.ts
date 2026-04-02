@@ -693,13 +693,6 @@ async function createStoryForComponent(filePath: string): Promise<boolean> {
 /**
  * Check whether a component is currently rendered using the server registry snapshot.
  */
-async function isComponentVisible(filePath: string): Promise<boolean> {
-  const instances = await fetchRegistry()
-  return instances.some(
-    (inst) => inst.meta?.filePath === filePath && inst.isConnected,
-  )
-}
-
 // ─── Coverage tab ───────────────────────────────────────────────────
 
 let lastCoverageJson = ''
@@ -714,26 +707,28 @@ async function fetchCoverage(): Promise<CoverageData | null> {
   }
 }
 
-/** Build a string key representing which file paths are currently visible. */
-async function computeVisibilityKey(entries: CoverageEntry[]): Promise<string> {
-  const parts: string[] = []
-  for (const e of entries) {
-    const visible = await isComponentVisible(e.filePath)
-    parts.push(`${e.filePath}:${visible ? '1' : '0'}`)
+/** Build a key from the registry's connected file paths to detect navigation. */
+function computeRegistryKey(): string {
+  const instances = fetchRegistry()
+  const paths = new Set<string>()
+  for (const inst of instances) {
+    if (inst.meta?.filePath && inst.isConnected) {
+      paths.add(inst.meta.filePath)
+    }
   }
-  return parts.join('|')
+  return [...paths].sort().join('|')
 }
 
 async function refreshCoverage() {
   const coverage = await fetchCoverage()
   if (!coverage) return
 
-  // Rebuild when either server-side coverage data or client-side visibility changes
+  // Rebuild when server-side coverage data or visible components change
   const json = JSON.stringify(coverage)
-  const visKey = await computeVisibilityKey(coverage.entries)
-  if (json === lastCoverageJson && visKey === lastVisibilityKey) return
+  const regKey = computeRegistryKey()
+  if (json === lastCoverageJson && regKey === lastVisibilityKey) return
   lastCoverageJson = json
-  lastVisibilityKey = visKey
+  lastVisibilityKey = regKey
 
   clearAllHighlights()
   await buildCoveragePanel(coverage)
@@ -743,6 +738,22 @@ async function buildCoveragePanel(coverage: CoverageData) {
   const pane = document.getElementById('pane-coverage')
   if (!pane) return
 
+  // Filter to only components visible on the current page
+  const registryInstances = await fetchRegistry()
+  const visibleFilePaths = new Set<string>()
+  for (const inst of registryInstances) {
+    if (inst.meta?.filePath && inst.isConnected) {
+      visibleFilePaths.add(inst.meta.filePath)
+    }
+  }
+  const visibleEntries = coverage.entries.filter((e) =>
+    visibleFilePaths.has(e.filePath),
+  )
+  const totalVisible = visibleEntries.length
+  const coveredVisible = visibleEntries.filter((e) => e.hasStory).length
+  const pctVisible =
+    totalVisible > 0 ? Math.round((coveredVisible / totalVisible) * 100) : 0
+
   const root = document.createElement('div')
   root.className = 'coverage-root'
 
@@ -751,13 +762,13 @@ async function buildCoveragePanel(coverage: CoverageData) {
   hdr.className = 'cov-hdr'
 
   const title = document.createElement('h2')
-  title.textContent = 'Story Coverage (in this page)'
+  title.textContent = 'Story Coverage (on this page)'
   hdr.appendChild(title)
 
   const pct = document.createElement('span')
-  const cc = coverageColorClass(coverage.coveragePercent)
+  const cc = coverageColorClass(pctVisible)
   pct.className = `pct ${cc}`
-  pct.textContent = `${coverage.coveragePercent}%`
+  pct.textContent = `${pctVisible}%`
   hdr.appendChild(pct)
 
   root.appendChild(hdr)
@@ -768,7 +779,7 @@ async function buildCoveragePanel(coverage: CoverageData) {
 
   const pl = document.createElement('div')
   pl.className = 'progress-label'
-  pl.textContent = `${coverage.coveredComponents} of ${coverage.totalComponents} components have story files`
+  pl.textContent = `${coveredVisible} of ${totalVisible} components on this page have story files`
   pw.appendChild(pl)
 
   const barRow = document.createElement('div')
@@ -778,22 +789,28 @@ async function buildCoveragePanel(coverage: CoverageData) {
   bar.className = 'progress-bar'
   const fill = document.createElement('div')
   fill.className = `progress-fill ${cc}`
-  fill.style.width = `${coverage.coveragePercent}%`
+  fill.style.width = `${pctVisible}%`
   bar.appendChild(fill)
   barRow.appendChild(bar)
 
-  // "Create all" button — creates stories for every visible instance on screen,
+  // "Create all" button — creates stories for every uncovered instance on screen,
   // deduplicated by (filePath + props fingerprint) so identical mounts are skipped.
   const allVisibleInstances = await collectAllVisibleInstances()
-  if (allVisibleInstances.length > 0) {
+  const uncoveredFilePaths = new Set(
+    visibleEntries.filter((e) => !e.hasStory).map((e) => e.filePath),
+  )
+  const uncoveredInstances = allVisibleInstances.filter(
+    (inst) => inst.meta?.filePath && uncoveredFilePaths.has(inst.meta.filePath),
+  )
+  if (uncoveredInstances.length > 0) {
     const createAllBtn = document.createElement('button')
     createAllBtn.className = 'create-all-btn'
-    createAllBtn.textContent = `Create all (${allVisibleInstances.length})`
-    createAllBtn.title = `Create stories for ${allVisibleInstances.length} visible component instance${allVisibleInstances.length === 1 ? '' : 's'} on screen`
+    createAllBtn.textContent = `Create all (${uncoveredInstances.length})`
+    createAllBtn.title = `Create stories for ${uncoveredInstances.length} uncovered component instance${uncoveredInstances.length === 1 ? '' : 's'} on screen`
     createAllBtn.addEventListener('click', async () => {
       createAllBtn.disabled = true
       createAllBtn.textContent = 'Creating\u2026'
-      for (const instance of allVisibleInstances) {
+      for (const instance of uncoveredInstances) {
         try {
           await rpcCall('component-highlighter:create-story', {
             meta: instance.meta,
@@ -818,7 +835,7 @@ async function buildCoveragePanel(coverage: CoverageData) {
   root.appendChild(pw)
 
   // Table
-  if (coverage.entries.length === 0) {
+  if (visibleEntries.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'empty'
     empty.textContent =
@@ -853,22 +870,9 @@ async function buildCoveragePanel(coverage: CoverageData) {
     )
   }
 
-  // Pre-compute visibility for all entries
-  const visibilityMap = new Map<string, boolean>()
-  const registryInstances = await fetchRegistry()
-  for (const entry of coverage.entries) {
-    visibilityMap.set(
-      entry.filePath,
-      registryInstances.some(
-        (inst) => inst.meta?.filePath === entry.filePath && inst.isConnected,
-      ),
-    )
-  }
-
-  for (const entry of coverage.entries) {
-    const visible = visibilityMap.get(entry.filePath) ?? false
+  for (const entry of visibleEntries) {
     const tr = document.createElement('tr')
-    tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}${!visible ? ' invisible' : ''}`
+    tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}`
 
     // Component name + file
     const tdName = document.createElement('td')
@@ -882,8 +886,6 @@ async function buildCoveragePanel(coverage: CoverageData) {
     const tdStatus = document.createElement('td')
     if (entry.hasStory) {
       tdStatus.innerHTML = `<span class="status covered"><span class="status-dot"></span>Covered</span>`
-    } else if (!visible) {
-      tdStatus.innerHTML = `<span class="status not-visible"><span class="status-dot"></span>Not visible</span>`
     } else {
       tdStatus.innerHTML = `<span class="status missing"><span class="status-dot"></span>Missing</span>`
     }
@@ -898,18 +900,13 @@ async function buildCoveragePanel(coverage: CoverageData) {
     const locateBtn = document.createElement('button')
     locateBtn.className = 'act-btn locate'
     locateBtn.innerHTML = BULLSEYE_ICON
-    if (!visible) {
-      locateBtn.title = 'Component not visible on this page'
-      locateBtn.setAttribute('disabled', '')
-    } else {
-      locateBtn.title = 'Scroll to component'
-      locateBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        rpcCall('component-highlighter:scroll-to-component', {
-          componentName: entry.componentName,
-        }).catch(() => {})
-      })
-    }
+    locateBtn.title = 'Scroll to component'
+    locateBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      rpcCall('component-highlighter:scroll-to-component', {
+        componentName: entry.componentName,
+      }).catch(() => {})
+    })
     actionsDiv.appendChild(locateBtn)
 
     // Open code button
@@ -962,29 +959,23 @@ async function buildCoveragePanel(coverage: CoverageData) {
       const createBtn = document.createElement('button')
       createBtn.className = 'act-btn create'
       createBtn.innerHTML = PLUS_ICON
-      if (!visible) {
-        createBtn.title =
-          'Component not visible — navigate to a page where it renders first'
-        createBtn.setAttribute('disabled', '')
-      } else {
-        createBtn.title = 'Create story from current props'
-        createBtn.addEventListener('click', async (e) => {
-          e.stopPropagation()
-          createBtn.disabled = true
-          createBtn.style.opacity = '0.5'
-          const created = await createStoryForComponent(entry.filePath)
-          if (created) {
-            // Wait for the RPC story creation to complete, then refresh
-            setTimeout(() => {
-              lastCoverageJson = ''
-              refreshCoverage()
-            }, 1500)
-          } else {
-            createBtn.disabled = false
-            createBtn.style.opacity = ''
-          }
-        })
-      }
+      createBtn.title = 'Create story from current props'
+      createBtn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        createBtn.disabled = true
+        createBtn.style.opacity = '0.5'
+        const created = await createStoryForComponent(entry.filePath)
+        if (created) {
+          // Wait for the RPC story creation to complete, then refresh
+          setTimeout(() => {
+            lastCoverageJson = ''
+            refreshCoverage()
+          }, 1500)
+        } else {
+          createBtn.disabled = false
+          createBtn.style.opacity = ''
+        }
+      })
       actionsDiv.appendChild(createBtn)
     }
 

@@ -756,14 +756,27 @@ export function createComponentHighlighterPlugin(
               handler: (diff: RegistryDiff) => {
                 if (!registryState) return
                 registryState.mutate((draft: SerializedRegistryInstance[]) => {
+                  // Full sync: replace the entire registry
+                  if (diff.fullSync) {
+                    draft.length = 0
+                    for (const inst of diff.added) {
+                      draft.push(inst)
+                    }
+                    return
+                  }
                   // Remove
                   for (const id of diff.removed) {
                     const idx = draft.findIndex((inst) => inst.id === id)
                     if (idx !== -1) draft.splice(idx, 1)
                   }
-                  // Add
+                  // Add (deduplicate by id to prevent stale re-pushes)
                   for (const inst of diff.added) {
-                    draft.push(inst)
+                    const existing = draft.findIndex((i) => i.id === inst.id)
+                    if (existing !== -1) {
+                      draft[existing] = inst
+                    } else {
+                      draft.push(inst)
+                    }
                   }
                   // Update
                   for (const inst of diff.updated) {

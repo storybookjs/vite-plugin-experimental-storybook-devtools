@@ -80,6 +80,17 @@ async function setRegistryRpcCallWhenTrusted(
 /** Push the full registry as an initial sync */
 function pushFullRegistry() {
   if (!rpcCallFn || componentRegistry.size === 0) return
+
+  // Clear any accumulated diffs — the full push supersedes them and
+  // leaving stale entries would cause duplicates on the server.
+  pendingDiff.added = []
+  pendingDiff.removed = []
+  pendingDiff.updated = []
+  if (diffFlushTimer) {
+    clearTimeout(diffFlushTimer)
+    diffFlushTimer = null
+  }
+
   const added: SerializedRegistryInstance[] = []
   for (const instance of componentRegistry.values()) {
     added.push(serializeInstance(instance))
@@ -88,6 +99,7 @@ function pushFullRegistry() {
     added,
     removed: [],
     updated: [],
+    fullSync: true,
   }).catch(() => {})
 }
 
@@ -217,18 +229,24 @@ function flushRegistryDiff() {
   )
     return
 
-  const diff: RegistryDiff = {
-    added: [...pendingDiff.added],
-    removed: [...pendingDiff.removed],
-    updated: [...pendingDiff.updated],
-  }
+  // Clear pending diff — we always do a full sync from the client registry
+  // to guarantee the server stays in sync (incremental diffs can lose removals
+  // during SPA navigation race conditions).
   pendingDiff.added = []
   pendingDiff.removed = []
   pendingDiff.updated = []
 
-  rpcCallFn('component-highlighter:push-registry-diff', diff).catch(() => {
-    // Server may not be ready yet; diffs will be re-pushed on next change
-  })
+  const added: SerializedRegistryInstance[] = []
+  for (const instance of componentRegistry.values()) {
+    added.push(serializeInstance(instance))
+  }
+
+  rpcCallFn('component-highlighter:push-registry-diff', {
+    added,
+    removed: [],
+    updated: [],
+    fullSync: true,
+  }).catch(() => {})
 }
 
 // Track if the dock is active (highlight mode)
