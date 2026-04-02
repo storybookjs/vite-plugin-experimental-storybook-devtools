@@ -21,6 +21,7 @@ let registrySharedState: any = null
 async function initRpcClient() {
   try {
     const client = await getDevToolsRpcClient()
+    await client.ensureTrusted()
     rpcClient = client
 
     // Subscribe to shared state

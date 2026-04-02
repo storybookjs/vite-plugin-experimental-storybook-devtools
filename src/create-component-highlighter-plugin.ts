@@ -225,8 +225,17 @@ export function createComponentHighlighterPlugin(
       isServe = config.command === 'serve'
     },
     config: (viteConfig) => {
+      viteConfig.optimizeDeps ??= {}
+      // Exclude our client modules from dep optimization – they are ESM and
+      // don't need pre-bundling. Including them causes unnecessary dep
+      // re-optimization on first load.
+      viteConfig.optimizeDeps.exclude ??= []
+      viteConfig.optimizeDeps.exclude.push(
+        'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
+        'vite-plugin-experimental-storybook-devtools/client/listeners',
+        'vite-plugin-experimental-storybook-devtools/client/overlay',
+      )
       if (framework.name === 'react') {
-        viteConfig.optimizeDeps ??= {}
         viteConfig.optimizeDeps.include ??= []
         viteConfig.optimizeDeps.include.push(
           'react-element-to-jsx-string/dist/esm/index.js',

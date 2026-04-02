@@ -61,6 +61,22 @@ export function setRegistryRpcCall(
   pushFullRegistry()
 }
 
+/** Set the RPC call function only after trust is established */
+async function setRegistryRpcCallWhenTrusted(
+  ctx: NonNullable<ReturnType<typeof getDevToolsClientContext>>,
+) {
+  if (rpcCallFn) return
+  try {
+    await ctx.rpc.ensureTrusted()
+  } catch {
+    // Trust was denied or timed out – don't register RPC
+    return
+  }
+  setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
+    return (ctx.rpc.call as any)(method, ...args)
+  })
+}
+
 /** Push the full registry as an initial sync */
 function pushFullRegistry() {
   if (!rpcCallFn || componentRegistry.size === 0) return
@@ -89,11 +105,9 @@ function autoInitRpc() {
     attempts++
     const ctx = getDevToolsClientContext()
     if (ctx?.rpc?.call) {
-      // Initialize registry sync
+      // Initialize registry sync (waits for trust before making RPC calls)
       if (!rpcCallFn) {
-        setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
-          return (ctx.rpc.call as any)(method, ...args)
-        })
+        setRegistryRpcCallWhenTrusted(ctx)
       }
 
       // Register client broadcast handlers (once)
