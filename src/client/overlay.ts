@@ -646,18 +646,6 @@ function emitCreateStory(
   window.dispatchEvent(createStoryEvent)
 }
 
-// Expose story creation so the panel iframe can trigger the same RPC flow.
-// The panel passes a ComponentInstance-like object from the shared registry.
-;(window as any).__componentHighlighterCreateStory = (instanceData: {
-  meta: ComponentInstance['meta']
-  props: Record<string, unknown>
-  serializedProps?: SerializedProps
-  storyName?: string
-}) => {
-  const name = instanceData.storyName ?? suggestStoryName(instanceData.props)
-  emitCreateStory({ ...instanceData, storyName: name }, false)
-}
-
 // Context menu management — delegates to the Shadow DOM context-menu module
 async function showContextMenu(
   instance: ComponentInstance,
@@ -750,35 +738,25 @@ async function showContextMenu(
       drawAllHighlights()
     },
     async visitStory(relativeFilePath: string) {
-      // Try the global registered by the panel iframe (works when dock is open)
-      let visitFn = (window as any).__storybookDevtoolsVisitStory
-      if (typeof visitFn === 'function') {
-        visitFn(relativeFilePath)
-        return
-      }
-
-      // Open the panel immediately — the panel's visitStory handles
-      // starting Storybook if needed and showing the terminal tab
+      // Switch to the panel dock and tell it to visit the story via RPC
+      // (works whether panel is inline or popped out into a separate window)
       const ctx = getDevToolsClientContext()
       if (ctx?.docks?.switchEntry) {
         await ctx.docks.switchEntry('storybook-devtools-panel')
-        for (let i = 0; i < 20; i++) {
-          await new Promise((r) => setTimeout(r, 150))
-          visitFn = (window as any).__storybookDevtoolsVisitStory
-          if (typeof visitFn === 'function') {
-            visitFn(relativeFilePath)
-            return
-          }
-        }
       }
 
-      // Fallback: resolve the story URL via the panel's builder and open in new tab
-      const buildUrlFn = (window as any).__storybookDevtoolsBuildStoryUrl
-      if (typeof buildUrlFn === 'function') {
-        const url = await buildUrlFn(relativeFilePath)
-        if (url) window.open(url, '_blank')
-        return
+      try {
+        const rpcCtx = getDevToolsClientContext()
+        if (rpcCtx?.rpc?.call) {
+          await (rpcCtx.rpc.call as any)('component-highlighter:visit-story', {
+            relativeFilePath,
+          })
+          return
+        }
+      } catch {
+        // RPC not available
       }
+
       // Last resort: fetch the index ourselves and open in new tab
       try {
         const res = await fetch('/__component-highlighter/storybook-index')

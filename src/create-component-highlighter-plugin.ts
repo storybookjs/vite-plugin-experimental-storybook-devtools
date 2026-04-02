@@ -13,6 +13,9 @@ import {
 } from './notifications'
 import { computeCoverage } from './coverage-dashboard'
 
+import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
+export type { SerializedRegistryInstance, RegistryDiff }
+
 // RPC function type declarations
 declare module '@vitejs/devtools-kit' {
   interface DevToolsRpcFunctions {
@@ -21,6 +24,19 @@ declare module '@vitejs/devtools-kit' {
     ) => void
     'component-highlighter:toggle-overlay': (data: { enabled: boolean }) => void
     'component-highlighter:create-story': (data: ComponentStoryData) => void
+    'component-highlighter:push-registry-diff': (diff: RegistryDiff) => void
+    'component-highlighter:get-registry': () => SerializedRegistryInstance[]
+    'component-highlighter:scroll-to-component': (data: { componentName: string }) => void
+    'component-highlighter:highlight-coverage-instances': (data: { componentName: string; hasStory: boolean } | null) => void
+    'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
+    'component-highlighter:visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
+  }
+
+  interface DevToolsRpcClientFunctions {
+    'component-highlighter:do-scroll-to-component': (data: { componentName: string }) => void
+    'component-highlighter:do-highlight-coverage': (data: { componentName: string; hasStory: boolean } | null) => void
+    'component-highlighter:do-set-highlight-mode': (data: { enabled: boolean }) => void
+    'component-highlighter:do-visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
   }
 }
 
@@ -55,6 +71,8 @@ interface ComponentStoryData {
   playFunction?: string[]
   /** Import statements required by the play function */
   playImports?: string[]
+  /** When true, skip navigating to the story after creation (e.g. batch "Create all") */
+  skipNavigation?: boolean
 }
 
 export interface ComponentHighlighterOptions {
@@ -175,6 +193,10 @@ export function createComponentHighlighterPlugin(
   // Track transformed components for coverage dashboard: componentName → filePath
   const transformedComponents = new Map<string, string>()
   let coverageCwd = ''
+  // Server-side registry snapshot built from incremental diffs pushed by the client
+  const registrySnapshot = new Map<string, SerializedRegistryInstance>()
+  // Pending visit request — stored by the server when the client wants the panel to navigate to a story
+  let pendingVisit: { relativeFilePath: string; preferredStoryName?: string } | null = null
 
 
   // Terminal-based Storybook launcher state
@@ -425,6 +447,32 @@ export function createComponentHighlighterPlugin(
         },
       )
 
+      // ── Middleware: pending visit (POST to set, GET to consume) ────
+      srv.middlewares.use(
+        '/__component-highlighter/pending-visit',
+        (req, res) => {
+          if (req.method === 'POST') {
+            let body = ''
+            req.on('data', (chunk: string) => { body += chunk })
+            req.on('end', () => {
+              try {
+                pendingVisit = JSON.parse(body)
+              } catch {
+                pendingVisit = null
+              }
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: true }))
+            })
+          } else {
+            // GET — consume and clear
+            const visit = pendingVisit
+            pendingVisit = null
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ visit }))
+          }
+        },
+      )
+
     },
     devtools: {
       setup(ctx) {
@@ -625,6 +673,7 @@ export function createComponentHighlighterPlugin(
                             path.relative(process.cwd(), data.meta.filePath),
                           storyName: story.storyName,
                           isAppend: !!existingContent,
+                          skipNavigation: !!data.skipNavigation,
                         },
                       })
                     }
@@ -674,6 +723,109 @@ export function createComponentHighlighterPlugin(
                   storiesDir,
                 )
                 return coverage
+              },
+            }),
+          }),
+        )
+
+        // ─── Registry sync & panel→client relay RPCs ───────────────────
+
+        // Client pushes incremental diffs; server applies them to the snapshot
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:push-registry-diff',
+            type: 'action',
+            setup: () => ({
+              handler: (diff: RegistryDiff) => {
+                for (const id of diff.removed) {
+                  registrySnapshot.delete(id)
+                }
+                for (const inst of diff.added) {
+                  registrySnapshot.set(inst.id, inst)
+                }
+                for (const inst of diff.updated) {
+                  registrySnapshot.set(inst.id, inst)
+                }
+              },
+            }),
+          }),
+        )
+
+        // Panel reads the latest registry snapshot
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:get-registry',
+            type: 'query',
+            setup: () => ({
+              handler: (): SerializedRegistryInstance[] => {
+                return Array.from(registrySnapshot.values())
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: scroll to a component
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:scroll-to-component',
+            type: 'action',
+            setup: () => ({
+              handler: (data: { componentName: string }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-scroll-to-component',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: highlight coverage instances on the app page
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:highlight-coverage-instances',
+            type: 'action',
+            setup: () => ({
+              handler: (data: { componentName: string; hasStory: boolean } | null) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-highlight-coverage',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: toggle highlight mode
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:set-highlight-mode',
+            type: 'action',
+            setup: () => ({
+              handler: (data: { enabled: boolean }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-set-highlight-mode',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Client/overlay → server → panel: navigate to a story
+        // Stores as pending visit AND broadcasts so the panel can pick it up
+        // either via client RPC handler or by polling the pending-visit endpoint
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:visit-story',
+            type: 'action',
+            setup: () => ({
+              handler: (data: { relativeFilePath: string; preferredStoryName?: string }) => {
+                pendingVisit = data
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-visit-story',
+                  args: [data],
+                })
               },
             }),
           }),

@@ -1,4 +1,6 @@
 import type { ComponentInstance } from '../frameworks/types'
+import type { SerializedRegistryInstance, RegistryDiff } from '../shared-types'
+import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
 import {
   enableOverlay,
   disableOverlay,
@@ -12,6 +14,12 @@ import {
   clearSelection,
   setClickThrough,
 } from './overlay'
+import {
+  setRegistryRef,
+  scrollToComponent,
+  showCoverageHighlights,
+  clearCoverageHighlights,
+} from './coverage-actions'
 import { isCurrentlyRecording } from './interaction-recorder'
 import { warn } from './logger'
 
@@ -30,6 +38,139 @@ declare global {
 
 // Component registry - maintained locally and synced via events
 const componentRegistry = new Map<string, ComponentInstance>()
+
+// Export getter for use by other client modules
+export function getComponentRegistry(): Map<string, ComponentInstance> {
+  return componentRegistry
+}
+
+// ─── Incremental registry sync to server ─────────────────────────────
+
+// Pending diff accumulator
+const pendingDiff: RegistryDiff = { added: [], removed: [], updated: [] }
+let diffFlushTimer: ReturnType<typeof setTimeout> | null = null
+let rpcCallFn: ((method: string, ...args: unknown[]) => Promise<unknown>) | null = null
+
+/** Set the RPC call function (injected by vite-devtools.ts after ctx is available) */
+export function setRegistryRpcCall(fn: (method: string, ...args: unknown[]) => Promise<unknown>) {
+  if (rpcCallFn) return // already initialized
+  rpcCallFn = fn
+  pushFullRegistry()
+}
+
+/** Push the full registry as an initial sync */
+function pushFullRegistry() {
+  if (!rpcCallFn || componentRegistry.size === 0) return
+  const added: SerializedRegistryInstance[] = []
+  for (const instance of componentRegistry.values()) {
+    added.push(serializeInstance(instance))
+  }
+  rpcCallFn('component-highlighter:push-registry-diff', { added, removed: [], updated: [] }).catch(() => {})
+}
+
+/**
+ * Auto-initialize RPC: registry sync + client broadcast handlers.
+ * Polls for the DevTools client context so everything works before dock activation.
+ */
+let rpcHandlersRegistered = false
+
+function autoInitRpc() {
+  if (rpcCallFn && rpcHandlersRegistered) return
+
+  let attempts = 0
+  const tryInit = () => {
+    attempts++
+    const ctx = getDevToolsClientContext()
+    if (ctx?.rpc?.call) {
+      // Initialize registry sync
+      if (!rpcCallFn) {
+        setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
+          return (ctx.rpc.call as any)(method, ...args)
+        })
+      }
+
+      // Register client broadcast handlers (once)
+      if (!rpcHandlersRegistered && ctx.rpc.client) {
+        rpcHandlersRegistered = true
+        try {
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-scroll-to-component',
+            type: 'action',
+            handler: (data: { componentName: string }) => {
+              scrollToComponent(data.componentName)
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-highlight-coverage',
+            type: 'action',
+            handler: (data: { componentName: string; hasStory: boolean } | null) => {
+              if (data) {
+                showCoverageHighlights(data.componentName, data.hasStory)
+              } else {
+                clearCoverageHighlights()
+              }
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-set-highlight-mode',
+            type: 'action',
+            handler: (data: { enabled: boolean }) => {
+              if (data.enabled) {
+                enableHighlightMode()
+              } else {
+                disableHighlightMode()
+              }
+            },
+          } as any)
+        } catch {
+          // Client RPC registration not supported
+        }
+      }
+      return
+    }
+    // Retry for up to 30 seconds
+    if (attempts < 60) {
+      setTimeout(tryInit, 500)
+    }
+  }
+  setTimeout(tryInit, 500)
+}
+
+function serializeInstance(instance: ComponentInstance): SerializedRegistryInstance {
+  return {
+    id: instance.id,
+    meta: { ...instance.meta },
+    props: instance.props,
+    serializedProps: instance.serializedProps,
+    isConnected: instance.element?.isConnected ?? false,
+  }
+}
+
+function scheduleRegistryPush() {
+  if (diffFlushTimer) clearTimeout(diffFlushTimer)
+  diffFlushTimer = setTimeout(flushRegistryDiff, 500)
+}
+
+function flushRegistryDiff() {
+  diffFlushTimer = null
+  if (!rpcCallFn) return
+  if (pendingDiff.added.length === 0 && pendingDiff.removed.length === 0 && pendingDiff.updated.length === 0) return
+
+  const diff: RegistryDiff = {
+    added: [...pendingDiff.added],
+    removed: [...pendingDiff.removed],
+    updated: [...pendingDiff.updated],
+  }
+  pendingDiff.added = []
+  pendingDiff.removed = []
+  pendingDiff.updated = []
+
+  rpcCallFn('component-highlighter:push-registry-diff', diff).catch(() => {
+    // Server may not be ready yet; diffs will be re-pushed on next change
+  })
+}
 
 // Track if the dock is active (highlight mode)
 let isDockActive = false
@@ -208,8 +349,9 @@ function initialize() {
   // Mark as initialized
   window.__componentHighlighterInitialized = true
 
-  // Set the registry reference for overlay module
+  // Set the registry reference for overlay module and coverage-actions module
   setComponentRegistry(componentRegistry)
+  setRegistryRef(componentRegistry)
 
   // Event listeners for registry synchronization
   window.addEventListener('component-highlighter:register', ((
@@ -217,6 +359,9 @@ function initialize() {
   ) => {
     const instance = event.detail
     componentRegistry.set(instance.id, instance)
+    // Track diff for server sync
+    pendingDiff.added.push(serializeInstance(instance))
+    scheduleRegistryPush()
   }) as EventListener)
 
   window.addEventListener('component-highlighter:unregister', ((
@@ -224,6 +369,9 @@ function initialize() {
   ) => {
     const id = event.detail
     componentRegistry.delete(id)
+    // Track diff for server sync
+    pendingDiff.removed.push(id)
+    scheduleRegistryPush()
   }) as EventListener)
 
   window.addEventListener('component-highlighter:update-props', ((
@@ -236,6 +384,9 @@ function initialize() {
       if (serializedProps) {
         instance.serializedProps = serializedProps
       }
+      // Track diff for server sync
+      pendingDiff.updated.push(serializeInstance(instance))
+      scheduleRegistryPush()
     }
   }) as EventListener)
 
@@ -276,6 +427,9 @@ function initialize() {
     }
   ;(window as unknown as { __componentHighlighterIsActive?: () => boolean }).__componentHighlighterIsActive =
     () => isDockActive
+
+  // Start auto-initialization of RPC (registry sync + broadcast handlers)
+  autoInitRpc()
 }
 
 // Run initialization

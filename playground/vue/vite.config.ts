@@ -19,20 +19,19 @@ const dirname =
     : path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
+  devtools: {
+    enabled: true,
+    clientAuth: false,
+  },
   plugins: [
     vue(),
-    process.env.STORYBOOK || process.env.E2E ? null : DevTools(),
+    process.env.STORYBOOK ? null : DevTools(),
     process.env.STORYBOOK
       ? null
       : componentHighlighter({
-          debugMode: true,
+          debugMode: false,
         }),
   ].filter(Boolean),
-  build: {
-    rolldownOptions: {
-      devtools: {}, // enable devtools mode
-    },
-  },
   resolve: {
     alias: {
       'vite-plugin-experimental-storybook-devtools/client/listeners': r(

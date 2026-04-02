@@ -2,8 +2,46 @@
  * Merged Storybook + Coverage panel.
  *
  * Hosted as a standalone HTML app via `ctx.views.hostStatic`.
- * Communicates with the server plugin via fetch-based middleware endpoints.
+ * Communicates with the server plugin via RPC and fetch-based middleware endpoints.
+ * All client-side DOM operations are delegated to the client via RPC broadcast
+ * so that the panel works whether inline or popped out into a separate window.
  */
+
+import { getDevToolsRpcClient, type DevToolsRpcClient } from '@vitejs/devtools-kit/client'
+
+// ─── RPC client ─────────────────────────────────────────────────────
+
+let rpcClient: DevToolsRpcClient | null = null
+
+async function initRpcClient() {
+  try {
+    const client = await getDevToolsRpcClient()
+    rpcClient = client
+  } catch {
+    // RPC client not available (e.g. during build or test)
+  }
+}
+
+/** Convenience wrapper for server RPC calls */
+function rpcCall(method: string, ...args: unknown[]): Promise<unknown> {
+  if (!rpcClient) return Promise.resolve(undefined)
+  return (rpcClient.call as any)(method, ...args)
+}
+
+/** Registry instance shape matching the server's SerializedRegistryInstance */
+interface RegistryInstance {
+  id: string
+  meta: {
+    componentName: string
+    filePath: string
+    relativeFilePath?: string
+    sourceId: string
+    isDefaultExport?: boolean
+  }
+  props: Record<string, unknown>
+  serializedProps?: Record<string, unknown>
+  isConnected: boolean
+}
 
 // ─── Icons ──────────────────────────────────────────────────────────
 const CODE_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`
@@ -192,13 +230,14 @@ async function visitStory(
         storybookIndexCache = null
         await new Promise((r) => setTimeout(r, 500))
       }
-      const targetUrl = await buildStoryUrl(
-        relativeFilePath,
-        preferredStoryName,
-      )
-      if (targetUrl) {
+      const storyId = await findStoryId(relativeFilePath, preferredStoryName)
+      if (storyId) {
         switchTab('storybook')
-        navigateStorybookPane(targetUrl)
+        // Try channel API first (no reload), fall back to iframe src navigation
+        if (!navigateStorybookViaChannel(storyId)) {
+          const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+          if (targetUrl) navigateStorybookPane(targetUrl)
+        }
         return
       }
     }
@@ -224,20 +263,43 @@ async function visitStory(
     if (isRunning) {
       clearInterval(poll)
       renderStorybookState('running')
-      // Now that Storybook is up, the index is available
-      const targetUrl = await buildStoryUrl(
-        relativeFilePath,
-        preferredStoryName,
-      )
-      if (targetUrl) {
-        switchTab('storybook')
-        navigateStorybookPane(targetUrl)
+      switchTab('storybook')
+      // Storybook just started — index may take a moment to become available
+      for (let retry = 0; retry < 10; retry++) {
+        storybookIndexCache = null
+        const storyId = await findStoryId(relativeFilePath, preferredStoryName)
+        if (storyId) {
+          if (!navigateStorybookViaChannel(storyId)) {
+            const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+            if (targetUrl) navigateStorybookPane(targetUrl)
+          }
+          break
+        }
+        await new Promise((r) => setTimeout(r, 1000))
       }
     } else if (attempts > 120) {
       clearInterval(poll)
       renderStorybookState('not-running')
     }
   }, 1000)
+}
+
+/**
+ * Navigate to a story via the Storybook channel API (postMessage).
+ * This avoids a full page reload when Storybook is already loaded.
+ * Returns true if the channel was available and the message was sent.
+ */
+function navigateStorybookViaChannel(storyId: string): boolean {
+  const iframe = document.querySelector<HTMLIFrameElement>('.sb-iframe')
+  if (!iframe?.contentWindow) return false
+  try {
+    const channel = (iframe.contentWindow as any).__STORYBOOK_ADDONS_CHANNEL__
+    if (!channel || typeof channel.emit !== 'function') return false
+    channel.emit('setCurrentStory', { storyId, viewMode: 'story' })
+    return true
+  } catch {
+    return false // cross-origin or not loaded yet
+  }
 }
 
 /** Set the Storybook iframe to a given URL, creating it if needed. */
@@ -253,34 +315,39 @@ function navigateStorybookPane(targetUrl: string) {
   }
 }
 
-// Expose visitStory on the parent window so the context menu can call it directly.
-try {
-  ;(window.parent as any).__storybookDevtoolsVisitStory = (
-    relativeFilePath: string,
-    preferredStoryName?: string,
-  ) => {
-    visitStory(relativeFilePath, preferredStoryName)
+// Register panel-side client RPC handler so the server can tell us to visit a story
+// (used by the client overlay after story creation, works whether panel is inline or popped out)
+function registerVisitStoryHandler() {
+  if (!rpcClient?.client) return
+  try {
+    rpcClient.client.register({
+      name: 'component-highlighter:do-visit-story',
+      type: 'action',
+      handler: (data: { relativeFilePath: string; preferredStoryName?: string }) => {
+        visitStory(data.relativeFilePath, data.preferredStoryName)
+      },
+    } as any)
+  } catch {
+    // Client RPC registration not supported in this context
   }
-  // Also expose the URL builder so callers can fall back to window.open
-  ;(window.parent as any).__storybookDevtoolsBuildStoryUrl = (
-    relativeFilePath: string,
-  ) => {
-    return buildStoryUrl(relativeFilePath)
-  }
-} catch {
-  // cross-origin
 }
 
-/** Remove all coverage highlight overlays from the parent page */
-function clearAllHighlights() {
+/** Check for a pending visit request stored by the server */
+async function checkPendingVisit() {
   try {
-    const els = window.parent.document.querySelectorAll(
-      '[data-coverage-highlight]',
-    )
-    els.forEach((el) => el.remove())
+    const res = await fetch('/__component-highlighter/pending-visit')
+    const data = await res.json()
+    if (data.visit) {
+      visitStory(data.visit.relativeFilePath, data.visit.preferredStoryName)
+    }
   } catch {
-    // cross-origin or parent not available
+    // Endpoint not available
   }
+}
+
+/** Ask the client to remove all coverage highlight overlays via RPC */
+function clearAllHighlights() {
+  rpcCall('component-highlighter:highlight-coverage-instances', null).catch(() => {})
 }
 
 // ─── Tab management ─────────────────────────────────────────────────
@@ -482,105 +549,83 @@ function propsFingerprint(props: Record<string, unknown>): string {
   return JSON.stringify(meaningful, Object.keys(meaningful).sort())
 }
 
+/** Fetch the registry snapshot from the server (RPC) */
+async function fetchRegistry(): Promise<RegistryInstance[]> {
+  try {
+    const result = await rpcCall('component-highlighter:get-registry')
+    return (result as RegistryInstance[]) || []
+  } catch {
+    return []
+  }
+}
+
 /**
- * Collect unique instances of a component from the live registry,
+ * Collect unique instances of a component from the server registry snapshot,
  * deduplicated by their serialized props fingerprint.
- * Matches by filePath since coverage uses the filename as componentName
- * which may differ from the actual component display name in the registry.
  */
-function collectUniqueInstances(filePath: string): any[] {
-  try {
-    const registry = (window.parent as any).__componentHighlighterRegistry as
-      | Map<string, any>
-      | undefined
-    if (!registry) return []
-
-    const seen = new Map<string, any>()
-    for (const instance of registry.values()) {
-      if (instance.meta?.filePath !== filePath) continue
-      const sp = instance.serializedProps
-      const fp = sp ? propsFingerprint(sp) : '{}'
-      if (!seen.has(fp)) {
-        seen.set(fp, instance)
-      }
+async function collectUniqueInstances(filePath: string): Promise<RegistryInstance[]> {
+  const instances = await fetchRegistry()
+  const seen = new Map<string, RegistryInstance>()
+  for (const instance of instances) {
+    if (instance.meta?.filePath !== filePath) continue
+    if (!instance.isConnected) continue
+    const sp = instance.serializedProps
+    const fp = sp ? propsFingerprint(sp) : '{}'
+    if (!seen.has(fp)) {
+      seen.set(fp, instance)
     }
-    return Array.from(seen.values())
-  } catch {
-    return []
   }
+  return Array.from(seen.values())
 }
 
 /**
- * Collect all unique instances currently visible in the registry across ALL
- * components. Deduplicates globally by (filePath + propsFingerprint) so that
- * two mounts of the same component with identical props produce a single entry.
+ * Collect all unique visible instances across ALL components from the server
+ * registry snapshot. Deduplicates by (filePath + propsFingerprint).
  */
-function collectAllVisibleInstances(): any[] {
-  try {
-    const registry = (window.parent as any).__componentHighlighterRegistry as
-      | Map<string, any>
-      | undefined
-    if (!registry) return []
-
-    const seen = new Map<string, any>()
-    for (const instance of registry.values()) {
-      const filePath = instance.meta?.filePath
-      if (!filePath) continue
-      const sp = instance.serializedProps
-      const fp = sp ? propsFingerprint(sp) : '{}'
-      const key = `${filePath}::${fp}`
-      if (!seen.has(key)) {
-        seen.set(key, instance)
-      }
+async function collectAllVisibleInstances(): Promise<RegistryInstance[]> {
+  const instances = await fetchRegistry()
+  const seen = new Map<string, RegistryInstance>()
+  for (const instance of instances) {
+    const filePath = instance.meta?.filePath
+    if (!filePath || !instance.isConnected) continue
+    const sp = instance.serializedProps
+    const fp = sp ? propsFingerprint(sp) : '{}'
+    const key = `${filePath}::${fp}`
+    if (!seen.has(key)) {
+      seen.set(key, instance)
     }
-    return Array.from(seen.values())
-  } catch {
-    return []
   }
+  return Array.from(seen.values())
 }
 
 /**
- * Create stories for a component by delegating to the client overlay's
- * story creation flow (same RPC path as the context menu "Save Story").
- * Finds all live instances, deduplicates by props, and creates one story
- * per unique variant.
+ * Create stories for a component by calling the server's create-story RPC
+ * directly with instance data from the registry snapshot.
  */
-function createStoryForComponent(filePath: string): boolean {
-  const createFn = (window.parent as any).__componentHighlighterCreateStory
-  if (typeof createFn !== 'function') return false
-
-  const instances = collectUniqueInstances(filePath)
+async function createStoryForComponent(filePath: string): Promise<boolean> {
+  const instances = await collectUniqueInstances(filePath)
   if (instances.length === 0) return false
 
   for (const instance of instances) {
-    createFn({
-      meta: instance.meta,
-      props: instance.props,
-      serializedProps: instance.serializedProps,
-    })
+    try {
+      await rpcCall('component-highlighter:create-story', {
+        meta: instance.meta,
+        props: instance.props,
+        serializedProps: instance.serializedProps,
+      })
+    } catch {
+      // Best effort; continue with remaining instances
+    }
   }
   return true
 }
 
 /**
- * Check whether a component is currently rendered (has live instances in the
- * registry). A component is considered rendered if at least one instance with a
- * matching filePath exists — regardless of dimensions or CSS visibility.
- * Components that return null or are never mounted won't be in the registry at all.
+ * Check whether a component is currently rendered using the server registry snapshot.
  */
-function isComponentVisible(filePath: string): boolean {
-  try {
-    const registry = (window.parent as any).__componentHighlighterRegistry as
-      | Map<string, any>
-      | undefined
-    if (!registry) return false
-    for (const instance of registry.values()) {
-      if (instance.meta?.filePath === filePath) return true
-    }
-    return false
-  } catch {
-    return false
-  }
+async function isComponentVisible(filePath: string): Promise<boolean> {
+  const instances = await fetchRegistry()
+  return instances.some((inst) => inst.meta?.filePath === filePath && inst.isConnected)
 }
 
 // ─── Coverage tab ───────────────────────────────────────────────────
@@ -598,10 +643,13 @@ async function fetchCoverage(): Promise<CoverageData | null> {
 }
 
 /** Build a string key representing which file paths are currently visible. */
-function computeVisibilityKey(entries: CoverageEntry[]): string {
-  return entries
-    .map((e) => `${e.filePath}:${isComponentVisible(e.filePath) ? '1' : '0'}`)
-    .join('|')
+async function computeVisibilityKey(entries: CoverageEntry[]): Promise<string> {
+  const parts: string[] = []
+  for (const e of entries) {
+    const visible = await isComponentVisible(e.filePath)
+    parts.push(`${e.filePath}:${visible ? '1' : '0'}`)
+  }
+  return parts.join('|')
 }
 
 async function refreshCoverage() {
@@ -610,16 +658,16 @@ async function refreshCoverage() {
 
   // Rebuild when either server-side coverage data or client-side visibility changes
   const json = JSON.stringify(coverage)
-  const visKey = computeVisibilityKey(coverage.entries)
+  const visKey = await computeVisibilityKey(coverage.entries)
   if (json === lastCoverageJson && visKey === lastVisibilityKey) return
   lastCoverageJson = json
   lastVisibilityKey = visKey
 
   clearAllHighlights()
-  buildCoveragePanel(coverage)
+  await buildCoveragePanel(coverage)
 }
 
-function buildCoveragePanel(coverage: CoverageData) {
+async function buildCoveragePanel(coverage: CoverageData) {
   const pane = document.getElementById('pane-coverage')
   if (!pane) return
 
@@ -664,23 +712,25 @@ function buildCoveragePanel(coverage: CoverageData) {
 
   // "Create all" button — creates stories for every visible instance on screen,
   // deduplicated by (filePath + props fingerprint) so identical mounts are skipped.
-  const allVisibleInstances = collectAllVisibleInstances()
+  const allVisibleInstances = await collectAllVisibleInstances()
   if (allVisibleInstances.length > 0) {
     const createAllBtn = document.createElement('button')
     createAllBtn.className = 'create-all-btn'
     createAllBtn.textContent = `Create all (${allVisibleInstances.length})`
     createAllBtn.title = `Create stories for ${allVisibleInstances.length} visible component instance${allVisibleInstances.length === 1 ? '' : 's'} on screen`
-    createAllBtn.addEventListener('click', () => {
+    createAllBtn.addEventListener('click', async () => {
       createAllBtn.disabled = true
       createAllBtn.textContent = 'Creating\u2026'
-      const createFn = (window.parent as any).__componentHighlighterCreateStory
-      if (typeof createFn === 'function') {
-        for (const instance of allVisibleInstances) {
-          createFn({
+      for (const instance of allVisibleInstances) {
+        try {
+          await rpcCall('component-highlighter:create-story', {
             meta: instance.meta,
             props: instance.props,
             serializedProps: instance.serializedProps,
+            skipNavigation: true,
           })
+        } catch {
+          // Best effort
         }
       }
       // Wait for the RPC story creation to complete, then refresh
@@ -717,55 +767,26 @@ function buildCoveragePanel(coverage: CoverageData) {
 
   const tbody = document.createElement('tbody')
 
-  // Track highlight overlays for cleanup
-  let activeHighlights: HTMLDivElement[] = []
-
-  const clearHighlights = () => {
-    for (const h of activeHighlights) h.remove()
-    activeHighlights = []
+  // Highlight/clear helpers — delegate to client via RPC broadcast
+  const highlightInstances = (componentName: string, hasStory: boolean) => {
+    rpcCall('component-highlighter:highlight-coverage-instances', { componentName, hasStory }).catch(() => {})
   }
 
-  const highlightInstances = (componentName: string, hasStory: boolean) => {
-    clearHighlights()
-    try {
-      const registry = (window.parent as any)
-        .__componentHighlighterRegistry as
-        | Map<string, { meta: { componentName: string }; element?: Element }>
-        | undefined
-      if (!registry) return
-      const color = hasStory ? '#22c55e' : '#ef4444'
-      for (const instance of registry.values()) {
-        if (
-          instance.meta.componentName === componentName &&
-          instance.element?.isConnected &&
-          instance.element.nodeType === Node.ELEMENT_NODE
-        ) {
-          const rect = instance.element.getBoundingClientRect()
-          const box = window.parent.document.createElement('div')
-          box.style.cssText = `
-            position: fixed;
-            left: ${rect.left}px;
-            top: ${rect.top}px;
-            width: ${rect.width}px;
-            height: ${rect.height}px;
-            outline: 2px solid ${color};
-            outline-offset: -1px;
-            background: ${color}22;
-            pointer-events: none;
-            z-index: 999999;
-            transition: opacity 0.2s ease;
-            border-radius: 2px;
-          `
-          box.setAttribute('data-coverage-highlight', 'true')
-          window.parent.document.body.appendChild(box)
-          activeHighlights.push(box)
-        }
-      }
-    } catch { /* cross-origin */ }
+  const clearHighlights = () => {
+    rpcCall('component-highlighter:highlight-coverage-instances', null).catch(() => {})
+  }
+
+  // Pre-compute visibility for all entries
+  const visibilityMap = new Map<string, boolean>()
+  const registryInstances = await fetchRegistry()
+  for (const entry of coverage.entries) {
+    visibilityMap.set(entry.filePath, registryInstances.some(
+      (inst) => inst.meta?.filePath === entry.filePath && inst.isConnected,
+    ))
   }
 
   for (const entry of coverage.entries) {
-    const visible = isComponentVisible(entry.filePath)
+    const visible = visibilityMap.get(entry.filePath) ?? false
     const tr = document.createElement('tr')
     tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}${!visible ? ' invisible' : ''}`
 
@@ -793,7 +814,7 @@ function buildCoveragePanel(coverage: CoverageData) {
     const actionsDiv = document.createElement('div')
     actionsDiv.className = 'actions'
 
-    // Scroll to component button
+    // Scroll to component button — delegates to client via RPC
     const locateBtn = document.createElement('button')
     locateBtn.className = 'act-btn locate'
     locateBtn.innerHTML = BULLSEYE_ICON
@@ -804,28 +825,7 @@ function buildCoveragePanel(coverage: CoverageData) {
       locateBtn.title = 'Scroll to component'
       locateBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        try {
-          const registry = (window.parent as any)
-            .__componentHighlighterRegistry as
-            | Map<string, { meta: { componentName: string }; element?: Element }>
-            | undefined
-          if (!registry) return
-          for (const instance of registry.values()) {
-            if (
-              instance.meta.componentName === entry.componentName &&
-              instance.element?.isConnected
-            ) {
-              // Clear stale highlights before scrolling
-              clearHighlights()
-              instance.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-              // Re-highlight once scroll finishes so boxes match new viewport positions
-              window.parent.addEventListener('scrollend', () => {
-                highlightInstances(entry.componentName, entry.hasStory)
-              }, { once: true })
-              break
-            }
-          }
-        } catch { /* cross-origin */ }
+        rpcCall('component-highlighter:scroll-to-component', { componentName: entry.componentName }).catch(() => {})
       })
     }
     actionsDiv.appendChild(locateBtn)
@@ -886,11 +886,11 @@ function buildCoveragePanel(coverage: CoverageData) {
         createBtn.setAttribute('disabled', '')
       } else {
         createBtn.title = 'Create story from current props'
-        createBtn.addEventListener('click', (e) => {
+        createBtn.addEventListener('click', async (e) => {
           e.stopPropagation()
           createBtn.disabled = true
           createBtn.style.opacity = '0.5'
-          const created = createStoryForComponent(entry.filePath)
+          const created = await createStoryForComponent(entry.filePath)
           if (created) {
             // Wait for the RPC story creation to complete, then refresh
             setTimeout(() => {
@@ -909,7 +909,7 @@ function buildCoveragePanel(coverage: CoverageData) {
     tdActions.appendChild(actionsDiv)
     tr.appendChild(tdActions)
 
-    // Hover → highlight matching component instances on the parent page
+    // Hover → highlight matching component instances on the app page via RPC
     tr.addEventListener('mouseenter', () => {
       highlightInstances(entry.componentName, entry.hasStory)
     })
@@ -1030,38 +1030,17 @@ function init() {
   const spacer = document.createElement('div')
   spacer.style.flex = '1'
 
-  // Highlight toggle button
+  // Highlight toggle button — delegates to client via RPC
   const highlightBtn = document.createElement('button')
   highlightBtn.className = 'highlight-toggle-btn'
   highlightBtn.id = 'highlight-toggle'
   highlightBtn.innerHTML = `${CROSSHAIR_ICON}`
   highlightBtn.title = 'Toggle component highlight mode'
   highlightBtn.addEventListener('click', () => {
-    try {
-      const parentWin = window.parent as any
-      if (highlightEnabled) {
-        parentWin.__componentHighlighterDisable?.()
-        highlightEnabled = false
-      } else {
-        parentWin.__componentHighlighterEnable?.()
-        highlightEnabled = true
-      }
-      highlightBtn.classList.toggle('active', highlightEnabled)
-    } catch {
-      // cross-origin or parent not available
-    }
+    highlightEnabled = !highlightEnabled
+    highlightBtn.classList.toggle('active', highlightEnabled)
+    rpcCall('component-highlighter:set-highlight-mode', { enabled: highlightEnabled }).catch(() => {})
   })
-
-  // Sync initial state from parent
-  try {
-    const parentWin = window.parent as any
-    if (parentWin.__componentHighlighterIsActive?.()) {
-      highlightEnabled = true
-      highlightBtn.classList.add('active')
-    }
-  } catch {
-    // cross-origin or parent not available
-  }
 
   const docsTab = document.createElement('button')
   docsTab.className = 'tab-btn'
@@ -1119,6 +1098,13 @@ function init() {
   document.getElementById('term-clear-btn')?.addEventListener('click', () => {
     const output = document.getElementById('terminal-output')
     if (output) output.innerHTML = ''
+  })
+
+  // Init RPC client for communication with server/client
+  initRpcClient().then(() => {
+    registerVisitStoryHandler()
+    // Check for any pending visit request (from context menu or story creation)
+    checkPendingVisit()
   })
 
   // Init storybook tab

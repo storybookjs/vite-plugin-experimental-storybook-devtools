@@ -1,8 +1,16 @@
 /// <reference types="@vitejs/devtools-kit" />
 /// <reference types="vite/client" />
 import type { DockClientScriptContext } from '@vitejs/devtools-kit/client'
-import { overlayEvents, showStoryCreationFeedback, hideContextMenu } from './overlay'
-import { enableHighlightMode, disableHighlightMode } from './listeners'
+import {
+  overlayEvents,
+  showStoryCreationFeedback,
+  hideContextMenu,
+} from './overlay'
+import {
+  enableHighlightMode,
+  disableHighlightMode,
+  setRegistryRpcCall,
+} from './listeners'
 import { debug, error as logError } from './logger'
 
 // Track previous subscription so we never stack duplicate listeners
@@ -11,6 +19,13 @@ let unsubLogInfo: (() => void) | null = null
 
 export default function clientScriptSetup(ctx: DockClientScriptContext): void {
   debug('clientScriptSetup called')
+
+  // Inject RPC call function into listeners.ts so it can push registry diffs
+  setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
+    return (ctx.rpc.call as any)(method, ...args)
+  })
+
+  // ─── Dock activation/deactivation ─────────────────────────────────
 
   // When dock is activated, enable highlight mode
   ctx.current.events.on('entry:activated', () => {
@@ -78,14 +93,16 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
         relativeFilePath?: string
         storyName?: string
         isAppend?: boolean
+        skipNavigation?: boolean
       }) => {
-        debug(
-          `Story created for ${data.componentName}: ${data.filePath}`,
-        )
+        debug(`Story created for ${data.componentName}: ${data.filePath}`)
         showStoryCreationFeedback('success', data.filePath, data.componentPath)
 
-        // If Storybook is already running, open the panel and navigate to the
-        // newly created story so the user can see it immediately.
+        // Skip navigation for batch operations (e.g. "Create all" from coverage panel)
+        if (data.skipNavigation) return
+
+        // If Storybook is already running, tell the panel to navigate to the
+        // newly created story via RPC (works whether panel is inline or popped out)
         const relPath = data.relativeFilePath
         if (!relPath) return
 
@@ -100,29 +117,21 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
           return
         }
 
-        const storyName = data.storyName
-
         // Close the context menu now that we're navigating to the story
         hideContextMenu()
 
-        // Panel already open → navigate directly
-        let visitFn = (window as any).__storybookDevtoolsVisitStory
-        if (typeof visitFn === 'function') {
-          visitFn(relPath, storyName)
-          return
-        }
-
-        // Panel not open yet — switch to it and wait for the panel to register
+        // Switch to the panel dock and tell it to visit the story via RPC
         if (ctx.docks?.switchEntry) {
           await ctx.docks.switchEntry('storybook-devtools-panel')
-          for (let i = 0; i < 20; i++) {
-            await new Promise((r) => setTimeout(r, 150))
-            visitFn = (window as any).__storybookDevtoolsVisitStory
-            if (typeof visitFn === 'function') {
-              visitFn(relPath, storyName)
-              return
-            }
-          }
+        }
+
+        try {
+          await (ctx.rpc.call as any)('component-highlighter:visit-story', {
+            relativeFilePath: relPath,
+            preferredStoryName: data.storyName,
+          })
+        } catch {
+          // Panel may not have registered its handler yet; best effort
         }
       },
     )

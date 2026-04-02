@@ -41,7 +41,8 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 5. **DevTools panel** (`src/panel/panel.ts`)
    - Four tabs: Storybook (embedded iframe), Coverage (dashboard), Terminal (process output), Docs
    - Coverage tab: lists all detected components, shows story status, bulk "Create all" button
-   - Panel communicates with overlay via `window.parent` globals
+   - Panel communicates via Vite DevTools RPC (works whether inline or popped out)
+   - Story navigation uses Storybook channel API (`__STORYBOOK_ADDONS_CHANNEL__.emit('setCurrentStory')`) for smooth transitions
 
 6. **Story generation (server)** (`src/frameworks/*/story-generator.ts`)
    - Receives payload from client via DevTools RPC
@@ -73,7 +74,8 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `src/client/overlay.ts` | Highlight rendering, story file cache, save actions, debug overlay |
 | `src/client/context-menu.ts` | Context menu UI (Shadow DOM), props display, action buttons |
 | `src/client/interaction-recorder.ts` | User interaction recording and play function generation |
-| `src/client/vite-devtools.ts` | DevTools dock lifecycle (activate/deactivate, double-Escape hook) |
+| `src/client/coverage-actions.ts` | Client-side coverage actions (scroll, highlight) triggered by panel via RPC |
+| `src/client/vite-devtools.ts` | DevTools dock lifecycle, client RPC handlers for panel→client broadcast |
 | `src/panel/panel.ts` | DevTools panel tabs (Storybook, Coverage, Terminal, Docs) |
 | `src/frameworks/<fw>/story-generator.ts` | Framework-specific story code output |
 | `src/utils/story-generator.ts` | Shared story generation utilities (name generation, args formatting) |
@@ -89,8 +91,24 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterToggle()` | Toggle highlight-all mode |
 | `__componentHighlighterDraw()` | Force redraw all highlights |
 | `__componentHighlighterDeactivateDock()` | Programmatically toggle dock off |
-| `__componentHighlighterCreateStory()` | Trigger story creation from panel |
-| `__storybookDevtoolsVisitStory()` | Navigate to story in panel iframe |
+
+## Panel↔Client communication (RPC-based)
+
+The panel runs as a standalone HTML app that can be popped out into a separate window.
+All panel→client communication uses Vite DevTools RPC with server-side relay:
+
+```
+Panel → server RPC call → server broadcasts → client RPC handler → DOM operation
+```
+
+| Server RPC (panel calls) | Client broadcast handler | Purpose |
+|--------------------------|-------------------------|---------|
+| `component-highlighter:get-registry` | — (query, no broadcast) | Panel reads serialized registry snapshot |
+| `component-highlighter:push-registry-diff` | — (client pushes to server) | Client syncs registry changes to server |
+| `component-highlighter:scroll-to-component` | `do-scroll-to-component` | Scroll app page to a component |
+| `component-highlighter:highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights on app page |
+| `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
+| `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
 
 ## Invariants (do not break)
 

@@ -47,6 +47,65 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
      - `.github/pull_request_template.md` - If PR process changed
    - When in doubt, update the docs. Stale documentation causes compounding errors for future agents and contributors.
 
+## Verifying DevTools Panel Behavior
+
+When changes affect the panel, coverage dashboard, or panel↔client communication,
+verify interactively using preview tools against a playground dev server.
+
+### Setup
+
+Use `.claude/launch.json` to start a playground (E2E env var is removed so DevTools
+authorization works). The DevTools dock lives inside
+`<vite-devtools-dock-embedded>` — a custom element with a **shadow DOM**.
+
+### Navigating the DevTools UI via preview tools
+
+```js
+// Access the shadow root
+const dock = document.querySelector('vite-devtools-dock-embedded');
+const shadow = dock?.shadowRoot;
+
+// Find dock buttons (Storybook, Component Highlighter, etc.)
+const buttons = shadow?.querySelectorAll('button');
+// Click by title: btn.title === 'Storybook' or 'Component Highlighter'
+
+// Access the panel iframe (Storybook/Coverage/Terminal/Docs tabs)
+const iframe = shadow?.querySelector('iframe');
+const iframeDoc = iframe?.contentDocument;
+
+// Interact with panel tab buttons
+iframeDoc?.querySelectorAll('.tab-btn');  // click by textContent
+
+// Panel-specific elements
+iframeDoc?.getElementById('highlight-toggle');  // highlight mode toggle
+iframeDoc?.querySelectorAll('tr.row');           // coverage table rows
+iframeDoc?.querySelector('.act-btn.locate');      // scroll-to-component buttons
+```
+
+### Authorization
+
+If the DevTools shows "Unauthorized", auto-authorize with:
+```js
+const ctx = window.__VITE_DEVTOOLS_CLIENT_CONTEXT__;
+const token = window.__VITE_DEVTOOLS_CONNECTION_AUTH_TOKEN__;
+ctx.rpc.requestTrustWithToken(token);
+```
+
+### What to verify
+
+- Coverage tab: components show correct visible/not-visible status
+- Hover on coverage rows: highlight overlays appear on app page (`[data-coverage-highlight]`)
+- Highlight toggle: `window.__componentHighlighterIsActive()` reflects state, cursor changes
+- Scroll-to-component: locate button triggers scroll via RPC
+- Create story / Create all: stories created without errors
+- Registry sync: `ctx.rpc.call('component-highlighter:get-registry')` returns instances
+
+### Communication architecture
+
+All panel↔client communication uses Vite DevTools RPC (no `window.parent`).
+Client broadcast handlers are registered in `listeners.ts` via `autoInitRpc()` —
+they work before dock activation. See `docs/ARCHITECTURE.md` for the full RPC table.
+
 ## Required Validation Before Handoff
 
 Run relevant checks (at minimum):
