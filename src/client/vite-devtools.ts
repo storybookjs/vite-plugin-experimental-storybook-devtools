@@ -1,32 +1,60 @@
 /// <reference types="@vitejs/devtools-kit" />
 /// <reference types="vite/client" />
 import type { DockClientScriptContext } from '@vitejs/devtools-kit/client'
-import { overlayEvents, showStoryCreationFeedback } from './overlay'
-import { enableHighlightMode, disableHighlightMode } from './listeners'
+import {
+  overlayEvents,
+  showStoryCreationFeedback,
+  hideContextMenu,
+} from './overlay'
+import {
+  enableHighlightMode,
+  disableHighlightMode,
+  setRegistryRpcCall,
+} from './listeners'
+import { debug, error as logError } from './logger'
+
+// Track previous subscription so we never stack duplicate listeners
+// (clientScriptSetup may be called more than once on HMR or dock reconnect)
+let unsubLogInfo: (() => void) | null = null
 
 export default function clientScriptSetup(ctx: DockClientScriptContext): void {
-  console.log('[component-highlighter] clientScriptSetup called')
+  debug('clientScriptSetup called')
+
+  // Inject RPC call function into listeners.ts so it can push registry diffs
+  setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
+    return (ctx.rpc.call as any)(method, ...args)
+  })
+
+  // ─── Dock activation/deactivation ─────────────────────────────────
 
   // When dock is activated, enable highlight mode
   ctx.current.events.on('entry:activated', () => {
-    console.log(
-      '[component-highlighter] dock activated - enabling highlight mode',
-    )
+    debug('dock activated - enabling highlight mode')
     enableHighlightMode()
   })
 
   // When dock is deactivated, disable highlight mode
   ctx.current.events.on('entry:deactivated', () => {
-    console.log(
-      '[component-highlighter] dock deactivated - disabling highlight mode',
-    )
+    debug('dock deactivated - disabling highlight mode')
     disableHighlightMode()
   })
 
+  // Expose a function so the double-Escape handler in listeners.ts can
+  // programmatically toggle the dock off (updates the DevTools button state).
+  ;(window as any).__componentHighlighterDeactivateDock = () => {
+    ctx.docks.toggleEntry(ctx.current.entryMeta.id)
+  }
+
+  // Clean up previous listener before adding a new one
+  if (unsubLogInfo) {
+    unsubLogInfo()
+    unsubLogInfo = null
+  }
+
   // Listen for "Create Story" button clicks from overlay
-  overlayEvents.on('log-info', async (data) => {
-    console.log(
-      '[component-highlighter] log-info event received, calling RPC:',
+  unsubLogInfo = overlayEvents.on('log-info', async (data) => {
+    debug(
+      'log-info event received, calling RPC:',
       data.meta.componentName,
       'story:',
       data.storyName,
@@ -45,10 +73,10 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
         ...(data.playImports ? { playImports: data.playImports } : {}),
       })
 
-      console.log('[component-highlighter] RPC call successful')
+      debug('RPC call successful')
       // Feedback will be shown via HMR event from server
-    } catch (error) {
-      console.error('[component-highlighter] RPC call failed:', error)
+    } catch (err) {
+      logError('RPC call failed:', err)
       // Show error feedback in overlay
       showStoryCreationFeedback('error')
     }
@@ -58,15 +86,53 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
   if (import.meta.hot) {
     import.meta.hot.on(
       'component-highlighter:story-created',
-      (data: {
+      async (data: {
         filePath: string
         componentName: string
         componentPath?: string
+        relativeFilePath?: string
+        storyName?: string
+        isAppend?: boolean
+        skipNavigation?: boolean
       }) => {
-        console.log(
-          `[component-highlighter] ✅ Story created for ${data.componentName}: ${data.filePath}`,
-        )
+        debug(`Story created for ${data.componentName}: ${data.filePath}`)
         showStoryCreationFeedback('success', data.filePath, data.componentPath)
+
+        // Skip navigation for batch operations (e.g. "Create all" from coverage panel)
+        if (data.skipNavigation) return
+
+        // If Storybook is already running, tell the panel to navigate to the
+        // newly created story via RPC (works whether panel is inline or popped out)
+        const relPath = data.relativeFilePath
+        if (!relPath) return
+
+        try {
+          const statusRes = await fetch(
+            '/__component-highlighter/storybook-status',
+          )
+          if (!statusRes.ok) return
+          const status = await statusRes.json()
+          if (!status.running) return
+        } catch {
+          return
+        }
+
+        // Close the context menu now that we're navigating to the story
+        hideContextMenu()
+
+        // Switch to the panel dock and tell it to visit the story via RPC
+        if (ctx.docks?.switchEntry) {
+          await ctx.docks.switchEntry('storybook-devtools-panel')
+        }
+
+        try {
+          await (ctx.rpc.call as any)('component-highlighter:visit-story', {
+            relativeFilePath: relPath,
+            preferredStoryName: data.storyName,
+          })
+        } catch {
+          // Panel may not have registered its handler yet; best effort
+        }
       },
     )
   }

@@ -75,7 +75,7 @@ export const convertInteractionsToCode = (
 
     if (event.type === 'type') {
       if (event.value === '') {
-        beginning = beginning.replace(EVENT_TO_USER_EVENT[event.type], 'clear')
+        beginning = beginning.replace(EVENT_TO_USER_EVENT[event.type]!, 'clear')
         valueStr = ''
       } else {
         valueStr = `, ${wrapInQuotes(event.value)}`

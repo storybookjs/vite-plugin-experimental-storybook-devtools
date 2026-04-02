@@ -3,8 +3,6 @@ import { expect, type Page } from '@playwright/test'
 export async function enableHighlighting(page: Page) {
   await page.evaluate(() => {
     ;(window as any).__componentHighlighterEnable?.()
-    ;(window as any).__componentHighlighterDraw?.()
-    ;(window as any).__componentHighlighterToggle?.()
   })
   await page.waitForTimeout(300)
 }
@@ -26,37 +24,20 @@ export async function getHighlightIdByComponent(page: Page, componentName: strin
 }
 
 export async function clickComponentHighlight(page: Page, componentName: string) {
+  // Use the test hook to directly select a component by its registry ID,
+  // which opens the context menu without needing highlight-all mode.
   const highlightId = await getHighlightIdByComponent(page, componentName)
   expect(highlightId).toBeTruthy()
 
-  const clicked = await page.evaluate((id) => {
-    const el = document.querySelector(
-      `#component-highlighter-container div[data-highlight-id="${id}"]`,
-    ) as HTMLElement | null
-    if (!el) return false
-
-    const rect = el.getBoundingClientRect()
-    el.dispatchEvent(
-      new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
-      }),
-    )
-
-    return true
+  const selected = await page.evaluate((id) => {
+    return (window as any).__componentHighlighterSelectById?.(id) ?? false
   }, highlightId)
 
-  expect(clicked).toBe(true)
+  expect(selected).toBe(true)
   await page.waitForTimeout(300)
 }
 
 export async function hoverTaskListHeading(page: Page) {
-  await page.evaluate(() => {
-    ;(window as any).__componentHighlighterToggle?.()
-  })
-
   const target = page.getByRole('heading', { name: 'All Tasks' })
   const bbox = await target.boundingBox()
   expect(bbox).toBeTruthy()

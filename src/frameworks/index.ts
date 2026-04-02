@@ -15,5 +15,4 @@ export type {
   TransformFunction,
   FrameworkDetector,
   FrameworkConfig,
-  ProviderDependency,
 } from './types'

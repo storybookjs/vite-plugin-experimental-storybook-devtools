@@ -1,22 +1,25 @@
 # Vite Component Highlighter Plugin
 
-A Vite plugin that instruments React components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
+A Vite plugin that instruments React and Vue components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
 
 ![Component Highlighter Demo](https://via.placeholder.com/800x400?text=Component+Highlighter+Demo)
 
-## ✨ Features
+## Features
 
-- 🔍 **Component Highlighting** - Visual overlay on React components with configurable colors
-- 📚 **One-Click Story Generation** - Create Storybook stories directly from your running app
-- 🎯 **JSX Props Support** - Properly serializes JSX children and nested components
-- 🔄 **Append to Existing Stories** - Add new stories to existing story files
-- 📁 **Smart Imports** - Automatically resolves and adds component imports
-- 🎛️ **DevTools Integration** - Built-in Vite DevTools Kit dock panel
-- 📊 **Debug Overlay** - Component stats and story coverage when holding Alt
-- ⚡ **Performance Optimized** - Only active in development, tree-shaken in production
-- ⌨️ **Keyboard Shortcuts** - Quick toggles and navigation
+- **Component Highlighting** - Visual overlay on React and Vue components with configurable colors
+- **One-Click Story Generation** - Create Storybook stories directly from your running app
+- **Interaction Recording** - Record user interactions and generate stories with play functions
+- **Props Serialization** - Properly serializes JSX children, Vue slots, nested components, and reactive objects
+- **Append to Existing Stories** - Add new story variants to existing story files
+- **Smart Imports** - Automatically resolves and adds component imports
+- **DevTools Integration** - Built-in Vite DevTools Kit dock panel with Storybook, Coverage, Terminal, and Docs tabs
+- **Coverage Dashboard** - Track story coverage across all detected components
+- **Debug Overlay** - Component stats and story coverage when holding Alt
+- **Copy Prompt** - Copy LLM-friendly component context to clipboard for AI-assisted development
+- **Performance Optimized** - Only active in development, tree-shaken in production
+- **Keyboard Shortcuts** - Quick toggles and navigation
 
-## 📦 Installation
+## Installation
 
 ```bash
 npm install vite-plugin-experimental-storybook-devtools
@@ -30,12 +33,12 @@ yarn add vite-plugin-experimental-storybook-devtools
 
 This plugin requires:
 - `vite` >= 5.0.0
-- `react` >= 18.0.0
 - `@vitejs/devtools` >= 0.1.0
+- One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Add the plugin to your Vite config
+### React
 
 ```typescript
 // vite.config.ts
@@ -53,78 +56,121 @@ export default defineConfig({
 })
 ```
 
-### 2. Start your development server
+### Vue
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { DevTools } from '@vitejs/devtools'
+import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/vue'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    DevTools(),
+    componentHighlighter(),
+  ],
+})
+```
+
+### Start developing
 
 ```bash
 npm run dev
 ```
 
-### 3. Open Vite DevTools
-
-Click the Vite DevTools floating button (usually bottom-right) and select the **Component Highlighter** tab.
-
-### 4. Start highlighting!
+Open Vite DevTools (floating button, usually bottom-right) and activate the **Component Highlighter** dock entry.
 
 Once the dock is active:
-- **Hover** over any component to see its tooltip
+- **Hover** over any component to see its highlight and tooltip
 - **Click** on a component to open the context menu
-- **Hold Alt** to see all components highlighted at once
-- **Create stories** with a single click!
+- **Hold Alt/Option** to see all components highlighted at once
+- **Create stories** with a single click
 
-## 🎮 Usage
+## Usage
 
 ### Highlight Modes
 
 | Mode | Trigger | Description |
 |------|---------|-------------|
-| **Hover** | Mouse over | Shows tooltip for single component |
-| **Highlight All** | Hold `Alt` | Shows all components with debug overlay |
-| **Toggle Sticky** | `Shift + H` | Keeps highlight-all mode active |
-| **Dismiss** | `Escape` | Closes context menu or selection |
+| **Hover** | Mouse over | Highlights single component under cursor |
+| **Highlight All** | Hold `Alt/Option` | Shows all components with debug overlay |
+| **Sticky Highlight** | `Shift + H` | Keeps highlight-all mode active until toggled off |
+| **Clear Selection** | `Escape` | Clears current component selection |
+| **Exit Highlighting** | `Escape` x2 (within 600ms) | Turns off highlight mode entirely |
 
 ### Highlight Colors
 
-- 🔵 **Blue** - Non-hovered components (when Alt is held)
-- 🩷 **Pink Solid** - Currently hovered component
-- 🩷 **Pink Dashed** - Other instances of the same component
-- 🩷 **Pink (20% bg)** - Selected component
+- **Blue border** - Non-hovered components (when Alt is held or sticky mode)
+- **Pink solid border** - Currently hovered component
+- **Pink dashed border** - Other instances of the same component type
+- **Pink background (20%)** - Selected component (context menu open)
+
+### Context Menu
+
+Click on a highlighted component to open the context menu, which provides:
+
+**Action buttons (top row):**
+1. **Open Code** - Opens the component source file in your editor
+2. **Copy Prompt** - Copies an LLM-friendly prompt with component name, file path, current props, and story status to clipboard
+3. **Open Story** - Opens the story file in your editor (disabled if no story exists yet)
+4. **View Story** - Navigates to the story in the embedded Storybook panel
+
+**Properties section:**
+- Displays all current props with type-colored badges (strings, numbers, booleans, functions, objects, JSX/slots)
+- Expandable object viewer with copy buttons
+- Collapsible props section
+
+**Story creation:**
+- **Story name input** - Pre-filled with a smart suggestion based on props (variant, type, size, etc.)
+- **Create** - Generates a story file with the current props
+- **Create with Interactions** - Records user interactions (clicks, typing, selections) and generates a story with a play function
 
 ### Creating Stories
 
 1. **Click on a highlighted component** to open the context menu
-2. **Enter a story name** (auto-suggested based on props)
-3. **Click "Create Story"** (or "Add Story" if stories exist)
-4. The story file is created/updated automatically!
+2. **Enter a story name** (auto-suggested based on meaningful props like variant, size, type)
+3. **Click "Create"** to generate a story with current props
+4. Or **click "Create with Interactions"** to record interactions first, then click the stop button to save
 
-### Context Menu Features
+The story file is created at `<component-dir>/<ComponentName>.stories.{ts,tsx}` (`.ts` for Vue, `.tsx` for React). If the file already exists, a new named export is appended.
 
-- **Component name** with Storybook icon (if stories exist)
-- **Relative file path** for quick reference
-- **Props display** with current values
-- **Story name input** with smart suggestions
-- **Open Component** - Opens the component file in your editor
-- **Open Stories** - Opens the story file in your editor
-- **Create/Add Story** - Generates story with current props
+### Coverage Dashboard
 
-## ⚙️ Configuration
+The DevTools panel includes a **Coverage** tab that shows:
+- A progress bar with color-coded coverage percentage
+- A table of all detected components with their story status
+- **Create all** button - Creates stories for all visible component instances on screen, deduplicating by props fingerprint
+- Per-component create buttons for individual story generation
+- Visibility indicators showing which components are currently rendered
+
+### DevTools Panel Tabs
+
+| Tab | Description |
+|-----|-------------|
+| **Storybook** | Embedded Storybook iframe with start/status controls |
+| **Coverage** | Component story coverage dashboard with bulk creation |
+| **Terminal** | Live Storybook process output with error highlighting |
+| **Docs** | Embedded Storybook documentation |
+
+## Configuration
 
 ```typescript
 componentHighlighter({
-  // Glob patterns for files to instrument (default: framework's extensions)
-  include: ['**/*.{tsx,jsx}'],
-  
+  // Glob patterns for files to instrument
+  include: ['**/*.{tsx,jsx}'],     // React
+  include: ['**/*.vue'],           // Vue
+
   // Glob patterns to exclude
-  exclude: ['**/node_modules/**', '**/dist/**', '**/*.stories.{tsx,jsx}'],
-  
-  // Custom event name for story creation
-  eventName: 'component-highlighter:create-story',
-  
-  // Enable/disable overlay (default: true)
-  enableOverlay: true,
-  
-  // Custom DevTools dock ID
-  devtoolsDockId: 'component-highlighter',
-  
+  exclude: ['**/node_modules/**', '**/dist/**'],
+
+  // Subdirectory for generated story files (relative to component)
+  storiesDir: undefined,
+
+  // Enable debug logging
+  debugMode: false,
+
   // Force instrumentation in production (default: false)
   force: false,
 })
@@ -140,24 +186,22 @@ The following patterns are excluded by default:
 - `**/*.test.{tsx,jsx,ts,js}`
 - `**/*.spec.{tsx,jsx,ts,js}`
 
-## 📖 Generated Story Format
+## Generated Story Format
 
-The plugin generates TypeScript stories compatible with Storybook 7+:
+### React
 
 ```typescript
-import React from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { fn } from 'storybook/test';
 import MyButton from './MyButton';
 import Icon from './Icon';
 
-const meta = {
-  title: 'Components/MyButton',
+const meta: Meta<typeof MyButton> = {
   component: MyButton,
-} satisfies Meta<typeof MyButton>;
+};
 
 export default meta;
-type Story = StoryObj<typeof meta>;
+type Story = StoryObj<typeof MyButton>;
 
 export const Primary: Story = {
   args: {
@@ -169,77 +213,122 @@ export const Primary: Story = {
 };
 ```
 
+### Vue
+
+```typescript
+import type { Meta, StoryObj } from '@storybook/vue3-vite';
+import Button from './Button.vue';
+
+const meta: Meta<typeof Button> = {
+  component: Button,
+};
+
+export default meta;
+type Story = StoryObj<typeof Button>;
+
+export const Secondary: Story = {
+  render: (args) => ({
+    components: { Button },
+    setup() {
+      const componentArgs = Object.fromEntries(
+        Object.entries(args).filter(([key]) => !key.startsWith('slot:')),
+      );
+      return { componentArgs };
+    },
+    template: `<Button v-bind="componentArgs">Click me</Button>`,
+  }),
+  args: {
+    variant: 'secondary',
+    size: 'default',
+  },
+};
+```
+
 ### Supported Prop Types
 
-| Type | Example | Generated Code |
-|------|---------|----------------|
-| Primitives | `"hello"`, `42`, `true` | `"hello"`, `42`, `true` |
-| Objects | `{ nested: { value: 1 } }` | `{ nested: { value: 1 } }` |
-| Arrays | `[1, 2, 3]` | `[1, 2, 3]` |
-| JSX Elements | `<Icon />` | `<Icon />` (with import) |
-| JSX Children | `<>Hello <Button /></>` | `<>Hello <Button /></>` |
-| Functions | `onClick={handleClick}` | `fn()` (with import) |
+| Type | React | Vue | Generated Code |
+|------|-------|-----|----------------|
+| Primitives | `"hello"`, `42`, `true` | Same | Direct values |
+| Objects | `{ nested: { value: 1 } }` | Reactive objects auto-unwrapped | `{ nested: { value: 1 } }` |
+| Arrays | `[1, 2, 3]` | Same | `[1, 2, 3]` |
+| JSX Elements | `<Icon />` | N/A | `<Icon />` (with import) |
+| Vue Slots | N/A | `<slot />` | Template syntax in render function |
+| Functions | `onClick={handler}` | `@click="handler"` | `fn()` (with import) |
+| Children | `<>Hello <Button /></>` | Default slot content | Framework-specific syntax |
 
-## 🔍 Debug Overlay
+## Debug Overlay
 
-When holding `Alt`, a debug overlay appears in the top-right corner showing:
+When holding `Alt/Option` (or with Shift+H sticky mode), a debug overlay appears showing:
 
 - **Total components** - Number of component instances on screen
 - **Unique components** - Number of distinct component types
 - **With stories** - Components that have story files
 - **Coverage %** - Percentage of components with stories
 
-## 🏗️ Architecture
+## Architecture
 
 For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Vite Plugin   │    │ Runtime Module   │    │  DevTools Dock  │
-│                 │    │                  │    │                 │
-│ • Transform JSX │───▶│ • Runtime HOC    │───▶│ • Component UI  │
-│ • Inject meta   │    │ • Registry       │    │ • RPC Handler   │
-│ • Load FW gen   │    │ • Serialization  │    │ • Story create  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                             │                           │
-                             ▼                           ▼
-                  ┌──────────────────┐    ┌─────────────────────┐
-                  │ Shared Helpers   │    │ Framework Story Gen │
-                  │ • DOM tracking   │    │ • React generator   │
-                  │ • Observers      │    │ • Vue generator     │
-                  └──────────────────┘    └─────────────────────┘
++-----------------+    +------------------+    +-----------------+
+|   Vite Plugin   |    | Runtime Module   |    |  DevTools Dock  |
+|                 |    |                  |    |                 |
+| - Transform     |--->| - Registration   |--->| - Panel UI      |
+| - Inject meta   |    | - Registry       |    | - RPC Handler   |
+| - Endpoints     |    | - Serialization  |    | - Story create  |
++-----------------+    +------------------+    +-----------------+
+                             |                         |
+                             v                         v
+                  +------------------+    +---------------------+
+                  | Client Overlay   |    | Framework Story Gen |
+                  | - Highlights     |    | - React generator   |
+                  | - Context menu   |    | - Vue generator     |
+                  | - Interactions   |    | - Shared utilities  |
+                  +------------------+    +---------------------+
 ```
 
 ### How It Works
 
-1. **Build-time**: Babel/compiler transforms wrap components with framework-specific HOC
-2. **Runtime**: HOC registers component instances with metadata and props
-3. **Interaction**: Overlay detects mouse events and renders highlights
-4. **Story Creation**: Plugin dynamically loads framework-specific story generator, serialized props are sent via RPC, story files are written to disk with framework-specific imports and file extensions
+1. **Build-time**: Framework-specific transforms inject component metadata (React via Babel AST, Vue via SFC compiler)
+2. **Runtime**: Framework wrappers (React HOC / Vue composable) register component instances with metadata, props, and DOM elements
+3. **Interaction**: Client overlay renders highlights on hover/click, shows context menu with props and actions
+4. **Story Creation**: Serialized props are sent via DevTools RPC to the server plugin, which dynamically loads the framework-specific story generator and writes story files to disk
+5. **Interaction Recording**: User actions are captured as an ordered list of steps, then formatted into a Storybook play function
 
-## 🧪 Development
+## Keyboard Shortcuts Reference
+
+| Shortcut | Action |
+|----------|--------|
+| `Alt/Option` (hold) | Show all component highlights + debug overlay |
+| `Shift + H` | Toggle sticky highlight-all mode |
+| `Escape` | Clear selection / close context menu |
+| `Escape` x2 (within 600ms) | Exit highlight mode entirely |
+| `Enter` (in story name input) | Create story |
+
+## Development
 
 ### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/vite-plugin-experimental-storybook-devtools.git
-cd vite-plugin-experimental-storybook-devtools
+git clone https://github.com/storybookjs/vite-plugin-storybook-devtools.git
+cd vite-plugin-storybook-devtools
 
-# Install dependencies
 pnpm install
 ```
 
 ### Available Scripts
 
 ```bash
-# Run the playground app
-pnpm play
+# Run React playground
+pnpm --filter playground-react dev
+
+# Run Vue playground
+pnpm --filter playground-vue dev
 
 # Run unit tests
 pnpm test
 
-# Run E2E tests (requires playground running)
+# Run E2E tests (starts playgrounds automatically)
 pnpm exec playwright test
 
 # Build the library
@@ -252,120 +341,74 @@ pnpm typecheck
 ### Project Structure
 
 ```
-├── src/
-│   ├── index.ts                               # Package entry
-│   ├── create-component-highlighter-plugin.ts # Main Vite plugin
-│   ├── runtime-helpers.ts                     # Shared runtime utilities
-│   ├── frameworks/
-│   │   ├── types.ts                           # Shared framework interfaces
-│   │   ├── react/
-│   │   │   ├── index.ts                       # React framework config
-│   │   │   ├── plugin.ts                      # React entry point
-│   │   │   ├── transform.ts                   # Babel AST transformation
-│   │   │   ├── runtime-module.ts              # Runtime HOC (React)
-│   │   │   └── story-generator.ts             # React story generation
-│   │   └── vue/
-│   │       ├── index.ts                       # Vue framework config
-│   │       ├── plugin.ts                      # Vue entry point
-│   │       ├── transform.ts                   # Vue SFC transformation
-│   │       ├── runtime-module.ts              # Runtime wrapper (Vue)
-│   │       └── story-generator.ts             # Vue story generation
-│   ├── client/
-│   │   ├── overlay.ts                         # UI overlay
-│   │   ├── listeners.ts                       # Event handlers
-│   │   └── vite-devtools.ts                   # DevTools dock
-│   └── utils/
-│       ├── story-generator.ts                 # Shared story utilities
-│       └── provider-analyzer.ts               # Provider detection
-├── tests/                                     # Unit tests
-├── e2e/                                       # E2E tests
-└── playground/                                # Development apps
-    ├── react/                                 # React test app
-    └── vue/                                   # Vue test app
+src/
+  create-component-highlighter-plugin.ts  # Main Vite plugin (server endpoints, RPC, transforms)
+  runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
+  frameworks/
+    types.ts                              # Shared framework interfaces
+    react/
+      plugin.ts                           # React entry point
+      index.ts                            # React framework config
+      transform.ts                        # Babel AST transformation
+      runtime-module.ts                   # React HOC + registration
+      story-generator.ts                  # React story generation
+    vue/
+      plugin.ts                           # Vue entry point
+      index.ts                            # Vue framework config
+      transform.ts                        # Vue SFC transformation
+      runtime-module.ts                   # Vue composable + registration
+      story-generator.ts                  # Vue story generation
+      vnode-to-template.ts               # VNode to template serialization
+  client/
+    overlay.ts                            # Highlight UI, story file cache, save actions
+    context-menu.ts                       # Context menu (Shadow DOM), props display, actions
+    listeners.ts                          # Mouse/keyboard event handlers, highlight mode state
+    vite-devtools.ts                      # DevTools dock lifecycle (activate/deactivate)
+    interaction-recorder.ts               # User interaction recording for play functions
+  panel/
+    panel.ts                              # DevTools panel (Storybook, Coverage, Terminal, Docs tabs)
+    panel.css                             # Panel styles
+  utils/
+    story-generator.ts                    # Shared story generation utilities
+    provider-analyzer.ts                  # Context provider detection
+e2e/
+  highlighter-helpers.ts                  # Shared E2E helper functions
+  common-highlighter-suite.ts             # Shared test suite (both frameworks)
+  playground-react-detection.spec.ts      # React-specific detection tests
+  playground-vue-detection.spec.ts        # Vue-specific detection tests
+playground/
+  react/                                  # React development app
+  vue/                                    # Vue development app
 ```
 
-## ⚠️ Limitations
+## Limitations
 
-- **React & Vue** - Currently supports React and Vue (other frameworks coming soon)
+- **React & Vue only** - Currently supports React and Vue (other frameworks planned)
 - **Development only** - Disabled in production builds by default
-- **Vite DevTools required** - Needs `@vitejs/devtools` for full functionality
+- **Vite DevTools required** - Needs `@vitejs/devtools` for the dock panel and RPC
+- **Function components** - Class components are not supported
 - **Provider dependencies** - Components requiring context providers may need Storybook decorators
 
-### Handling Provider Dependencies
+## Troubleshooting
 
-If your components use context providers (Redux, Router, Theme, etc.), you'll need to set up decorators in your Storybook preview file. The plugin includes a provider analyzer that can help identify these dependencies.
+### Stories aren't being created
 
-See the [Provider Analysis](#provider-analysis) section for more details.
-
-## 🔮 Future Plans
-
-- [ ] Vue support
-- [ ] Svelte support
-- [ ] Angular support
-- [ ] Automatic decorator generation
-- [ ] Component usage analytics
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](./CONTRIBUTING.md) before submitting a PR.
-
-### Reporting Issues
-
-When reporting issues, please include:
-- Node.js version
-- Vite version
-- React version
-- Browser and version
-- Minimal reproduction
-
-## 📄 License
-
-MIT © Yann Braga
-
----
-
-## Appendix
-
-### Provider Analysis
-
-The plugin includes a provider analyzer (`src/provider-analyzer.ts`) that can detect common provider dependencies:
-
-**Supported Providers**:
-- Redux (`react-redux`, `@reduxjs/toolkit`)
-- React Router (`react-router-dom`)
-- Emotion (`@emotion/react`)
-- Styled Components (`styled-components`)
-- TanStack Query (`@tanstack/react-query`)
-- React Intl (`react-intl`)
-- i18next (`react-i18next`)
-- Chakra UI (`@chakra-ui/react`)
-- Mantine (`@mantine/core`)
-- Next.js (`next/router`, `next/navigation`)
-
-The analyzer scans your app entry point and logs detected providers with decorator suggestions.
-
-### Keyboard Shortcuts Reference
-
-| Shortcut | Action |
-|----------|--------|
-| `Alt` (hold) | Show all component highlights + debug overlay |
-| `Shift + H` | Toggle sticky highlight-all mode |
-| `Escape` | Dismiss context menu / clear selection |
-
-### Troubleshooting
-
-#### Stories aren't being created
-
-1. Ensure the DevTools dock is open and the Component Highlighter tab is active
+1. Ensure the DevTools dock is open and the Component Highlighter entry is active
 2. Check the browser console for errors
 3. Verify the output path is writable
 
-#### Components not being highlighted
+### Components not being highlighted
 
 1. Ensure the file matches the `include` patterns
 2. Check that it's not matching an `exclude` pattern
-3. Verify the component is a function component (not a class)
+3. Verify the component is a function component (class components are not supported)
+4. For Vue, ensure the component has a `<script setup>` or `<script>` block
 
-#### JSX props showing as `[Object]`
+### Story generation produces wrong imports
 
-This typically means the component rendered before the plugin fully loaded. Try refreshing the page.
+1. Check that component references are in the live registry (rendered on screen)
+2. Vue components need the `.vue` extension in the import path
+
+## License
+
+MIT

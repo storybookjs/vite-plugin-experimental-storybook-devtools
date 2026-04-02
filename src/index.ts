@@ -30,11 +30,16 @@ export type {
   TransformFunction,
   FrameworkDetector,
   FrameworkConfig,
-  ProviderDependency,
 } from './frameworks'
 
-// Provider analyzer
+// Notification abstraction
+export type {
+  Notification,
+  NotificationLevel,
+  NotificationHandle,
+  NotificationService,
+} from './notifications'
 export {
-  analyzeAppProviders,
-  analyzeComponentFile,
-} from './utils/provider-analyzer'
+  ConsoleNotificationService,
+  DevToolsNotificationService,
+} from './notifications'

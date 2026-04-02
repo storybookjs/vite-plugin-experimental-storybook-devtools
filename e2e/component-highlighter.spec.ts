@@ -1,29 +1,23 @@
 import { test, expect, Page } from '@playwright/test'
 
-// Helper to enable highlight mode and show all highlights
-async function enableHighlightModeAndShowAll(page: Page) {
-  // Enable overlay and toggle highlight all
+// Helper to enable highlight mode
+async function enableHighlightModeForTest(page: Page) {
   await page.evaluate(() => {
-    const registry = (window as any).__componentHighlighterRegistry
-    if (registry) {
-      // Update rects for all components
-      for (const instance of registry.values()) {
-        if (instance.element && instance.element.isConnected) {
-          instance.rect = instance.element.getBoundingClientRect()
-        }
-      }
-    }
-    // Enable overlay
-    ;(window as any).__componentHighlighterDraw?.()
-    // Toggle highlight all
-    ;(window as any).__componentHighlighterToggle?.()
+    ;(window as any).__componentHighlighterEnable?.()
   })
-  // Wait for highlights to render
   await page.waitForTimeout(500)
 }
 
 async function openContextMenu(page: Page) {
-  await enableHighlightModeAndShowAll(page)
+  await enableHighlightModeForTest(page)
+
+  // Hover over a component to trigger its highlight, then click
+  const target = page.getByRole('heading', { name: 'All Tasks' })
+  const bbox = await target.boundingBox()
+  expect(bbox).toBeTruthy()
+
+  await page.mouse.move(bbox!.x + bbox!.width / 2, bbox!.y + bbox!.height / 2)
+  await page.waitForTimeout(300)
 
   const clicked = await page.evaluate(() => {
     const highlights = document.querySelectorAll(
@@ -85,7 +79,7 @@ test.describe('Component Highlighter', () => {
 
   test.describe('Highlight Behavior', () => {
     test('should show highlight container when enabled', async ({ page }) => {
-      await enableHighlightModeAndShowAll(page)
+      await enableHighlightModeForTest(page)
 
       const highlightContainer = page.locator(
         '#component-highlighter-container',
@@ -93,8 +87,15 @@ test.describe('Component Highlighter', () => {
       await expect(highlightContainer).toBeAttached()
     })
 
-    test('should show highlights when toggle is called', async ({ page }) => {
-      await enableHighlightModeAndShowAll(page)
+    test('should show highlight on hover', async ({ page }) => {
+      await enableHighlightModeForTest(page)
+
+      // Hover over a component to trigger its highlight
+      const target = page.getByRole('heading', { name: 'All Tasks' })
+      const bbox = await target.boundingBox()
+      expect(bbox).toBeTruthy()
+      await page.mouse.move(bbox!.x + bbox!.width / 2, bbox!.y + bbox!.height / 2)
+      await page.waitForTimeout(300)
 
       // Check that highlight elements exist
       const highlightContainer = page.locator(
@@ -106,11 +107,18 @@ test.describe('Component Highlighter', () => {
       expect(count).toBeGreaterThan(0)
     })
 
-    test('should have correct highlight styles', async ({ page }) => {
-      await enableHighlightModeAndShowAll(page)
+    test('should have correct highlight styles on hover', async ({ page }) => {
+      await enableHighlightModeForTest(page)
 
-      // Get highlight styles
-      const hasHighlightsWithBorders = await page.evaluate(() => {
+      // Hover over a component to trigger its highlight
+      const target = page.getByRole('heading', { name: 'All Tasks' })
+      const bbox = await target.boundingBox()
+      expect(bbox).toBeTruthy()
+      await page.mouse.move(bbox!.x + bbox!.width / 2, bbox!.y + bbox!.height / 2)
+      await page.waitForTimeout(300)
+
+      // Check highlight styles
+      const hasHighlightsWithOutlines = await page.evaluate(() => {
         const container = document.getElementById(
           'component-highlighter-container',
         )
@@ -119,17 +127,17 @@ test.describe('Component Highlighter', () => {
         const highlights = container.querySelectorAll('div[data-highlight-id]')
         if (highlights.length === 0) return false
 
-        // Check that at least one highlight has a border
+        // Check that at least one highlight has an outline
         for (const el of highlights) {
           const style = window.getComputedStyle(el)
-          if (style.borderStyle !== 'none' || style.outlineStyle !== 'none') {
+          if (style.outlineStyle !== 'none') {
             return true
           }
         }
         return false
       })
 
-      expect(hasHighlightsWithBorders).toBe(true)
+      expect(hasHighlightsWithOutlines).toBe(true)
     })
   })
 
@@ -193,11 +201,16 @@ test.describe('Component Highlighter', () => {
   })
 
   test.describe('Storybook Icon', () => {
-    test('should show storybook icon for components with stories', async ({
+    test('should show storybook icon for components with stories on hover', async ({
       page,
     }) => {
-      await enableHighlightModeAndShowAll(page)
+      await enableHighlightModeForTest(page)
 
+      // Hover a component that has a story (Button)
+      const button = page.getByRole('button', { name: 'Filter' })
+      const bbox = await button.boundingBox()
+      expect(bbox).toBeTruthy()
+      await page.mouse.move(bbox!.x + bbox!.width / 2, bbox!.y + bbox!.height / 2)
       await page.waitForTimeout(1000) // Wait for story file checks
 
       // Check if any highlight has the storybook icon
@@ -205,7 +218,6 @@ test.describe('Component Highlighter', () => {
       const iconCount = await storybookIcons.count()
 
       // Button component has a story file, so there should be at least one icon
-      // Note: This test assumes Button.stories.tsx exists
       console.log(`Found ${iconCount} storybook icons`)
       // Just check it doesn't crash - icon count may vary based on story file existence
     })
@@ -218,64 +230,6 @@ test.describe('Component Highlighter', () => {
       // Should show Props section
       const propsSection = page.locator('text=Props:')
       await expect(propsSection).toBeVisible({ timeout: 5000 })
-    })
-  })
-
-  test.describe('Debug Overlay', () => {
-    test('should show debug overlay when highlight all is enabled', async ({
-      page,
-    }) => {
-      await enableHighlightModeAndShowAll(page)
-
-      // Debug overlay should be visible
-      const debugOverlay = page.locator('#component-highlighter-debug')
-      await expect(debugOverlay).toBeAttached()
-      await expect(debugOverlay).toBeVisible()
-    })
-
-    test('should display component stats in debug overlay', async ({
-      page,
-    }) => {
-      await enableHighlightModeAndShowAll(page)
-
-      const debugOverlay = page.locator('#component-highlighter-debug')
-      await expect(debugOverlay).toBeVisible()
-
-      // Check that it shows the expected stat labels
-      await expect(debugOverlay).toContainText('Total components')
-      await expect(debugOverlay).toContainText('Unique components')
-      await expect(debugOverlay).toContainText('With stories')
-      await expect(debugOverlay).toContainText('Coverage')
-    })
-
-    test('should show coverage percentage', async ({ page }) => {
-      await enableHighlightModeAndShowAll(page)
-
-      const debugOverlay = page.locator('#component-highlighter-debug')
-      await expect(debugOverlay).toBeVisible()
-
-      // Coverage percentage should be shown
-      const content = await debugOverlay.textContent()
-      expect(content).toMatch(/\d+%/)
-    })
-
-    test('should hide debug overlay when highlight all is disabled', async ({
-      page,
-    }) => {
-      await enableHighlightModeAndShowAll(page)
-
-      // Debug overlay should be visible
-      const debugOverlay = page.locator('#component-highlighter-debug')
-      await expect(debugOverlay).toBeVisible()
-
-      // Toggle off highlight all
-      await page.evaluate(() => {
-        ;(window as any).__componentHighlighterToggle?.()
-      })
-      await page.waitForTimeout(300)
-
-      // Debug overlay should be hidden
-      await expect(debugOverlay).not.toBeAttached()
     })
   })
 })

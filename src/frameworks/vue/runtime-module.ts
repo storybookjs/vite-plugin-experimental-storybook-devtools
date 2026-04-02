@@ -18,6 +18,11 @@ declare const __COMPONENT_HIGHLIGHTER_DEBUG__: boolean
 
 const DEBUG_MODE = __COMPONENT_HIGHLIGHTER_DEBUG__
 
+// Expose debug flag to client modules (overlay, listeners, etc.)
+if (typeof window !== 'undefined' && DEBUG_MODE) {
+  window.__componentHighlighterDebug = true
+}
+
 const logDebug = (...args: unknown[]) => {
   if (DEBUG_MODE) {
     console.log('[component-highlighter-vue]', ...args)

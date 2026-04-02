@@ -2,24 +2,10 @@
 import { computed, ref } from 'vue'
 import Header from './components/Header.vue'
 import Button from './components/Button.vue'
-import TaskCard from './components/TaskCard.vue'
+import TaskCard, { type Task } from './components/TaskCard.vue'
 import TaskList from './components/TaskList.vue'
 import TaskForm, { type TaskFormData } from './components/TaskForm.vue'
 import Modal from './components/Modal.vue'
-
-interface Task {
-  id: string
-  title: string
-  status: 'pending' | 'in-progress' | 'completed'
-  metadata: {
-    priority: 'high' | 'medium' | 'low'
-    dueDate: string
-    assignee: {
-      name: string
-      avatar?: string
-    }
-  }
-}
 
 const initialTasks: Task[] = [
   {
@@ -125,6 +111,7 @@ const completedCount = computed(
           v-for="task in tasks"
           :key="task.id"
           :task="task"
+          show-action
           @action="handleViewTask(task.title)"
         />
 
@@ -137,7 +124,7 @@ const completedCount = computed(
       title="Create New Task"
       @close="isModalOpen = false"
     >
-      <TaskForm @submit="handleAddTask" @cancel="isModalOpen = false" />
+      <TaskForm show-cancel @submit="handleAddTask" @cancel="isModalOpen = false" />
     </Modal>
   </div>
 </template>

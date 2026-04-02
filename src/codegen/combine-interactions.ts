@@ -10,7 +10,7 @@ export const combineInteractions = (
   if (interaction.event.type === 'dblclick') {
     let clicksRemoved = 0
     for (let i = result.length - 1; i >= 0 && clicksRemoved < 2; i--) {
-      if (result[i].event.type === 'click') {
+      if (result[i]!.event.type === 'click') {
         result.splice(i, 1)
         clicksRemoved++
       }
@@ -22,7 +22,7 @@ export const combineInteractions = (
 
   if (interaction.event.type === 'type') {
     for (let i = result.length - 1; i >= 0; i--) {
-      const prevInteraction = result[i]
+      const prevInteraction = result[i]!
 
       const isNotType = prevInteraction.event.type !== 'type'
       const isShiftKey =
@@ -48,7 +48,7 @@ export const combineInteractions = (
 
   if (interaction.event.type === 'keyup') {
     for (let i = result.length - 1; i >= 0; i--) {
-      const prevInteraction = result[i]
+      const prevInteraction = result[i]!
       if (
         prevInteraction.event.type === 'keydown' &&
         prevInteraction.event.key === 'shift'
@@ -66,17 +66,17 @@ export const combineInteractions = (
     let tabKeydownIndex: number | null = null
 
     for (let i = result.length - 1; i >= 0; i--) {
-      const prevInteraction = result[i]
+      const prevInteraction = result[i]!
       if (
-        prevInteraction?.event.type === 'keydown' &&
-        prevInteraction?.event.key === 'tab'
+        prevInteraction.event.type === 'keydown' &&
+        prevInteraction.event.key === 'tab'
       ) {
         tabKeydownIndex = i
       }
 
       if (
-        prevInteraction?.event.type === 'keydown' &&
-        prevInteraction?.event.key === 'shift'
+        prevInteraction.event.type === 'keydown' &&
+        prevInteraction.event.key === 'shift'
       ) {
         hasShift = true
         break

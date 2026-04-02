@@ -27,11 +27,8 @@ export function registerCommonHighlighterSuite(test: TestLike) {
       await enableHighlighting(page)
     })
 
-    test('renders highlight container and debug overlay', async ({ page }) => {
+    test('renders highlight container', async ({ page }) => {
       await expect(page.locator('#component-highlighter-container')).toBeVisible()
-      await expect(page.locator('#component-highlighter-debug')).toBeVisible()
-      await expect(page.locator('#component-highlighter-debug')).toContainText('Total components')
-      await expect(page.locator('#component-highlighter-debug')).toContainText('Coverage')
     })
 
     test('shows hover highlight behavior when hovering a component', async ({ page }) => {
@@ -46,8 +43,9 @@ export function registerCommonHighlighterSuite(test: TestLike) {
 
         return els.some((el) => {
           const style = window.getComputedStyle(el)
+          // Highlights use outline (not border) for strokes
           return (
-            style.borderColor.includes('255, 71, 133') ||
+            style.outlineColor.includes('255, 71, 133') ||
             style.backgroundColor.includes('255, 71, 133')
           )
         })
@@ -62,7 +60,7 @@ export function registerCommonHighlighterSuite(test: TestLike) {
       await expect(page.locator('#open-component-btn')).toBeVisible()
       await expect(page.locator('#save-story-btn')).toBeVisible()
       await expect(page.locator('#story-name-input')).toBeVisible()
-      await expect(page.locator('text=Props:')).toBeVisible()
+      await expect(page.locator('text=Properties')).toBeVisible()
     })
 
     test('supports context menu close interactions', async ({ page }) => {

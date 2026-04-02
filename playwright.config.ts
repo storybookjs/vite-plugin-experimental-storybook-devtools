@@ -32,15 +32,13 @@ export default defineConfig({
 
   webServer: [
     {
-      command:
-        'E2E=1 pnpm --dir playground/react dev --host 127.0.0.1 --port 5173',
+      command: 'pnpm --dir playground/react dev --host 127.0.0.1 --port 5173',
       url: 'http://127.0.0.1:5173',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
     },
     {
-      command:
-        'E2E=1 pnpm --dir playground/vue dev --host 127.0.0.1 --port 5174',
+      command: 'pnpm --dir playground/vue dev --host 127.0.0.1 --port 5174',
       url: 'http://127.0.0.1:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,

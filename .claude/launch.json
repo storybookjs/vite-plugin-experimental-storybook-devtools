@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vue-playground",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "playground-vue", "dev", "--port", "5174"],
+      "port": 5174,
+      "env": {
+      }
+    }
+  ]
+}
