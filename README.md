@@ -2,8 +2,6 @@
 
 A Vite plugin that instruments React and Vue components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
 
-![Component Highlighter Demo](https://via.placeholder.com/800x400?text=Component+Highlighter+Demo)
-
 ## Features
 
 - **Component Highlighting** - Visual overlay on React and Vue components with configurable colors
@@ -14,7 +12,6 @@ A Vite plugin that instruments React and Vue components to provide visual highli
 - **Smart Imports** - Automatically resolves and adds component imports
 - **DevTools Integration** - Built-in Vite DevTools Kit dock panel with Storybook, Coverage, Terminal, and Docs tabs
 - **Coverage Dashboard** - Track story coverage across all detected components
-- **Debug Overlay** - Component stats and story coverage when holding Alt
 - **Copy Prompt** - Copy LLM-friendly component context to clipboard for AI-assisted development
 - **Performance Optimized** - Only active in development, tree-shaken in production
 - **Keyboard Shortcuts** - Quick toggles and navigation
@@ -85,7 +82,7 @@ Open Vite DevTools (floating button, usually bottom-right) and activate the **Co
 Once the dock is active:
 - **Hover** over any component to see its highlight and tooltip
 - **Click** on a component to open the context menu
-- **Hold Alt/Option** to see all components highlighted at once
+- **Press Alt/Option** to toggle click-through mode (interact with the app underneath highlights)
 - **Create stories** with a single click
 
 ## Usage
@@ -95,14 +92,12 @@ Once the dock is active:
 | Mode | Trigger | Description |
 |------|---------|-------------|
 | **Hover** | Mouse over | Highlights single component under cursor |
-| **Highlight All** | Hold `Alt/Option` | Shows all components with debug overlay |
-| **Sticky Highlight** | `Shift + H` | Keeps highlight-all mode active until toggled off |
+| **Click-through** | Press `Alt/Option` | Toggles click-through mode so you can interact with the app underneath highlights |
 | **Clear Selection** | `Escape` | Clears current component selection |
 | **Exit Highlighting** | `Escape` x2 (within 600ms) | Turns off highlight mode entirely |
 
 ### Highlight Colors
 
-- **Blue border** - Non-hovered components (when Alt is held or sticky mode)
 - **Pink solid border** - Currently hovered component
 - **Pink dashed border** - Other instances of the same component type
 - **Pink background (20%)** - Selected component (context menu open)
@@ -182,9 +177,10 @@ The following patterns are excluded by default:
 - `**/node_modules/**`
 - `**/dist/**`
 - `**/*.d.ts`
-- `**/*.stories.{tsx,jsx,ts,js}`
-- `**/*.test.{tsx,jsx,ts,js}`
-- `**/*.spec.{tsx,jsx,ts,js}`
+- `**/*.stories.*`
+- `**/stories.*`
+- `**/*.story.*`
+- `**/story.*`
 
 ## Generated Story Format
 
@@ -256,15 +252,6 @@ export const Secondary: Story = {
 | Functions | `onClick={handler}` | `@click="handler"` | `fn()` (with import) |
 | Children | `<>Hello <Button /></>` | Default slot content | Framework-specific syntax |
 
-## Debug Overlay
-
-When holding `Alt/Option` (or with Shift+H sticky mode), a debug overlay appears showing:
-
-- **Total components** - Number of component instances on screen
-- **Unique components** - Number of distinct component types
-- **With stories** - Components that have story files
-- **Coverage %** - Percentage of components with stories
-
 ## Architecture
 
 For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -299,8 +286,8 @@ For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 | Shortcut | Action |
 |----------|--------|
-| `Alt/Option` (hold) | Show all component highlights + debug overlay |
-| `Shift + H` | Toggle sticky highlight-all mode |
+| `Mod+Shift+H` | Toggle component highlighter (via command palette) |
+| `Alt/Option` (press) | Toggle click-through mode (interact with app underneath highlights) |
 | `Escape` | Clear selection / close context menu |
 | `Escape` x2 (within 600ms) | Exit highlight mode entirely |
 | `Enter` (in story name input) | Create story |
@@ -344,6 +331,9 @@ pnpm typecheck
 src/
   create-component-highlighter-plugin.ts  # Main Vite plugin (server endpoints, RPC, transforms)
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
+  coverage-dashboard.ts                   # Server-side coverage computation
+  notifications.ts                        # Notification abstraction (DevTools logs + console)
+  shared-types.ts                         # Shared types for server/client RPC transfer
   frameworks/
     types.ts                              # Shared framework interfaces
     react/
@@ -365,15 +355,29 @@ src/
     listeners.ts                          # Mouse/keyboard event handlers, highlight mode state
     vite-devtools.ts                      # DevTools dock lifecycle (activate/deactivate)
     interaction-recorder.ts               # User interaction recording for play functions
+    coverage-actions.ts                   # Client-side coverage actions (scroll, highlight)
+    logger.ts                             # Debug logging utility
+    utils/
+      format-utils.ts                     # Value formatting helpers for context menu
+      html-preview.ts                     # HTML preview rendering for prop values
+      prop-utils.ts                       # Prop type detection and badge utilities
+  codegen/
+    interactions-to-code.ts               # Converts recorded interactions to play function code
+    generate-query.ts                     # Generates Testing Library queries from targets
+    args-to-string.ts                     # Serializes args objects to source code strings
+    combine-interactions.ts               # Combines/deduplicates sequential interaction steps
+    get-interaction-event.ts              # Maps DOM events to interaction event types
+    types.ts                              # Codegen type definitions
   panel/
     panel.ts                              # DevTools panel (Storybook, Coverage, Terminal, Docs tabs)
     panel.css                             # Panel styles
+    index.html                            # Panel HTML shell
   utils/
     story-generator.ts                    # Shared story generation utilities
-    provider-analyzer.ts                  # Context provider detection
 e2e/
   highlighter-helpers.ts                  # Shared E2E helper functions
   common-highlighter-suite.ts             # Shared test suite (both frameworks)
+  component-highlighter.spec.ts           # Highlighter interaction tests
   playground-react-detection.spec.ts      # React-specific detection tests
   playground-vue-detection.spec.ts        # Vue-specific detection tests
 playground/

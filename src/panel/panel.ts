@@ -29,6 +29,13 @@ async function initRpcClient() {
       'component-highlighter:registry',
     )
     registrySharedState = regState
+    // Refresh coverage immediately when the registry changes (e.g. on navigation)
+    regState.on('updated', () => {
+      if (coverageInterval) {
+        // Coverage tab is active — refresh immediately
+        refreshCoverage()
+      }
+    })
 
     const visitState = await client.sharedState.get(
       'component-highlighter:pending-visit',

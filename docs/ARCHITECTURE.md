@@ -60,7 +60,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `/__component-highlighter/storybook-index` | GET | Proxy Storybook's index.json for story entries |
 | `/__component-highlighter/start-storybook` | POST | Start a Storybook dev server process |
 | `/__component-highlighter/terminal-logs` | GET | Stream accumulated Storybook process output |
-| `/__open-in-editor` | GET | Open a file in the user's editor |
+| `/__open-in-editor` | GET | Open a file in the user's editor (Vite built-in, not registered by this plugin) |
 
 ## Key modules (where to edit)
 
@@ -76,9 +76,21 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `src/client/interaction-recorder.ts` | User interaction recording and play function generation |
 | `src/client/coverage-actions.ts` | Client-side coverage actions (scroll, highlight) triggered by panel via RPC |
 | `src/client/vite-devtools.ts` | DevTools dock lifecycle, client RPC handlers for panel→client broadcast |
+| `src/client/logger.ts` | Debug logging utility (`window.__componentHighlighterDebug`) |
+| `src/client/utils/format-utils.ts` | Value formatting helpers for context menu display |
+| `src/client/utils/html-preview.ts` | HTML preview rendering for prop values |
+| `src/client/utils/prop-utils.ts` | Prop type detection and badge utilities |
 | `src/panel/panel.ts` | DevTools panel tabs (Storybook, Coverage, Terminal, Docs) |
 | `src/frameworks/<fw>/story-generator.ts` | Framework-specific story code output |
 | `src/utils/story-generator.ts` | Shared story generation utilities (name generation, args formatting) |
+| `src/codegen/interactions-to-code.ts` | Converts recorded interactions to play function code |
+| `src/codegen/generate-query.ts` | Generates Testing Library queries from recorded targets |
+| `src/codegen/args-to-string.ts` | Serializes args objects to source code strings |
+| `src/codegen/combine-interactions.ts` | Combines/deduplicates sequential interaction steps |
+| `src/codegen/get-interaction-event.ts` | Maps DOM events to interaction event types |
+| `src/coverage-dashboard.ts` | Server-side coverage computation (component → story file matching) |
+| `src/notifications.ts` | Notification abstraction (DevTools Logs API + console fallback) |
+| `src/shared-types.ts` | Shared types for server/client (SerializedRegistryInstance, RegistryDiff) |
 
 ## Window globals (automation / testing hooks)
 
@@ -89,6 +101,9 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterDisable()` | Disable highlight mode |
 | `__componentHighlighterIsActive()` | Check if highlight mode is on |
 | `__componentHighlighterDeactivateDock()` | Programmatically toggle dock off |
+| `__componentHighlighterSelectById(id)` | Select a specific component instance by its registry ID |
+| `__componentHighlighterGetRegistry()` | Return the live component name→filePath registry Map |
+| `__componentHighlighterDebug` | Set to `true` to enable verbose debug logging in the console |
 
 ## Panel↔Client communication (RPC-based)
 
@@ -107,6 +122,9 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 | `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
 | `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
 | `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |
+| — (command handler) | `do-open-url` | Open a URL in a new browser tab (e.g. Storybook docs) |
+| — (command handler) | `do-open-panel-tab` | Switch the dock to the Storybook panel entry |
+| — (command handler) | `do-switch-tab` | Switch to a specific tab within the panel (registered in panel.ts) |
 
 ## Shared state (auto-synced between server and clients)
 
@@ -172,6 +190,9 @@ Focused e2e entrypoints:
 # Framework-specific detection
 pnpm exec playwright test e2e/playground-react-detection.spec.ts
 pnpm exec playwright test e2e/playground-vue-detection.spec.ts
+
+# Highlighter interaction tests (context menu, story creation)
+pnpm exec playwright test e2e/component-highlighter.spec.ts
 
 # Common highlighter features (runs for both frameworks)
 pnpm exec playwright test e2e/common-highlighter-suite.ts
