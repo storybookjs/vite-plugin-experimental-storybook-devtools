@@ -235,8 +235,11 @@ export function createComponentHighlighterPlugin(
         'vite-plugin-experimental-storybook-devtools/client/listeners',
         'vite-plugin-experimental-storybook-devtools/client/overlay',
       )
+      // @testing-library/dom depends on aria-query (CJS) which breaks when
+      // loaded as raw ESM. Pre-bundle it so Vite handles the CJS→ESM conversion.
+      viteConfig.optimizeDeps.include ??= []
+      viteConfig.optimizeDeps.include.push('@testing-library/dom')
       if (framework.name === 'react') {
-        viteConfig.optimizeDeps.include ??= []
         viteConfig.optimizeDeps.include.push(
           'react-element-to-jsx-string/dist/esm/index.js',
         )
