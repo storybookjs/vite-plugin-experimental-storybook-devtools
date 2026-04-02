@@ -79,6 +79,14 @@ function getSbTokenStyles() {
 
       /* Misc */
       --sb-border-radius: 4px;
+
+      /* Syntax / prop type badge colors (matches Storybook's object inspector) */
+      --sb-syntax-string: rgb(196, 26, 22);
+      --sb-syntax-number: rgb(28, 0, 207);
+      --sb-syntax-boolean: rgb(28, 0, 207);
+      --sb-syntax-function: rgb(13, 34, 170);
+      --sb-syntax-key: rgb(136, 19, 145);
+      --sb-syntax-null: rgb(128, 128, 128);
     }
 
     @media (prefers-color-scheme: dark) {
@@ -102,7 +110,7 @@ function getSbTokenStyles() {
         --sb-bgcolor-negative: transparent;
 
         --sb-bordercolor-default: hsl(0 0% 100% / 0.1);
-        --sb-bordercolor-muted: hsl(0 0% 100% / 0.5);
+        --sb-bordercolor-muted: hsl(0 0% 100% / 0.05);
         --sb-bordercolor-positive: hsl(101 52% 64% / 0.15);
         --sb-bordercolor-warning: hsl(36 100% 64% / 0.15);
         --sb-bordercolor-negative: hsl(16 100% 64% / 0.15);
@@ -111,6 +119,13 @@ function getSbTokenStyles() {
         --sb-bar-hover: #70B3FF;
         --sb-bar-selected: #479DFF;
         --sb-bar-bg: #222325;
+
+        --sb-syntax-string: rgb(233, 63, 59);
+        --sb-syntax-number: hsl(252, 100%, 75%);
+        --sb-syntax-boolean: hsl(252, 100%, 75%);
+        --sb-syntax-function: rgb(85, 106, 242);
+        --sb-syntax-key: rgb(227, 110, 236);
+        --sb-syntax-null: rgb(127, 127, 127);
       }
     }
   `;
@@ -127,6 +142,18 @@ function injectDesignTokens(shadowRoot) {
   shadowRoot.prepend(style);
 }
 ```
+
+---
+
+## Style contexts
+
+There are three distinct places where styles get applied. Use the right injection approach for each:
+
+| Context | File(s) | Where tokens go | Notes |
+|---|---|---|---|
+| **Shadow DOM** (context menu, dock chrome) | `src/client/context-menu.ts` | `:host {}` CSS vars at top of embedded style string | Tokens + dark mode override both in the string |
+| **Panel iframe** | `src/panel/panel.css` | `:root {}` CSS vars at top of the file | Standalone HTML document, `:root` not `:host` |
+| **Host page overlays** | `overlay.ts`, `coverage-actions.ts`, `interaction-recorder.ts` | Hardcoded hex in `style.cssText` strings | CSS variables **cannot** be consumed here — the element is injected into the user's page DOM, not a shadow root. Use the token hex values directly and add a comment like `/* --sb-color-brand */`. |
 
 ---
 

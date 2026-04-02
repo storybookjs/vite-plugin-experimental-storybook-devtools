@@ -152,3 +152,4 @@ shadowRoot.prepend(style);
 - Always include both light (`:host {}`) and dark (`@media (prefers-color-scheme: dark)`) blocks
 - Never hardcode hex colors — use the `--sb-*` variables
 - The Shadow DOM root is `<vite-devtools-dock-embedded>`'s `shadowRoot`
+- **Unavailable actions**: omit them from the DOM entirely — do not render them as `disabled`. This applies to popover menus, context menu action buttons, and any other affordance that depends on optional state (e.g. story existence, editor availability).
