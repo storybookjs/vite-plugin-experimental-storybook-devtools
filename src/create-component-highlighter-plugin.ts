@@ -2,7 +2,7 @@
 import type { Plugin, ViteDevServer } from 'vite'
 import { createFilter } from 'vite'
 import type { FrameworkConfig, SerializedProps } from './frameworks'
-import { defineRpcFunction } from '@vitejs/devtools-kit'
+import { defineRpcFunction, defineCommand } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
@@ -25,7 +25,6 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:toggle-overlay': (data: { enabled: boolean }) => void
     'component-highlighter:create-story': (data: ComponentStoryData) => void
     'component-highlighter:push-registry-diff': (diff: RegistryDiff) => void
-    'component-highlighter:get-registry': () => SerializedRegistryInstance[]
     'component-highlighter:scroll-to-component': (data: { componentName: string }) => void
     'component-highlighter:highlight-coverage-instances': (data: { componentName: string; hasStory: boolean } | null) => void
     'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
@@ -36,8 +35,18 @@ declare module '@vitejs/devtools-kit' {
   interface DevToolsRpcClientFunctions {
     'component-highlighter:do-scroll-to-component': (data: { componentName: string }) => void
     'component-highlighter:do-highlight-coverage': (data: { componentName: string; hasStory: boolean } | null) => void
-    'component-highlighter:do-set-highlight-mode': (data: { enabled: boolean }) => void
+    'component-highlighter:do-set-highlight-mode': (data: { enabled: boolean; toggle?: boolean }) => void
     'component-highlighter:do-visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
+    'component-highlighter:do-open-url': (data: { url: string }) => void
+    'component-highlighter:do-open-panel-tab': (data: { tab: string }) => void
+    'component-highlighter:do-switch-tab': (data: { tab: string }) => void
+  }
+
+  interface DevToolsRpcSharedStates {
+    'component-highlighter:registry': SerializedRegistryInstance[]
+    'component-highlighter:pending-visit': { relativeFilePath: string; preferredStoryName?: string } | null
+    'component-highlighter:pending-tab': string | null
+    'component-highlighter:highlight-active': boolean
   }
 }
 
@@ -194,10 +203,13 @@ export function createComponentHighlighterPlugin(
   // Track transformed components for coverage dashboard: componentName → filePath
   const transformedComponents = new Map<string, string>()
   let coverageCwd = ''
-  // Server-side registry snapshot built from incremental diffs pushed by the client
-  const registrySnapshot = new Map<string, SerializedRegistryInstance>()
-  // Pending visit request — stored by the server when the client wants the panel to navigate to a story
-  let pendingVisit: { relativeFilePath: string; preferredStoryName?: string } | null = null
+  // Shared state handles (initialized in devtools.setup)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let registryState: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pendingVisitState: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let pendingTabState: any = null
 
 
   // Terminal-based Storybook launcher state
@@ -448,32 +460,6 @@ export function createComponentHighlighterPlugin(
         },
       )
 
-      // ── Middleware: pending visit (POST to set, GET to consume) ────
-      srv.middlewares.use(
-        '/__component-highlighter/pending-visit',
-        (req, res) => {
-          if (req.method === 'POST') {
-            let body = ''
-            req.on('data', (chunk: string) => { body += chunk })
-            req.on('end', () => {
-              try {
-                pendingVisit = JSON.parse(body)
-              } catch {
-                pendingVisit = null
-              }
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ ok: true }))
-            })
-          } else {
-            // GET — consume and clear
-            const visit = pendingVisit
-            pendingVisit = null
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ visit }))
-          }
-        },
-      )
-
     },
     devtools: {
       setup(ctx) {
@@ -512,6 +498,24 @@ export function createComponentHighlighterPlugin(
               '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
           })
         }
+
+        // ─── Shared state initialization ─────────────────────────────────
+
+        ctx.rpc.sharedState.get('component-highlighter:registry', {
+          initialValue: [] as SerializedRegistryInstance[],
+        }).then((s) => { registryState = s })
+
+        ctx.rpc.sharedState.get('component-highlighter:pending-visit', {
+          initialValue: null as { relativeFilePath: string; preferredStoryName?: string } | null,
+        }).then((s) => { pendingVisitState = s })
+
+        ctx.rpc.sharedState.get('component-highlighter:pending-tab', {
+          initialValue: null as string | null,
+        }).then((s) => { pendingTabState = s })
+
+        ctx.rpc.sharedState.get('component-highlighter:highlight-active', {
+          initialValue: false,
+        })
 
         // Register RPC functions for communication with the client
         ctx.rpc.register(
@@ -731,35 +735,31 @@ export function createComponentHighlighterPlugin(
 
         // ─── Registry sync & panel→client relay RPCs ───────────────────
 
-        // Client pushes incremental diffs; server applies them to the snapshot
+        // Client pushes incremental diffs; server applies them to shared state
         ctx.rpc.register(
           defineRpcFunction({
             name: 'component-highlighter:push-registry-diff',
             type: 'action',
             setup: () => ({
               handler: (diff: RegistryDiff) => {
-                for (const id of diff.removed) {
-                  registrySnapshot.delete(id)
-                }
-                for (const inst of diff.added) {
-                  registrySnapshot.set(inst.id, inst)
-                }
-                for (const inst of diff.updated) {
-                  registrySnapshot.set(inst.id, inst)
-                }
-              },
-            }),
-          }),
-        )
-
-        // Panel reads the latest registry snapshot
-        ctx.rpc.register(
-          defineRpcFunction({
-            name: 'component-highlighter:get-registry',
-            type: 'query',
-            setup: () => ({
-              handler: (): SerializedRegistryInstance[] => {
-                return Array.from(registrySnapshot.values())
+                if (!registryState) return
+                registryState.mutate((draft: SerializedRegistryInstance[]) => {
+                  // Remove
+                  for (const id of diff.removed) {
+                    const idx = draft.findIndex((inst) => inst.id === id)
+                    if (idx !== -1) draft.splice(idx, 1)
+                  }
+                  // Add
+                  for (const inst of diff.added) {
+                    draft.push(inst)
+                  }
+                  // Update
+                  for (const inst of diff.updated) {
+                    const idx = draft.findIndex((i) => i.id === inst.id)
+                    if (idx !== -1) draft[idx] = inst
+                    else draft.push(inst)
+                  }
+                })
               },
             }),
           }),
@@ -822,7 +822,9 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: (data: { relativeFilePath: string; preferredStoryName?: string }) => {
-                pendingVisit = data
+                if (pendingVisitState) {
+                  pendingVisitState.mutate(() => data)
+                }
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-visit-story',
                   args: [data],
@@ -849,6 +851,145 @@ export function createComponentHighlighterPlugin(
                 })
               },
             }),
+          }),
+        )
+
+        // ─── Helper: open a specific tab in the panel ──────────────────
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        function openPanelTab(devtoolsCtx: any, tab: string) {
+          // Store in shared state so the panel picks it up on load or via subscription
+          if (pendingTabState) {
+            pendingTabState.mutate(() => tab)
+          }
+          // Tell the client to switch the dock to the panel (if not already open)
+          devtoolsCtx.rpc.broadcast({
+            method: 'component-highlighter:do-open-panel-tab',
+            args: [{ tab }],
+          })
+          // Tell the panel directly to switch tabs (if already open)
+          devtoolsCtx.rpc.broadcast({
+            method: 'component-highlighter:do-switch-tab',
+            args: [{ tab }],
+          })
+        }
+
+        // ─── Commands (Mod+K palette) ──────────────────────────────────
+
+        ctx.commands.register(
+          defineCommand({
+            id: 'storybook:toggle-highlight-mode',
+            title: 'Toggle Component Highlighter',
+            description: 'Start or stop inspecting components on the page',
+            icon: 'ph:crosshair',
+            category: 'Storybook',
+            keybindings: [{ key: 'Mod+Shift+H' }],
+            handler: () => {
+              ctx.rpc.broadcast({
+                method: 'component-highlighter:do-set-highlight-mode',
+                args: [{ enabled: true, toggle: true }],
+              })
+            },
+          }),
+        )
+
+        ctx.commands.register(
+          defineCommand({
+            id: 'storybook:create-missing-stories',
+            title: 'Write Stories for Missing Components',
+            description: 'Generate story files for all visible components without stories',
+            icon: 'ph:file-plus-duotone',
+            category: 'Storybook',
+            handler: async () => {
+              // Use the registry snapshot + coverage data to find uncovered visible components
+              const coverage = computeCoverage(
+                transformedComponents,
+                ctx.cwd,
+                storiesDir,
+              )
+              const uncovered = coverage.entries.filter((e) => !e.hasStory)
+              if (uncovered.length === 0) {
+                notifications.notify({
+                  message: 'All components already have stories',
+                  level: 'success',
+                  toast: true,
+                  autoDismissMs: 3000,
+                  category: 'story-creation',
+                })
+                return
+              }
+
+              // Find visible uncovered components in the registry snapshot
+              let storiesCreated = 0
+              for (const entry of uncovered) {
+                // Find a matching instance in the registry
+                const allInstances = registryState?.value() ?? []
+                const instances = (allInstances as SerializedRegistryInstance[])
+                  .filter((inst) => inst.meta.filePath === entry.filePath && inst.isConnected)
+                if (instances.length === 0) continue
+
+                // Deduplicate by props fingerprint
+                const seen = new Set<string>()
+                for (const inst of instances) {
+                  const fp = inst.serializedProps ? JSON.stringify(inst.serializedProps) : '{}'
+                  if (seen.has(fp)) continue
+                  seen.add(fp)
+
+                  // Invoke the create-story handler directly
+                  await ctx.rpc.invokeLocal('component-highlighter:create-story', {
+                    meta: inst.meta,
+                    props: inst.props,
+                    serializedProps: inst.serializedProps,
+                    skipNavigation: true,
+                  })
+                  storiesCreated++
+                }
+              }
+
+              notifications.notify({
+                message: storiesCreated > 0
+                  ? `Created stories for ${storiesCreated} component${storiesCreated === 1 ? '' : 's'}`
+                  : 'No visible uncovered components found — navigate to a page with components first',
+                level: storiesCreated > 0 ? 'success' : 'info',
+                toast: true,
+                autoDismissMs: 4000,
+                category: 'story-creation',
+              })
+
+              // Open the coverage tab so the user can see the updated results
+              openPanelTab(ctx, 'coverage')
+            },
+          }),
+        )
+
+        ctx.commands.register(
+          defineCommand({
+            id: 'storybook:see-coverage',
+            title: 'See Component Coverage',
+            description: 'Open the coverage dashboard showing story status for all components',
+            icon: 'ph:chart-bar-duotone',
+            category: 'Storybook',
+            handler: () => {
+              openPanelTab(ctx, 'coverage')
+            },
+          }),
+        )
+
+        ctx.commands.register(
+          defineCommand({
+            id: 'storybook:open-docs',
+            title: 'Open Storybook Docs',
+            description: 'Open the Storybook documentation website',
+            icon: 'ph:book-open-duotone',
+            category: 'Storybook',
+            handler: () => {
+              // Server-side commands can't open browser tabs directly,
+              // but we can broadcast to the client to do it
+              ctx.rpc.broadcast({
+                method: 'component-highlighter:do-open-url',
+                args: [{ url: 'https://storybook.js.org/docs' }],
+              })
+            },
           }),
         )
 

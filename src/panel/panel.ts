@@ -7,16 +7,70 @@
  * so that the panel works whether inline or popped out into a separate window.
  */
 
-import { getDevToolsRpcClient, type DevToolsRpcClient } from '@vitejs/devtools-kit/client'
+import {
+  getDevToolsRpcClient,
+  type DevToolsRpcClient,
+} from '@vitejs/devtools-kit/client'
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
 let rpcClient: DevToolsRpcClient | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let registrySharedState: any = null
 
 async function initRpcClient() {
   try {
     const client = await getDevToolsRpcClient()
     rpcClient = client
+
+    // Subscribe to shared state
+    const regState = await client.sharedState.get(
+      'component-highlighter:registry',
+    )
+    registrySharedState = regState
+
+    const visitState = await client.sharedState.get(
+      'component-highlighter:pending-visit',
+    )
+    // React to pending visit changes in real time
+    const currentVisit = visitState.value()
+    if (currentVisit) {
+      visitState.mutate(() => null) // consume
+      visitStory(currentVisit.relativeFilePath, currentVisit.preferredStoryName)
+    }
+    visitState.on('updated', (val: any) => {
+      if (val) {
+        visitState.mutate(() => null) // consume
+        visitStory(val.relativeFilePath, val.preferredStoryName)
+      }
+    })
+
+    const tabState = await client.sharedState.get(
+      'component-highlighter:pending-tab',
+    )
+    const currentTab = tabState.value()
+    if (currentTab) {
+      tabState.mutate(() => null) // consume
+      switchTab(currentTab as TabId)
+    }
+    tabState.on('updated', (val: any) => {
+      if (val) {
+        tabState.mutate(() => null) // consume
+        switchTab(val as TabId)
+      }
+    })
+
+    // Sync highlight toggle button state
+    const hlState = await client.sharedState.get(
+      'component-highlighter:highlight-active',
+    )
+    const updateHighlightBtn = (active: boolean) => {
+      highlightEnabled = active
+      const btn = document.getElementById('highlight-toggle')
+      btn?.classList.toggle('active', active)
+    }
+    updateHighlightBtn(hlState.value() ?? false)
+    hlState.on('updated', (val: any) => updateHighlightBtn(!!val))
   } catch {
     // RPC client not available (e.g. during build or test)
   }
@@ -235,7 +289,10 @@ async function visitStory(
         switchTab('storybook')
         // Try channel API first (no reload), fall back to iframe src navigation
         if (!navigateStorybookViaChannel(storyId)) {
-          const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+          const targetUrl = await buildStoryUrl(
+            relativeFilePath,
+            preferredStoryName,
+          )
           if (targetUrl) navigateStorybookPane(targetUrl)
         }
         return
@@ -270,7 +327,10 @@ async function visitStory(
         const storyId = await findStoryId(relativeFilePath, preferredStoryName)
         if (storyId) {
           if (!navigateStorybookViaChannel(storyId)) {
-            const targetUrl = await buildStoryUrl(relativeFilePath, preferredStoryName)
+            const targetUrl = await buildStoryUrl(
+              relativeFilePath,
+              preferredStoryName,
+            )
             if (targetUrl) navigateStorybookPane(targetUrl)
           }
           break
@@ -315,16 +375,27 @@ function navigateStorybookPane(targetUrl: string) {
   }
 }
 
-// Register panel-side client RPC handler so the server can tell us to visit a story
-// (used by the client overlay after story creation, works whether panel is inline or popped out)
-function registerVisitStoryHandler() {
+// Register panel-side client RPC handlers so the server can communicate with the panel
+// in real time (works whether panel is inline or popped out)
+function registerPanelRpcHandlers() {
   if (!rpcClient?.client) return
   try {
     rpcClient.client.register({
       name: 'component-highlighter:do-visit-story',
       type: 'action',
-      handler: (data: { relativeFilePath: string; preferredStoryName?: string }) => {
+      handler: (data: {
+        relativeFilePath: string
+        preferredStoryName?: string
+      }) => {
         visitStory(data.relativeFilePath, data.preferredStoryName)
+      },
+    } as any)
+
+    rpcClient.client.register({
+      name: 'component-highlighter:do-switch-tab',
+      type: 'action',
+      handler: (data: { tab: string }) => {
+        switchTab(data.tab as TabId)
       },
     } as any)
   } catch {
@@ -332,22 +403,11 @@ function registerVisitStoryHandler() {
   }
 }
 
-/** Check for a pending visit request stored by the server */
-async function checkPendingVisit() {
-  try {
-    const res = await fetch('/__component-highlighter/pending-visit')
-    const data = await res.json()
-    if (data.visit) {
-      visitStory(data.visit.relativeFilePath, data.visit.preferredStoryName)
-    }
-  } catch {
-    // Endpoint not available
-  }
-}
-
 /** Ask the client to remove all coverage highlight overlays via RPC */
 function clearAllHighlights() {
-  rpcCall('component-highlighter:highlight-coverage-instances', null).catch(() => {})
+  rpcCall('component-highlighter:highlight-coverage-instances', null).catch(
+    () => {},
+  )
 }
 
 // ─── Tab management ─────────────────────────────────────────────────
@@ -550,10 +610,10 @@ function propsFingerprint(props: Record<string, unknown>): string {
 }
 
 /** Fetch the registry snapshot from the server (RPC) */
-async function fetchRegistry(): Promise<RegistryInstance[]> {
+/** Read the registry from shared state (synced automatically from client) */
+function fetchRegistry(): RegistryInstance[] {
   try {
-    const result = await rpcCall('component-highlighter:get-registry')
-    return (result as RegistryInstance[]) || []
+    return (registrySharedState?.value() as RegistryInstance[]) ?? []
   } catch {
     return []
   }
@@ -563,7 +623,9 @@ async function fetchRegistry(): Promise<RegistryInstance[]> {
  * Collect unique instances of a component from the server registry snapshot,
  * deduplicated by their serialized props fingerprint.
  */
-async function collectUniqueInstances(filePath: string): Promise<RegistryInstance[]> {
+async function collectUniqueInstances(
+  filePath: string,
+): Promise<RegistryInstance[]> {
   const instances = await fetchRegistry()
   const seen = new Map<string, RegistryInstance>()
   for (const instance of instances) {
@@ -625,7 +687,9 @@ async function createStoryForComponent(filePath: string): Promise<boolean> {
  */
 async function isComponentVisible(filePath: string): Promise<boolean> {
   const instances = await fetchRegistry()
-  return instances.some((inst) => inst.meta?.filePath === filePath && inst.isConnected)
+  return instances.some(
+    (inst) => inst.meta?.filePath === filePath && inst.isConnected,
+  )
 }
 
 // ─── Coverage tab ───────────────────────────────────────────────────
@@ -769,20 +833,28 @@ async function buildCoveragePanel(coverage: CoverageData) {
 
   // Highlight/clear helpers — delegate to client via RPC broadcast
   const highlightInstances = (componentName: string, hasStory: boolean) => {
-    rpcCall('component-highlighter:highlight-coverage-instances', { componentName, hasStory }).catch(() => {})
+    rpcCall('component-highlighter:highlight-coverage-instances', {
+      componentName,
+      hasStory,
+    }).catch(() => {})
   }
 
   const clearHighlights = () => {
-    rpcCall('component-highlighter:highlight-coverage-instances', null).catch(() => {})
+    rpcCall('component-highlighter:highlight-coverage-instances', null).catch(
+      () => {},
+    )
   }
 
   // Pre-compute visibility for all entries
   const visibilityMap = new Map<string, boolean>()
   const registryInstances = await fetchRegistry()
   for (const entry of coverage.entries) {
-    visibilityMap.set(entry.filePath, registryInstances.some(
-      (inst) => inst.meta?.filePath === entry.filePath && inst.isConnected,
-    ))
+    visibilityMap.set(
+      entry.filePath,
+      registryInstances.some(
+        (inst) => inst.meta?.filePath === entry.filePath && inst.isConnected,
+      ),
+    )
   }
 
   for (const entry of coverage.entries) {
@@ -825,7 +897,9 @@ async function buildCoveragePanel(coverage: CoverageData) {
       locateBtn.title = 'Scroll to component'
       locateBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        rpcCall('component-highlighter:scroll-to-component', { componentName: entry.componentName }).catch(() => {})
+        rpcCall('component-highlighter:scroll-to-component', {
+          componentName: entry.componentName,
+        }).catch(() => {})
       })
     }
     actionsDiv.appendChild(locateBtn)
@@ -1039,7 +1113,9 @@ function init() {
   highlightBtn.addEventListener('click', () => {
     highlightEnabled = !highlightEnabled
     highlightBtn.classList.toggle('active', highlightEnabled)
-    rpcCall('component-highlighter:set-highlight-mode', { enabled: highlightEnabled }).catch(() => {})
+    rpcCall('component-highlighter:set-highlight-mode', {
+      enabled: highlightEnabled,
+    }).catch(() => {})
   })
 
   const docsTab = document.createElement('button')
@@ -1101,10 +1177,10 @@ function init() {
   })
 
   // Init RPC client for communication with server/client
+  // Init RPC client — also sets up shared state subscriptions for
+  // pending visit/tab, registry, and highlight toggle sync.
   initRpcClient().then(() => {
-    registerVisitStoryHandler()
-    // Check for any pending visit request (from context menu or story creation)
-    checkPendingVisit()
+    registerPanelRpcHandlers()
   })
 
   // Init storybook tab

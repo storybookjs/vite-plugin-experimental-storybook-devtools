@@ -33,7 +33,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
    - Renders highlight rectangles in `#component-highlighter-container`
-   - Handles hover, click, keyboard shortcuts (Alt, Shift+H, Escape, double-Escape)
+   - Handles hover, click, keyboard shortcuts (Alt toggle, Escape, double-Escape)
    - Context menu (Shadow DOM) shows props, action buttons, story creation form
    - Triggers story creation requests (Create / Create with Interactions)
    - Interaction recorder (`src/client/interaction-recorder.ts`) captures user actions as play function steps
@@ -101,12 +101,40 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 
 | Server RPC (panel calls) | Client broadcast handler | Purpose |
 |--------------------------|-------------------------|---------|
-| `component-highlighter:get-registry` | — (query, no broadcast) | Panel reads serialized registry snapshot |
-| `component-highlighter:push-registry-diff` | — (client pushes to server) | Client syncs registry changes to server |
+| `component-highlighter:push-registry-diff` | — (client pushes to server) | Client syncs registry changes to shared state |
 | `component-highlighter:scroll-to-component` | `do-scroll-to-component` | Scroll app page to a component |
 | `component-highlighter:highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights on app page |
 | `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
 | `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
+| `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |
+
+## Shared state (auto-synced between server and clients)
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `component-highlighter:registry` | `SerializedRegistryInstance[]` | Component instances synced from client to panel |
+| `component-highlighter:pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request (consumed by panel) |
+| `component-highlighter:pending-tab` | `string \| null` | Tab switch request (consumed by panel) |
+| `component-highlighter:highlight-active` | `boolean` | Whether highlight mode is on (syncs panel toggle button) |
+
+## DevTools commands (Mod+K palette)
+
+| Command ID | Title | Shortcut | Description |
+|------------|-------|----------|-------------|
+| `storybook:toggle-highlight-mode` | Toggle Component Highlighter | `Mod+Shift+H` | Start/stop inspecting components |
+| `storybook:create-missing-stories` | Write Stories for Missing Components | — | Generate stories for all visible uncovered components |
+| `storybook:see-coverage` | See Component Coverage | — | Open the coverage dashboard showing story status |
+| `storybook:open-docs` | Open Storybook Docs | — | Open the Storybook documentation website |
+
+## Keyboard shortcuts
+
+| Key | Action | Context |
+|-----|--------|---------|
+| `Mod+K` | Open command palette | Any time DevTools is active |
+| `Mod+Shift+H` | Toggle highlight mode | Any time DevTools is active |
+| `Alt` (press) | Toggle click-through mode | While highlight mode is on |
+| `Escape` | Clear selection | While a component is selected |
+| `Escape` x2 | Exit highlight mode | While highlight mode is on |
 
 ## Invariants (do not break)
 

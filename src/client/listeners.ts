@@ -48,10 +48,14 @@ export function getComponentRegistry(): Map<string, ComponentInstance> {
 // Pending diff accumulator
 const pendingDiff: RegistryDiff = { added: [], removed: [], updated: [] }
 let diffFlushTimer: ReturnType<typeof setTimeout> | null = null
-let rpcCallFn: ((method: string, ...args: unknown[]) => Promise<unknown>) | null = null
+let rpcCallFn:
+  | ((method: string, ...args: unknown[]) => Promise<unknown>)
+  | null = null
 
 /** Set the RPC call function (injected by vite-devtools.ts after ctx is available) */
-export function setRegistryRpcCall(fn: (method: string, ...args: unknown[]) => Promise<unknown>) {
+export function setRegistryRpcCall(
+  fn: (method: string, ...args: unknown[]) => Promise<unknown>,
+) {
   if (rpcCallFn) return // already initialized
   rpcCallFn = fn
   pushFullRegistry()
@@ -64,7 +68,11 @@ function pushFullRegistry() {
   for (const instance of componentRegistry.values()) {
     added.push(serializeInstance(instance))
   }
-  rpcCallFn('component-highlighter:push-registry-diff', { added, removed: [], updated: [] }).catch(() => {})
+  rpcCallFn('component-highlighter:push-registry-diff', {
+    added,
+    removed: [],
+    updated: [],
+  }).catch(() => {})
 }
 
 /**
@@ -103,7 +111,9 @@ function autoInitRpc() {
           ctx.rpc.client.register({
             name: 'component-highlighter:do-highlight-coverage',
             type: 'action',
-            handler: (data: { componentName: string; hasStory: boolean } | null) => {
+            handler: (
+              data: { componentName: string; hasStory: boolean } | null,
+            ) => {
               if (data) {
                 showCoverageHighlights(data.componentName, data.hasStory)
               } else {
@@ -115,12 +125,38 @@ function autoInitRpc() {
           ctx.rpc.client.register({
             name: 'component-highlighter:do-set-highlight-mode',
             type: 'action',
-            handler: (data: { enabled: boolean }) => {
-              if (data.enabled) {
+            handler: (data: { enabled: boolean; toggle?: boolean }) => {
+              if (data.toggle) {
+                // Toggle: flip the current state
+                if (isDockActive) {
+                  disableHighlightMode()
+                } else {
+                  enableHighlightMode()
+                }
+              } else if (data.enabled) {
                 enableHighlightMode()
               } else {
                 disableHighlightMode()
               }
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-open-url',
+            type: 'action',
+            handler: (data: { url: string }) => {
+              window.open(data.url, '_blank')
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-open-panel-tab',
+            type: 'action',
+            handler: (_data: { tab: string }) => {
+              // Switch to the Storybook panel dock; the panel will read
+              // the pending tab from the server endpoint on load.
+              const clientCtx = getDevToolsClientContext() as any
+              clientCtx?.docks?.switchEntry?.('storybook-devtools-panel')
             },
           } as any)
         } catch {
@@ -137,7 +173,9 @@ function autoInitRpc() {
   setTimeout(tryInit, 500)
 }
 
-function serializeInstance(instance: ComponentInstance): SerializedRegistryInstance {
+function serializeInstance(
+  instance: ComponentInstance,
+): SerializedRegistryInstance {
   return {
     id: instance.id,
     meta: { ...instance.meta },
@@ -155,7 +193,12 @@ function scheduleRegistryPush() {
 function flushRegistryDiff() {
   diffFlushTimer = null
   if (!rpcCallFn) return
-  if (pendingDiff.added.length === 0 && pendingDiff.removed.length === 0 && pendingDiff.updated.length === 0) return
+  if (
+    pendingDiff.added.length === 0 &&
+    pendingDiff.removed.length === 0 &&
+    pendingDiff.updated.length === 0
+  )
+    return
 
   const diff: RegistryDiff = {
     added: [...pendingDiff.added],
@@ -184,6 +227,7 @@ const DOUBLE_ESCAPE_MS = 600
 export function enableHighlightMode() {
   isDockActive = true
   enableOverlay()
+  syncHighlightState(true)
   // TODO: hide/fade the DevTools panel so components beneath it are reachable.
   // Targeting `vite-devtools-dock-embedded` with opacity+pointer-events works
   // technically but the UX isn't great — find a better approach (e.g. slide
@@ -202,7 +246,7 @@ export function disableHighlightMode() {
   clearSelection()
   disableOverlay()
   hideHoverMenu()
-  // TODO: restore the DevTools panel once the approach above is settled.
+  syncHighlightState(false)
 }
 
 // Debounce function for performance
@@ -326,13 +370,26 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+/** Sync highlight-active shared state so the panel toggle button stays in sync */
+function syncHighlightState(active: boolean) {
+  if (!rpcCallFn) return
+  const ctx = getDevToolsClientContext()
+  if (!ctx?.rpc?.sharedState) return
+  ctx.rpc.sharedState
+    .get('component-highlighter:highlight-active')
+    .then((state: any) => state.mutate(() => active))
+    .catch(() => {})
+}
+
 /** Notify the user about click-through state change via DevTools toast */
 function notifyClickThrough(enabled: boolean) {
   if (!rpcCallFn) return
   const message = enabled
     ? 'Click-through enabled — press Alt to disable'
     : 'Click-through disabled'
-  rpcCallFn('component-highlighter:notify', { message, level: 'info' }).catch(() => {})
+  rpcCallFn('component-highlighter:notify', { message, level: 'info' }).catch(
+    () => {},
+  )
 }
 
 /**
@@ -343,9 +400,7 @@ function initialize() {
   // Prevent duplicate initialization if module is loaded multiple times
   if (typeof window === 'undefined') return
   if (window.__componentHighlighterInitialized) {
-    warn(
-      'Already initialized, skipping duplicate initialization',
-    )
+    warn('Already initialized, skipping duplicate initialization')
     return
   }
 
@@ -412,18 +467,24 @@ function initialize() {
   window.__componentHighlighterRegistry = componentRegistry
 
   // Test/automation hook: bypass DevTools dock activation when needed.
-  ;(window as unknown as { __componentHighlighterEnable?: () => void }).__componentHighlighterEnable =
-    () => {
-      enableHighlightMode()
+  ;(
+    window as unknown as { __componentHighlighterEnable?: () => void }
+  ).__componentHighlighterEnable = () => {
+    enableHighlightMode()
+  }
+  ;(
+    window as unknown as { __componentHighlighterDisable?: () => void }
+  ).__componentHighlighterDisable = () => {
+    disableHighlightMode()
+  }
+  ;(
+    window as unknown as { __componentHighlighterIsActive?: () => boolean }
+  ).__componentHighlighterIsActive = () => isDockActive
+  ;(
+    window as unknown as {
+      __componentHighlighterSelectById?: (id: string) => boolean
     }
-  ;(window as unknown as { __componentHighlighterDisable?: () => void }).__componentHighlighterDisable =
-    () => {
-      disableHighlightMode()
-    }
-  ;(window as unknown as { __componentHighlighterIsActive?: () => boolean }).__componentHighlighterIsActive =
-    () => isDockActive
-  ;(window as unknown as { __componentHighlighterSelectById?: (id: string) => boolean }).__componentHighlighterSelectById =
-    (id: string) => selectComponentById(id)
+  ).__componentHighlighterSelectById = (id: string) => selectComponentById(id)
 
   // Start auto-initialization of RPC (registry sync + broadcast handlers)
   autoInitRpc()
