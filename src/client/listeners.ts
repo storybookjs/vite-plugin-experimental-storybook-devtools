@@ -4,7 +4,6 @@ import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
 import {
   enableOverlay,
   disableOverlay,
-  toggleHighlightAll,
   updateHover,
   updateInstanceRects,
   setComponentRegistry,
@@ -13,6 +12,8 @@ import {
   hasSelection,
   clearSelection,
   setClickThrough,
+  isClickThroughEnabled,
+  selectComponentById,
 } from './overlay'
 import {
   setRegistryRef,
@@ -27,8 +28,6 @@ import { warn } from './logger'
 declare global {
   interface Window {
     __componentHighlighterRegistry?: Map<string, ComponentInstance>
-    __componentHighlighterToggle?: () => boolean
-    __componentHighlighterDraw?: () => void
     __componentHighlighterInitialized?: boolean
     __componentHighlighterEnable?: () => void
     __componentHighlighterDisable?: () => void
@@ -175,9 +174,6 @@ function flushRegistryDiff() {
 // Track if the dock is active (highlight mode)
 let isDockActive = false
 
-// Track Option key state
-let isOptionHeld = false
-
 // Double-Escape to exit highlight mode
 let lastEscapeTime = 0
 const DOUBLE_ESCAPE_MS = 600
@@ -199,7 +195,10 @@ export function enableHighlightMode() {
  */
 export function disableHighlightMode() {
   isDockActive = false
-  isOptionHeld = false
+  // Disable click-through if it was active
+  if (isClickThroughEnabled()) {
+    setClickThrough(false)
+  }
   clearSelection()
   disableOverlay()
   hideHoverMenu()
@@ -286,10 +285,15 @@ const handleMouseMove = debounce((event: MouseEvent) => {
 function handleKeyDown(event: KeyboardEvent) {
   if (isCurrentlyRecording()) return
 
-  // Option/Alt key: enable click-through so users can interact while highlighting is on
-  if (event.key === 'Alt' && isDockActive && !isOptionHeld) {
-    isOptionHeld = true
-    setClickThrough(true)
+  // Alt/Option key: toggle click-through mode (press to toggle, not hold)
+  // This allows clicking through highlights to interact with the app.
+  // Using a toggle avoids modifier+click browser defaults (e.g. Alt+click downloads links).
+  if (event.key === 'Alt' && isDockActive) {
+    event.preventDefault() // Suppress browser menu bar activation
+    const newState = !isClickThroughEnabled()
+    setClickThrough(newState)
+    notifyClickThrough(newState)
+    return
   }
 
   // Escape handling:
@@ -322,14 +326,13 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
-function handleKeyUp(event: KeyboardEvent) {
-  if (isCurrentlyRecording()) return
-
-  // Option/Alt key release: disable click-through
-  if (event.key === 'Alt' && isOptionHeld) {
-    isOptionHeld = false
-    setClickThrough(false)
-  }
+/** Notify the user about click-through state change via DevTools toast */
+function notifyClickThrough(enabled: boolean) {
+  if (!rpcCallFn) return
+  const message = enabled
+    ? 'Click-through enabled — press Alt to disable'
+    : 'Click-through disabled'
+  rpcCallFn('component-highlighter:notify', { message, level: 'info' }).catch(() => {})
 }
 
 /**
@@ -393,7 +396,6 @@ function initialize() {
   // Initialize DOM event listeners
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('keydown', handleKeyDown)
-  document.addEventListener('keyup', handleKeyUp)
 
   // Update component positions on scroll
   window.addEventListener(
@@ -406,15 +408,8 @@ function initialize() {
     { passive: true },
   )
 
-  // Export for debugging
+  // Export for debugging and E2E testing
   window.__componentHighlighterRegistry = componentRegistry
-  window.__componentHighlighterToggle = () => {
-    return toggleHighlightAll()
-  }
-  window.__componentHighlighterDraw = () => {
-    enableOverlay()
-    updateInstanceRects()
-  }
 
   // Test/automation hook: bypass DevTools dock activation when needed.
   ;(window as unknown as { __componentHighlighterEnable?: () => void }).__componentHighlighterEnable =
@@ -427,6 +422,8 @@ function initialize() {
     }
   ;(window as unknown as { __componentHighlighterIsActive?: () => boolean }).__componentHighlighterIsActive =
     () => isDockActive
+  ;(window as unknown as { __componentHighlighterSelectById?: (id: string) => boolean }).__componentHighlighterSelectById =
+    (id: string) => selectComponentById(id)
 
   // Start auto-initialization of RPC (registry sync + broadcast handlers)
   autoInitRpc()

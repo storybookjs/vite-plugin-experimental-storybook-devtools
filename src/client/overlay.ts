@@ -29,7 +29,6 @@ function safeOverlayCall<T>(fn: () => T, fallback?: T): T | undefined {
 
 function disableOverlaySafe() {
   isOverlayEnabled = false
-  isHighlightAllActive = false
   isClickThroughActive = false
   if (highlightContainer) {
     highlightContainer.remove()
@@ -89,7 +88,6 @@ let highlightContainer: HTMLDivElement | null = null
 let highlightElements: Map<string, HTMLDivElement> = new Map()
 let contextMenuHandle: ContextMenuHandle | null = null
 let isOverlayEnabled = false
-let isHighlightAllActive = false
 let isClickThroughActive = false
 let currentHoveredId: string | null = null
 let selectedComponentId: string | null = null
@@ -248,7 +246,7 @@ function createHighlightElement(instance: ComponentInstance): HTMLDivElement {
   el.style.cssText = `
     position: fixed;
     box-sizing: border-box;
-    pointer-events: ${isHighlightAllActive || isClickThroughActive ? 'none' : 'auto'};
+    pointer-events: ${isClickThroughActive ? 'none' : 'auto'};
     cursor: pointer;
   `
   return el
@@ -380,15 +378,6 @@ function drawAllHighlightsImpl() {
     } else if (currentHoveredId === instance.id && isOverlayEnabled) {
       type = 'hovered'
       shouldShow = true
-    } else if (isHighlightAllActive) {
-      // When highlighting all with Option held
-      // Components with stories: pink, components without stories: blue
-      if (hasStory) {
-        type = 'hovered' // Pink stroke and background
-      } else {
-        type = 'other' // Blue stroke and background
-      }
-      shouldShow = true
     } else if (
       highlightComponentName &&
       instance.meta.componentName === highlightComponentName &&
@@ -427,8 +416,8 @@ function drawAllHighlightsImpl() {
     }
   }
 
-  // Update pointer-events based on highlight-all or click-through state
-  const pointerEvents = (isHighlightAllActive || isClickThroughActive) ? 'none' : 'auto'
+  // Update pointer-events based on click-through state
+  const pointerEvents = isClickThroughActive ? 'none' : 'auto'
   for (const el of highlightElements.values()) {
     el.style.pointerEvents = pointerEvents
   }
@@ -545,15 +534,12 @@ function clearAllHighlights() {
 }
 
 let wasOverlayEnabledBeforeRecording = false
-let wasHighlightAllActiveBeforeRecording = false
 
 function suspendHighlightingForRecording() {
   wasOverlayEnabledBeforeRecording = isOverlayEnabled
-  wasHighlightAllActiveBeforeRecording = isHighlightAllActive
 
   debug('Suspending highlight UI for interaction recording', {
     isOverlayEnabled,
-    isHighlightAllActive,
   })
 
   selectedComponentId = null
@@ -565,24 +551,15 @@ function suspendHighlightingForRecording() {
 function resumeHighlightingAfterRecording() {
   debug('Resuming highlight UI after interaction recording', {
     wasOverlayEnabledBeforeRecording,
-    wasHighlightAllActiveBeforeRecording,
   })
 
-  if (
-    wasOverlayEnabledBeforeRecording ||
-    wasHighlightAllActiveBeforeRecording
-  ) {
+  if (wasOverlayEnabledBeforeRecording) {
     enableOverlay()
   }
 
-  if (wasHighlightAllActiveBeforeRecording) {
-    setHighlightAll(true)
-  } else {
-    drawAllHighlights()
-  }
+  drawAllHighlights()
 
   wasOverlayEnabledBeforeRecording = false
-  wasHighlightAllActiveBeforeRecording = false
 }
 
 function emitCreateStory(
@@ -852,7 +829,6 @@ export function enableOverlay() {
 
 export function disableOverlay() {
   isOverlayEnabled = false
-  isHighlightAllActive = false
   // Reset cursor when overlay is disabled
   document.body.style.cursor = ''
   clearAllHighlights()
@@ -861,36 +837,13 @@ export function disableOverlay() {
   removeHighlightContainer()
 }
 
-export function setHighlightAll(enabled: boolean) {
-  isHighlightAllActive = enabled
-  if (enabled) {
-    createHighlightContainer()
-    document.body.style.cursor = 'crosshair'
-  }
-  drawAllHighlights()
-}
-
-export function toggleHighlightAll() {
-  isHighlightAllActive = !isHighlightAllActive
-  if (isHighlightAllActive) {
-    isOverlayEnabled = true
-    createHighlightContainer()
-    document.body.style.cursor = 'crosshair'
-  } else {
-    isOverlayEnabled = false
-    document.body.style.cursor = ''
-    clearAllHighlights()
-    currentHoveredId = null
-    hideHoverMenu()
-    removeHighlightContainer()
-  }
-  drawAllHighlights()
-  return isHighlightAllActive
+export function isClickThroughEnabled(): boolean {
+  return isClickThroughActive
 }
 
 export function setClickThrough(enabled: boolean) {
   isClickThroughActive = enabled
-  const pointerEvents = enabled ? 'none' : (isHighlightAllActive ? 'none' : 'auto')
+  const pointerEvents = enabled ? 'none' : 'auto'
   for (const el of highlightElements.values()) {
     el.style.pointerEvents = pointerEvents
   }
@@ -947,8 +900,21 @@ export function hasSelection(): boolean {
   return selectedComponentId !== null
 }
 
-export function isHighlightAllEnabled(): boolean {
-  return isHighlightAllActive
+/**
+ * Test/automation hook: select a component by its registry ID.
+ * Opens the context menu as if the user clicked the component's highlight.
+ */
+export function selectComponentById(id: string) {
+  if (!componentRegistry) return false
+  const instance = componentRegistry.get(id)
+  if (!instance) return false
+  if (instance.element?.isConnected) {
+    instance.rect = instance.element.getBoundingClientRect()
+  }
+  const rect = instance.rect
+  if (!rect) return false
+  selectComponent(instance, rect.left + rect.width / 2, rect.top + rect.height / 2)
+  return true
 }
 
 // Invalidate story cache for a specific path (called after story creation)

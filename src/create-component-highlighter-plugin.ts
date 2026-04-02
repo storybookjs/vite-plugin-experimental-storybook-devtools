@@ -30,6 +30,7 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:highlight-coverage-instances': (data: { componentName: string; hasStory: boolean } | null) => void
     'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
     'component-highlighter:visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
+    'component-highlighter:notify': (data: { message: string; level?: string }) => void
   }
 
   interface DevToolsRpcClientFunctions {
@@ -825,6 +826,26 @@ export function createComponentHighlighterPlugin(
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-visit-story',
                   args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Client → server: show a toast notification
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:notify',
+            type: 'action',
+            setup: () => ({
+              handler: (data: { message: string; level?: string }) => {
+                const level = (data.level as 'info' | 'warn' | 'error' | 'success') || 'info'
+                notifications.notify({
+                  message: data.message,
+                  level,
+                  toast: true,
+                  autoDismissMs: 3000,
+                  category: 'component-highlighter',
                 })
               },
             }),

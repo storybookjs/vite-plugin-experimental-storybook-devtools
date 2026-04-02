@@ -88,8 +88,6 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterEnable()` | Enable highlight mode (bypass dock) |
 | `__componentHighlighterDisable()` | Disable highlight mode |
 | `__componentHighlighterIsActive()` | Check if highlight mode is on |
-| `__componentHighlighterToggle()` | Toggle highlight-all mode |
-| `__componentHighlighterDraw()` | Force redraw all highlights |
 | `__componentHighlighterDeactivateDock()` | Programmatically toggle dock off |
 
 ## Panel↔Client communication (RPC-based)
