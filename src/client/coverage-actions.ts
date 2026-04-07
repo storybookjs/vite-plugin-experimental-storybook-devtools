@@ -3,6 +3,7 @@
  * These run in the app's browser context so they can access the DOM directly.
  */
 import type { ComponentInstance } from '../frameworks/types'
+import { attachHighlightLabel } from './highlight-label'
 
 // Reference set by listeners.ts during initialization
 let componentRegistry: Map<string, ComponentInstance> | null = null
@@ -18,6 +19,37 @@ const COVERAGE_HIGHLIGHT_ATTR = 'data-coverage-highlight'
 export function clearCoverageHighlights() {
   const els = document.querySelectorAll(`[${COVERAGE_HIGHLIGHT_ATTR}]`)
   els.forEach((el) => el.remove())
+}
+
+/**
+ * Create a highlight overlay box for a component instance with a name label.
+ */
+function createHighlightBox(
+  rect: DOMRect,
+  componentName: string,
+  color: string,
+): HTMLDivElement {
+  const box = document.createElement('div')
+  box.style.cssText = `
+    position: fixed;
+    left: ${rect.left}px;
+    top: ${rect.top}px;
+    width: ${rect.width}px;
+    height: ${rect.height}px;
+    outline: 2px solid ${color};
+    outline-offset: -1px;
+    background: ${color}22;
+    pointer-events: none;
+    z-index: 999999;
+    transition: opacity 0.2s ease;
+    border-radius: 2px;
+  `
+  box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+
+  // Attach the shared name label
+  attachHighlightLabel(box, rect, componentName, color)
+
+  return box
 }
 
 export function showCoverageHighlights(
@@ -38,22 +70,7 @@ export function showCoverageHighlights(
       instance.element.nodeType === Node.ELEMENT_NODE
     ) {
       const rect = instance.element.getBoundingClientRect()
-      const box = document.createElement('div')
-      box.style.cssText = `
-        position: fixed;
-        left: ${rect.left}px;
-        top: ${rect.top}px;
-        width: ${rect.width}px;
-        height: ${rect.height}px;
-        outline: 2px solid ${color};
-        outline-offset: -1px;
-        background: ${color}22;
-        pointer-events: none;
-        z-index: 999999;
-        transition: opacity 0.2s ease;
-        border-radius: 2px;
-      `
-      box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+      const box = createHighlightBox(rect, componentName, color)
       document.body.appendChild(box)
     }
   }
@@ -82,22 +99,7 @@ export function showBatchCoverageHighlights(
     ) {
       const color = hasStory ? '#86CE64' : '#FF6933'
       const rect = instance.element.getBoundingClientRect()
-      const box = document.createElement('div')
-      box.style.cssText = `
-        position: fixed;
-        left: ${rect.left}px;
-        top: ${rect.top}px;
-        width: ${rect.width}px;
-        height: ${rect.height}px;
-        outline: 2px solid ${color};
-        outline-offset: -1px;
-        background: ${color}22;
-        pointer-events: none;
-        z-index: 999999;
-        transition: opacity 0.2s ease;
-        border-radius: 2px;
-      `
-      box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+      const box = createHighlightBox(rect, instance.meta.componentName, color)
       document.body.appendChild(box)
     }
   }
