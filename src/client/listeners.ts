@@ -19,6 +19,7 @@ import {
   setRegistryRef,
   scrollToComponent,
   showCoverageHighlights,
+  showBatchCoverageHighlights,
   clearCoverageHighlights,
 } from './coverage-actions'
 import { isCurrentlyRecording } from './interaction-recorder'
@@ -145,6 +146,16 @@ function autoInitRpc() {
               } else {
                 clearCoverageHighlights()
               }
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-highlight-coverage-batch',
+            type: 'action',
+            handler: (
+              data: Array<{ componentName: string; hasStory: boolean }>,
+            ) => {
+              showBatchCoverageHighlights(data)
             },
           } as any)
 

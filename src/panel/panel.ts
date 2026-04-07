@@ -117,6 +117,7 @@ const EYE_ICON = `<svg width="12" height="12" viewBox="0 0 11.2368 13.9999" fill
 const PLUS_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`
 const CHECK_ICON = `<svg width="12" height="12" viewBox="0 0 14 9.5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M13.8536 0.853553C14.0488 0.658291 14.0488 0.341709 13.8536 0.146447C13.6583 -0.0488155 13.3417 -0.0488155 13.1464 0.146447L5 8.29289L0.853553 4.14645C0.658291 3.95118 0.341709 3.95118 0.146447 4.14645C-0.0488155 4.34171 -0.0488155 4.65829 0.146447 4.85355L4.64645 9.35355C4.84171 9.54882 5.15829 9.54882 5.35355 9.35355L13.8536 0.853553Z" fill="currentColor"/></svg>`
 const ELLIPSIS_ICON = `<svg width="12" height="3" viewBox="0 0 12 3" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 1.5C3 2.32843 2.32843 3 1.5 3C0.671573 3 0 2.32843 0 1.5C0 0.671573 0.671573 0 1.5 0C2.32843 0 3 0.671573 3 1.5Z" fill="currentColor"/><path d="M12 1.5C12 2.32843 11.3284 3 10.5 3C9.67157 3 9 2.32843 9 1.5C9 0.671573 9.67157 0 10.5 0C11.3284 0 12 0.671573 12 1.5Z" fill="currentColor"/><path d="M6 3C6.82843 3 7.5 2.32843 7.5 1.5C7.5 0.671573 6.82843 0 6 0C5.17157 0 4.5 0.671573 4.5 1.5C4.5 2.32843 5.17157 3 6 3Z" fill="currentColor"/></svg>`
+const WARNING_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.134 2.5a1 1 0 0 1 1.732 0l5.196 9A1 1 0 0 1 13.196 13H2.804a1 1 0 0 1-.866-1.5l5.196-9Z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 6v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="11" r="0.7" fill="currentColor"/></svg>`
 const BULLSEYE_ICON = `<svg width="12" height="12" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M0 7C0 3.13401 3.13401 0 7 0C10.866 0 14 3.13401 14 7C14 10.866 10.866 14 7 14C3.13401 14 0 10.866 0 7ZM6.5 10.5V12.9795C3.5851 12.739 1.26101 10.4149 1.02054 7.5H3.5C3.77614 7.5 4 7.27614 4 7C4 6.72386 3.77614 6.5 3.5 6.5H1.02054C1.26101 3.5851 3.5851 1.26101 6.5 1.02054V3.5C6.5 3.77614 6.72386 4 7 4C7.27614 4 7.5 3.77614 7.5 3.5V1.02054C10.4149 1.26101 12.739 3.5851 12.9795 6.5H10.5C10.2239 6.5 10 6.72386 10 7C10 7.27614 10.2239 7.5 10.5 7.5H12.9795C12.739 10.4149 10.4149 12.739 7.5 12.9795V10.5C7.5 10.2239 7.27614 10 7 10C6.72386 10 6.5 10.2239 6.5 10.5Z" fill="currentColor"/></svg>`
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -814,88 +815,47 @@ async function buildCoveragePanel(coverage: CoverageData) {
   const coveredVisible = visibleEntries.filter((e) => e.hasStory).length
   const pctVisible =
     totalVisible > 0 ? Math.round((coveredVisible / totalVisible) * 100) : 0
+  const cc = coverageColorClass(pctVisible)
+
+  const missingEntries = visibleEntries.filter((e) => !e.hasStory)
+  const coveredEntries = visibleEntries.filter((e) => e.hasStory)
 
   const root = document.createElement('div')
   root.className = 'coverage-root'
 
-  // Header
+  // ── Header with donut chart ──
   const hdr = document.createElement('div')
   hdr.className = 'cov-hdr'
 
+  const hdrText = document.createElement('div')
+  hdrText.className = 'cov-hdr-text'
   const title = document.createElement('h2')
-  title.textContent = 'Story Coverage (on this page)'
-  hdr.appendChild(title)
+  title.textContent = 'Coverage'
+  hdrText.appendChild(title)
+  const subtitle = document.createElement('div')
+  subtitle.className = 'cov-hdr-subtitle'
+  subtitle.textContent = `${coveredVisible}/${totalVisible} components on this page have stories`
+  hdrText.appendChild(subtitle)
+  hdr.appendChild(hdrText)
 
-  const pct = document.createElement('span')
-  const cc = coverageColorClass(pctVisible)
-  pct.className = `pct ${cc}`
-  pct.textContent = `${pctVisible}%`
-  hdr.appendChild(pct)
-
+  // Donut chart
+  const donut = document.createElement('div')
+  donut.className = 'cov-donut'
+  const r = 18 // radius
+  const circumference = 2 * Math.PI * r
+  const offset = circumference - (pctVisible / 100) * circumference
+  donut.innerHTML = `
+    <svg viewBox="0 0 44 44">
+      <circle class="cov-donut-track" cx="22" cy="22" r="${r}" />
+      <circle class="cov-donut-fill ${cc}" cx="22" cy="22" r="${r}"
+        stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
+    </svg>
+    <span class="cov-donut-label">${pctVisible}</span>
+  `
+  hdr.appendChild(donut)
   root.appendChild(hdr)
 
-  // Progress bar
-  const pw = document.createElement('div')
-  pw.className = 'progress-wrap'
-
-  const pl = document.createElement('div')
-  pl.className = 'progress-label'
-  pl.textContent = `${coveredVisible} of ${totalVisible} components on this page have story files`
-  pw.appendChild(pl)
-
-  const barRow = document.createElement('div')
-  barRow.className = 'progress-row'
-
-  const bar = document.createElement('div')
-  bar.className = 'progress-bar'
-  const fill = document.createElement('div')
-  fill.className = `progress-fill ${cc}`
-  fill.style.width = `${pctVisible}%`
-  bar.appendChild(fill)
-  barRow.appendChild(bar)
-
-  // "Create all" button — creates stories for every uncovered instance on screen,
-  // deduplicated by (filePath + props fingerprint) so identical mounts are skipped.
-  const allVisibleInstances = await collectAllVisibleInstances()
-  const uncoveredFilePaths = new Set(
-    visibleEntries.filter((e) => !e.hasStory).map((e) => e.filePath),
-  )
-  const uncoveredInstances = allVisibleInstances.filter(
-    (inst) => inst.meta?.filePath && uncoveredFilePaths.has(inst.meta.filePath),
-  )
-  if (uncoveredInstances.length > 0) {
-    const createAllBtn = document.createElement('button')
-    createAllBtn.className = 'create-all-btn'
-    createAllBtn.textContent = `Create all (${uncoveredInstances.length})`
-    createAllBtn.title = `Create stories for ${uncoveredInstances.length} uncovered component instance${uncoveredInstances.length === 1 ? '' : 's'} on screen`
-    createAllBtn.addEventListener('click', async () => {
-      createAllBtn.disabled = true
-      createAllBtn.textContent = 'Creating\u2026'
-      for (const instance of uncoveredInstances) {
-        try {
-          await rpcCall('component-highlighter:create-story', {
-            meta: instance.meta,
-            props: instance.props,
-            serializedProps: instance.serializedProps,
-            skipNavigation: true,
-          })
-        } catch {
-          // Best effort
-        }
-      }
-      // Wait for the RPC story creation to complete, then refresh
-      setTimeout(() => {
-        lastCoverageJson = ''
-        refreshCoverage()
-      }, 1500)
-    })
-    barRow.appendChild(createAllBtn)
-  }
-
-  pw.appendChild(barRow)
-  root.appendChild(pw)
-
-  // Table
+  // Empty state
   if (visibleEntries.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'empty'
@@ -906,16 +866,6 @@ async function buildCoveragePanel(coverage: CoverageData) {
     pane.appendChild(root)
     return
   }
-
-  const wrap = document.createElement('div')
-  wrap.className = 'table-wrap'
-
-  const table = document.createElement('table')
-  const thead = document.createElement('thead')
-  thead.innerHTML = `<tr><th>Component</th><th>Status</th><th>Actions</th></tr>`
-  table.appendChild(thead)
-
-  const tbody = document.createElement('tbody')
 
   // Highlight/clear helpers — delegate to client via RPC broadcast
   const highlightInstances = (componentName: string, hasStory: boolean) => {
@@ -931,54 +881,126 @@ async function buildCoveragePanel(coverage: CoverageData) {
     )
   }
 
-  for (const entry of visibleEntries) {
-    const tr = document.createElement('tr')
-    tr.className = `row ${entry.hasStory ? 'covered' : 'uncovered'}`
+  // Scrollable wrapper for both sections
+  const listWrap = document.createElement('div')
+  listWrap.className = 'cov-list-wrap'
 
-    // Component name + file
-    const tdName = document.createElement('td')
-    tdName.innerHTML = `
-      <div class="comp-name">${esc(entry.componentName)}</div>
-      <div class="comp-file" title="${esc(entry.relativeFilePath)}">${esc(entry.relativeFilePath)}</div>
-    `
-    tr.appendChild(tdName)
+  // ── Missing section ──
+  if (missingEntries.length > 0) {
+    const section = document.createElement('div')
+    section.className = 'cov-section'
 
-    // Status badge
-    const tdStatus = document.createElement('td')
-    if (entry.hasStory) {
-      tdStatus.innerHTML = `<span class="status covered"><span class="status-dot"></span>Covered</span>`
-    } else {
-      tdStatus.innerHTML = `<span class="status missing"><span class="status-dot"></span>Missing</span>`
-    }
-    tr.appendChild(tdStatus)
+    const sectionHdr = document.createElement('div')
+    sectionHdr.className = 'cov-section-hdr'
 
-    // Action buttons
-    const tdActions = document.createElement('td')
-    const actionsDiv = document.createElement('div')
-    actionsDiv.className = 'actions'
+    const sectionTitle = document.createElement('span')
+    sectionTitle.className = 'cov-section-title'
+    sectionTitle.innerHTML = `Missing<span class="cov-section-count">${missingEntries.length}</span>`
+    sectionHdr.appendChild(sectionTitle)
 
-    // More actions button — opens popover with editor/Storybook actions
-    const moreBtn = document.createElement('button')
-    moreBtn.className = 'act-btn more-btn'
-    moreBtn.innerHTML = ELLIPSIS_ICON
-    moreBtn.title = 'Edit files, view story, and more'
-    moreBtn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      showActionPopover(moreBtn, entry)
+    const sectionActions = document.createElement('div')
+    sectionActions.className = 'cov-section-actions'
+
+    // Preview button — highlights all uncovered components on the page
+    const previewBtn = document.createElement('button')
+    previewBtn.className = 'cov-preview-btn'
+    previewBtn.textContent = 'Preview'
+    previewBtn.title = 'Highlight all uncovered components on the page'
+    let previewing = false
+    previewBtn.addEventListener('click', () => {
+      previewing = !previewing
+      previewBtn.classList.toggle('active', previewing)
+      if (previewing) {
+        // Highlight all uncovered components at once via batch RPC
+        const batch = missingEntries.map((e) => ({
+          componentName: e.componentName,
+          hasStory: false,
+        }))
+        rpcCall('component-highlighter:highlight-coverage-batch', batch).catch(
+          () => {},
+        )
+      } else {
+        clearHighlights()
+      }
     })
-    actionsDiv.appendChild(moreBtn)
+    sectionActions.appendChild(previewBtn)
 
-    // Covered indicator — always visible on rows with a story
-    if (entry.hasStory) {
-      const coveredBtn = document.createElement('button')
-      coveredBtn.className = 'act-btn covered-indicator'
-      coveredBtn.innerHTML = CHECK_ICON
-      coveredBtn.disabled = true
-      actionsDiv.appendChild(coveredBtn)
+    // "Generate all" button
+    const allVisibleInstances = await collectAllVisibleInstances()
+    const uncoveredFilePaths = new Set(
+      missingEntries.map((e) => e.filePath),
+    )
+    const uncoveredInstances = allVisibleInstances.filter(
+      (inst) =>
+        inst.meta?.filePath && uncoveredFilePaths.has(inst.meta.filePath),
+    )
+    if (uncoveredInstances.length > 0) {
+      const createAllBtn = document.createElement('button')
+      createAllBtn.className = 'create-all-btn'
+      createAllBtn.textContent = 'Generate all'
+      createAllBtn.title = `Create stories for ${uncoveredInstances.length} uncovered component${uncoveredInstances.length === 1 ? '' : 's'}`
+      createAllBtn.addEventListener('click', async () => {
+        createAllBtn.disabled = true
+        createAllBtn.textContent = 'Creating\u2026'
+        for (const instance of uncoveredInstances) {
+          try {
+            await rpcCall('component-highlighter:create-story', {
+              meta: instance.meta,
+              props: instance.props,
+              serializedProps: instance.serializedProps,
+              skipNavigation: true,
+            })
+          } catch {
+            // Best effort
+          }
+        }
+        setTimeout(() => {
+          lastCoverageJson = ''
+          refreshCoverage()
+        }, 1500)
+      })
+      sectionActions.appendChild(createAllBtn)
     }
 
-    // Create story button (only for uncovered components)
-    if (!entry.hasStory) {
+    sectionHdr.appendChild(sectionActions)
+    section.appendChild(sectionHdr)
+
+    const list = document.createElement('ul')
+    list.className = 'cov-list'
+
+    for (const entry of missingEntries) {
+      const li = document.createElement('li')
+      li.className = 'cov-item'
+
+      const info = document.createElement('div')
+      info.className = 'cov-item-info'
+      info.innerHTML = `
+        <div class="comp-name">${esc(entry.componentName)}</div>
+        <div class="comp-file" title="${esc(entry.relativeFilePath)}">${esc(entry.relativeFilePath)}</div>
+      `
+      li.appendChild(info)
+
+      const actions = document.createElement('div')
+      actions.className = 'cov-item-actions'
+
+      // More actions (hidden until hover)
+      const moreBtn = document.createElement('button')
+      moreBtn.className = 'act-btn more-btn'
+      moreBtn.innerHTML = ELLIPSIS_ICON
+      moreBtn.title = 'More actions'
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        showActionPopover(moreBtn, entry)
+      })
+      actions.appendChild(moreBtn)
+
+      // Warning icon
+      const warn = document.createElement('span')
+      warn.className = 'cov-warning-icon'
+      warn.innerHTML = WARNING_ICON
+      actions.appendChild(warn)
+
+      // Create story "+" button
       const createBtn = document.createElement('button')
       createBtn.className = 'act-btn create'
       createBtn.innerHTML = PLUS_ICON
@@ -986,38 +1008,101 @@ async function buildCoveragePanel(coverage: CoverageData) {
       createBtn.addEventListener('click', async (e) => {
         e.stopPropagation()
         createBtn.disabled = true
-        createBtn.style.opacity = '0.5'
         const created = await createStoryForComponent(entry.filePath)
         if (created) {
-          // Wait for the RPC story creation to complete, then refresh
           setTimeout(() => {
             lastCoverageJson = ''
             refreshCoverage()
           }, 1500)
         } else {
           createBtn.disabled = false
-          createBtn.style.opacity = ''
         }
       })
-      actionsDiv.appendChild(createBtn)
+      actions.appendChild(createBtn)
+
+      li.appendChild(actions)
+
+      // Hover → highlight matching component instances on the app page via RPC
+      li.addEventListener('mouseenter', () => {
+        highlightInstances(entry.componentName, false)
+      })
+      li.addEventListener('mouseleave', () => {
+        if (!previewing) clearHighlights()
+      })
+
+      list.appendChild(li)
     }
 
-    tdActions.appendChild(actionsDiv)
-    tr.appendChild(tdActions)
-
-    // Hover → highlight matching component instances on the app page via RPC
-    tr.addEventListener('mouseenter', () => {
-      highlightInstances(entry.componentName, entry.hasStory)
-    })
-
-    tr.addEventListener('mouseleave', clearHighlights)
-
-    tbody.appendChild(tr)
+    section.appendChild(list)
+    listWrap.appendChild(section)
   }
 
-  table.appendChild(tbody)
-  wrap.appendChild(table)
-  root.appendChild(wrap)
+  // ── Covered section ──
+  if (coveredEntries.length > 0) {
+    const section = document.createElement('div')
+    section.className = 'cov-section'
+
+    const sectionHdr = document.createElement('div')
+    sectionHdr.className = 'cov-section-hdr'
+
+    const sectionTitle = document.createElement('span')
+    sectionTitle.className = 'cov-section-title'
+    sectionTitle.innerHTML = `Covered<span class="cov-section-count">${coveredEntries.length}</span>`
+    sectionHdr.appendChild(sectionTitle)
+
+    section.appendChild(sectionHdr)
+
+    const list = document.createElement('ul')
+    list.className = 'cov-list'
+
+    for (const entry of coveredEntries) {
+      const li = document.createElement('li')
+      li.className = 'cov-item'
+
+      const info = document.createElement('div')
+      info.className = 'cov-item-info'
+      info.innerHTML = `
+        <div class="comp-name">${esc(entry.componentName)}</div>
+        <div class="comp-file" title="${esc(entry.relativeFilePath)}">${esc(entry.relativeFilePath)}</div>
+      `
+      li.appendChild(info)
+
+      const actions = document.createElement('div')
+      actions.className = 'cov-item-actions'
+
+      // More actions (hidden until hover)
+      const moreBtn = document.createElement('button')
+      moreBtn.className = 'act-btn more-btn'
+      moreBtn.innerHTML = ELLIPSIS_ICON
+      moreBtn.title = 'More actions'
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        showActionPopover(moreBtn, entry)
+      })
+      actions.appendChild(moreBtn)
+
+      // Checkmark icon
+      const check = document.createElement('span')
+      check.className = 'cov-check-icon'
+      check.innerHTML = CHECK_ICON
+      actions.appendChild(check)
+
+      li.appendChild(actions)
+
+      // Hover → highlight matching component instances on the app page via RPC
+      li.addEventListener('mouseenter', () => {
+        highlightInstances(entry.componentName, true)
+      })
+      li.addEventListener('mouseleave', clearHighlights)
+
+      list.appendChild(li)
+    }
+
+    section.appendChild(list)
+    listWrap.appendChild(section)
+  }
+
+  root.appendChild(listWrap)
 
   pane.innerHTML = ''
   pane.appendChild(root)

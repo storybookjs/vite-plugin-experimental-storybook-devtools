@@ -27,6 +27,7 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:push-registry-diff': (diff: RegistryDiff) => void
     'component-highlighter:scroll-to-component': (data: { componentName: string }) => void
     'component-highlighter:highlight-coverage-instances': (data: { componentName: string; hasStory: boolean } | null) => void
+    'component-highlighter:highlight-coverage-batch': (data: Array<{ componentName: string; hasStory: boolean }>) => void
     'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
     'component-highlighter:visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
     'component-highlighter:notify': (data: { message: string; level?: string }) => void
@@ -35,6 +36,7 @@ declare module '@vitejs/devtools-kit' {
   interface DevToolsRpcClientFunctions {
     'component-highlighter:do-scroll-to-component': (data: { componentName: string }) => void
     'component-highlighter:do-highlight-coverage': (data: { componentName: string; hasStory: boolean } | null) => void
+    'component-highlighter:do-highlight-coverage-batch': (data: Array<{ componentName: string; hasStory: boolean }>) => void
     'component-highlighter:do-set-highlight-mode': (data: { enabled: boolean; toggle?: boolean }) => void
     'component-highlighter:do-visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
     'component-highlighter:do-open-url': (data: { url: string }) => void
@@ -815,6 +817,22 @@ export function createComponentHighlighterPlugin(
               handler: (data: { componentName: string; hasStory: boolean } | null) => {
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-highlight-coverage',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: batch highlight coverage instances (Preview button)
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:highlight-coverage-batch',
+            type: 'action',
+            setup: () => ({
+              handler: (data: Array<{ componentName: string; hasStory: boolean }>) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-highlight-coverage-batch',
                   args: [data],
                 })
               },

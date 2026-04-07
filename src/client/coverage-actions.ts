@@ -59,6 +59,50 @@ export function showCoverageHighlights(
   }
 }
 
+/**
+ * Highlight multiple components at once (used by Preview button).
+ * Each entry specifies a componentName and hasStory flag.
+ */
+export function showBatchCoverageHighlights(
+  components: Array<{ componentName: string; hasStory: boolean }>,
+) {
+  clearCoverageHighlights()
+  if (!componentRegistry) return
+
+  const nameToStory = new Map(
+    components.map((c) => [c.componentName, c.hasStory]),
+  )
+
+  for (const instance of componentRegistry.values()) {
+    const hasStory = nameToStory.get(instance.meta.componentName)
+    if (
+      hasStory !== undefined &&
+      instance.element?.isConnected &&
+      instance.element.nodeType === Node.ELEMENT_NODE
+    ) {
+      const color = hasStory ? '#86CE64' : '#FF6933'
+      const rect = instance.element.getBoundingClientRect()
+      const box = document.createElement('div')
+      box.style.cssText = `
+        position: fixed;
+        left: ${rect.left}px;
+        top: ${rect.top}px;
+        width: ${rect.width}px;
+        height: ${rect.height}px;
+        outline: 2px solid ${color};
+        outline-offset: -1px;
+        background: ${color}22;
+        pointer-events: none;
+        z-index: 999999;
+        transition: opacity 0.2s ease;
+        border-radius: 2px;
+      `
+      box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+      document.body.appendChild(box)
+    }
+  }
+}
+
 // ─── Scroll to component ─────────────────────────────────────────────
 
 export function scrollToComponent(componentName: string) {
