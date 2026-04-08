@@ -2,17 +2,15 @@ import type { ComponentInstance } from '../frameworks/types'
 import type { SerializedRegistryInstance, RegistryDiff } from '../shared-types'
 import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
 import {
-  enableOverlay,
-  disableOverlay,
-  updateHover,
-  updateInstanceRects,
   setComponentRegistry,
-  showHoverMenu,
-  hideHoverMenu,
-  hasSelection,
-  clearSelection,
-  setClickThrough,
-  isClickThroughEnabled,
+  showContextMenu,
+  hideContextMenu,
+  drawAllHighlights,
+  createOverlayDOM,
+  removeOverlayDOM,
+  setClickThroughDOM,
+  updateInstanceRects,
+  pushSelectedComponentRPC,
   selectComponentById,
 } from './overlay'
 import {
@@ -25,9 +23,11 @@ import {
 import { isCurrentlyRecording } from './interaction-recorder'
 import { warn } from './logger'
 import {
-  getIsPanelHighlighterActive,
-  setIsPanelHighlighterActive,
-} from './highlight-state'
+  createHighlightActor,
+  getHighlightActor,
+  isOverlayActive,
+  isClickThrough,
+} from './highlight-machine'
 
 // Type declarations for globals
 declare global {
@@ -40,33 +40,29 @@ declare global {
   }
 }
 
-// Component registry - maintained locally and synced via events
+// Component registry
 const componentRegistry = new Map<string, ComponentInstance>()
 
-// Export getter for use by other client modules
 export function getComponentRegistry(): Map<string, ComponentInstance> {
   return componentRegistry
 }
 
 // ─── Incremental registry sync to server ─────────────────────────────
 
-// Pending diff accumulator
 const pendingDiff: RegistryDiff = { added: [], removed: [], updated: [] }
 let diffFlushTimer: ReturnType<typeof setTimeout> | null = null
 let rpcCallFn:
   | ((method: string, ...args: unknown[]) => Promise<unknown>)
   | null = null
 
-/** Set the RPC call function (injected by vite-devtools.ts after ctx is available) */
 export function setRegistryRpcCall(
   fn: (method: string, ...args: unknown[]) => Promise<unknown>,
 ) {
-  if (rpcCallFn) return // already initialized
+  if (rpcCallFn) return
   rpcCallFn = fn
   pushFullRegistry()
 }
 
-/** Set the RPC call function only after trust is established */
 async function setRegistryRpcCallWhenTrusted(
   ctx: NonNullable<ReturnType<typeof getDevToolsClientContext>>,
 ) {
@@ -74,7 +70,6 @@ async function setRegistryRpcCallWhenTrusted(
   try {
     await ctx.rpc.ensureTrusted()
   } catch {
-    // Trust was denied or timed out – don't register RPC
     return
   }
   setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
@@ -82,12 +77,9 @@ async function setRegistryRpcCallWhenTrusted(
   })
 }
 
-/** Push the full registry as an initial sync */
 function pushFullRegistry() {
   if (!rpcCallFn || componentRegistry.size === 0) return
 
-  // Clear any accumulated diffs — the full push supersedes them and
-  // leaving stale entries would cause duplicates on the server.
   pendingDiff.added = []
   pendingDiff.removed = []
   pendingDiff.updated = []
@@ -110,7 +102,6 @@ function pushFullRegistry() {
 
 /**
  * Auto-initialize RPC: registry sync + client broadcast handlers.
- * Polls for the DevTools client context so everything works before dock activation.
  */
 let rpcHandlersRegistered = false
 
@@ -122,12 +113,10 @@ function autoInitRpc() {
     attempts++
     const ctx = getDevToolsClientContext()
     if (ctx?.rpc?.call) {
-      // Initialize registry sync (waits for trust before making RPC calls)
       if (!rpcCallFn) {
         setRegistryRpcCallWhenTrusted(ctx)
       }
 
-      // Register client broadcast handlers (once)
       if (!rpcHandlersRegistered && ctx.rpc.client) {
         rpcHandlersRegistered = true
         try {
@@ -167,17 +156,18 @@ function autoInitRpc() {
             name: 'component-highlighter:do-set-highlight-mode',
             type: 'action',
             handler: (data: { enabled: boolean; toggle?: boolean }) => {
+              const actor = getHighlightActor()
+              const ctx = actor.getSnapshot().context
               if (data.toggle) {
-                // Toggle: flip the current state
-                if (isDockActive) {
-                  disableHighlightMode()
+                if (ctx.mode === 'dock' || ctx.dockWasActive) {
+                  actor.send({ type: 'DOCK_DEACTIVATE' })
                 } else {
-                  enableHighlightMode()
+                  actor.send({ type: 'DOCK_ACTIVATE' })
                 }
               } else if (data.enabled) {
-                enableHighlightMode()
+                actor.send({ type: 'DOCK_ACTIVATE' })
               } else {
-                disableHighlightMode()
+                actor.send({ type: 'DOCK_DEACTIVATE' })
               }
             },
           } as any)
@@ -194,8 +184,6 @@ function autoInitRpc() {
             name: 'component-highlighter:do-open-panel-tab',
             type: 'action',
             handler: (_data: { tab: string }) => {
-              // Switch to the Storybook panel dock; the panel will read
-              // the pending tab from the server endpoint on load.
               const clientCtx = getDevToolsClientContext() as any
               clientCtx?.docks?.switchEntry?.('storybook-devtools-panel')
             },
@@ -205,23 +193,19 @@ function autoInitRpc() {
         }
       }
 
-      // Subscribe to highlighter-tab-active shared state so we can
-      // enable/disable the overlay when the panel switches tabs or closes.
+      // Subscribe to highlighter-tab-active shared state
       if (ctx.rpc.sharedState) {
         ctx.rpc.sharedState
           .get('component-highlighter:highlighter-tab-active')
           .then((state: any) => {
+            const actor = getHighlightActor()
             const handleTabChange = (active: boolean) => {
-              const wasActive = getIsPanelHighlighterActive()
-              setIsPanelHighlighterActive(active)
+              const wasActive =
+                actor.getSnapshot().context.mode === 'panel'
               if (active && !wasActive) {
-                // Panel's highlighter tab just became active → enable overlay
-                enableOverlay()
-              } else if (!active && wasActive && !isDockActive) {
-                // Panel's highlighter tab deactivated and action button isn't on
-                clearSelection()
-                disableOverlay()
-                hideHoverMenu()
+                actor.send({ type: 'PANEL_HIGHLIGHTER_ACTIVATE' })
+              } else if (!active && wasActive) {
+                actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
               }
             }
             handleTabChange(!!state.value())
@@ -232,7 +216,6 @@ function autoInitRpc() {
 
       return
     }
-    // Retry for up to 30 seconds
     if (attempts < 60) {
       setTimeout(tryInit, 500)
     }
@@ -270,9 +253,6 @@ function flushRegistryDiff() {
   )
     return
 
-  // Clear pending diff — we always do a full sync from the client registry
-  // to guarantee the server stays in sync (incremental diffs can lose removals
-  // during SPA navigation race conditions).
   pendingDiff.added = []
   pendingDiff.removed = []
   pendingDiff.updated = []
@@ -290,50 +270,8 @@ function flushRegistryDiff() {
   }).catch(() => {})
 }
 
-// Track if the dock is active (highlight mode via action button)
-let isDockActive = false
+// ─── Debounce ────────────────────────────────────────────────────────
 
-/** Whether the overlay should be active (either action button or panel tab) */
-function isHighlightActive(): boolean {
-  return isDockActive || getIsPanelHighlighterActive()
-}
-
-// Double-Escape to exit highlight mode
-let lastEscapeTime = 0
-const DOUBLE_ESCAPE_MS = 600
-
-/**
- * Enable highlight mode (called when dock is activated)
- */
-export function enableHighlightMode() {
-  isDockActive = true
-  enableOverlay()
-  syncHighlightState(true)
-  // TODO: hide/fade the DevTools panel so components beneath it are reachable.
-  // Targeting `vite-devtools-dock-embedded` with opacity+pointer-events works
-  // technically but the UX isn't great — find a better approach (e.g. slide
-  // the panel out, shrink it, or use a dedicated DevTools API if one exists).
-}
-
-/**
- * Disable highlight mode (called when dock is deactivated)
- */
-export function disableHighlightMode() {
-  isDockActive = false
-  // Disable click-through if it was active
-  if (isClickThroughEnabled()) {
-    setClickThrough(false)
-  }
-  clearSelection()
-  disableOverlay()
-  hideHoverMenu()
-  syncHighlightState(false)
-  // Reset highlighter-tab-active so the context menu works when
-  // highlight mode is re-enabled with the panel closed
-  syncHighlighterTabActive(false)
-}
-
-// Debounce function for performance
 function debounce(func: Function, wait: number) {
   let timeout: ReturnType<typeof setTimeout> | undefined
   return (...args: unknown[]) => {
@@ -342,11 +280,9 @@ function debounce(func: Function, wait: number) {
   }
 }
 
-// Find component at pointer position
+// ─── Component finding ──────────────────────────────────────────────
+
 function findComponentAtPoint(x: number, y: number): ComponentInstance | null {
-  // Temporarily hide the highlight container so elementFromPoint hits the
-  // actual app elements. Individual highlight children have pointer-events: auto
-  // (for click handling), so they'd intercept the hit test otherwise.
   const highlightContainer = document.getElementById(
     'component-highlighter-container',
   )
@@ -363,98 +299,57 @@ function findComponentAtPoint(x: number, y: number): ComponentInstance | null {
 
   if (!elementAtPoint) return null
 
-  // Walk up the DOM tree from the deepest element to find component instances
   let currentElement: Element | null = elementAtPoint
 
   while (currentElement) {
-    // Check if this element has a component instance
     for (const instance of componentRegistry.values()) {
       if (instance.element === currentElement && instance.element.isConnected) {
         return instance
       }
     }
-
-    // Move up to parent
     currentElement = currentElement.parentElement
   }
 
   return null
 }
 
-// Mouse move handler with debouncing
+// ─── Event handlers (send machine events) ────────────────────────────
+
 const handleMouseMove = debounce((event: MouseEvent) => {
-  // Only respond when highlight mode is on (action button or panel tab)
-  if (!isHighlightActive()) return
+  const actor = getHighlightActor()
+  if (!isOverlayActive(actor)) return
+  if (isCurrentlyRecording()) return
 
-  // Never render highlight UI while interactions are being recorded
-  if (isCurrentlyRecording()) {
-    updateHover(null)
-    hideHoverMenu()
-    return
-  }
-
-  // Update instance rects for all components (for overlay positioning)
   updateInstanceRects()
 
-  // Find component under cursor for hover highlight
   const instance = findComponentAtPoint(event.clientX, event.clientY)
-  updateHover(instance?.id || null)
+  actor.send({ type: 'HOVER', componentId: instance?.id || null })
 
   if (instance) {
-    // Update rect for this instance (needed for proper highlight positioning)
     instance.rect = instance.element.getBoundingClientRect()
-    showHoverMenu(instance, event.clientX, event.clientY)
-  } else {
-    hideHoverMenu()
   }
-}, 16) // ~60fps
+}, 16)
 
-// Keyboard handlers
 function handleKeyDown(event: KeyboardEvent) {
   if (isCurrentlyRecording()) return
 
-  // Alt/Option key: toggle click-through mode (press to toggle, not hold)
-  // This allows clicking through highlights to interact with the app.
-  // Using a toggle avoids modifier+click browser defaults (e.g. Alt+click downloads links).
-  if (event.key === 'Alt' && isHighlightActive()) {
-    event.preventDefault() // Suppress browser menu bar activation
-    const newState = !isClickThroughEnabled()
-    setClickThrough(newState)
-    notifyClickThrough(newState)
+  const actor = getHighlightActor()
+  if (!isOverlayActive(actor)) return
+
+  if (event.key === 'Alt') {
+    event.preventDefault()
+    actor.send({ type: 'TOGGLE_CLICK_THROUGH' })
     return
   }
 
-  // Escape handling:
-  //   First press  → clear current selection (if any)
-  //   Second press within DOUBLE_ESCAPE_MS → exit highlight mode entirely
-  //   (the DevTools panel is automatically restored by disableHighlightMode)
-  if (event.key === 'Escape' && isHighlightActive()) {
-    const now = Date.now()
-
-    if (now - lastEscapeTime < DOUBLE_ESCAPE_MS) {
-      // Second Escape — toggle the dock off via the DevTools API so the button
-      // state updates correctly. This fires entry:deactivated which in turn
-      // calls disableHighlightMode() (overlay off + panel restored).
-      lastEscapeTime = 0
-      const deactivate = (window as any).__componentHighlighterDeactivateDock
-      if (typeof deactivate === 'function') {
-        deactivate()
-      } else {
-        // Fallback if the dock script hasn't registered the function yet
-        disableHighlightMode()
-      }
-    } else {
-      // First Escape — record the time and clear any active selection
-      lastEscapeTime = now
-      if (hasSelection()) {
-        clearSelection()
-      }
-    }
+  if (event.key === 'Escape') {
+    actor.send({ type: 'ESCAPE' })
     return
   }
 }
 
-/** Sync highlight-active shared state so the panel toggle button stays in sync */
+// ─── RPC sync helpers ────────────────────────────────────────────────
+
 function syncHighlightState(active: boolean) {
   if (!rpcCallFn) return
   const ctx = getDevToolsClientContext()
@@ -465,7 +360,6 @@ function syncHighlightState(active: boolean) {
     .catch(() => {})
 }
 
-/** Sync highlighter-tab-active shared state so the context menu knows whether the panel's highlighter tab is open */
 function syncHighlighterTabActive(active: boolean) {
   if (!rpcCallFn) return
   const ctx = getDevToolsClientContext()
@@ -476,7 +370,6 @@ function syncHighlighterTabActive(active: boolean) {
     .catch(() => {})
 }
 
-/** Notify the user about click-through state change via DevTools toast */
 function notifyClickThrough(enabled: boolean) {
   if (!rpcCallFn) return
   const message = enabled
@@ -487,24 +380,112 @@ function notifyClickThrough(enabled: boolean) {
   )
 }
 
-/**
- * Initialize the component highlighter listeners
- * This is called once when the module is loaded
- */
+// ─── Machine action callback for highlight clicks ────────────────────
+
+function handleHighlightClick(instance: ComponentInstance, e: MouseEvent) {
+  const actor = getHighlightActor()
+  actor.send({
+    type: 'SELECT_COMPONENT',
+    component: instance,
+    x: e.clientX,
+    y: e.clientY,
+  })
+}
+
+// ─── Initialize ──────────────────────────────────────────────────────
+
 function initialize() {
-  // Prevent duplicate initialization if module is loaded multiple times
   if (typeof window === 'undefined') return
   if (window.__componentHighlighterInitialized) {
     warn('Already initialized, skipping duplicate initialization')
     return
   }
 
-  // Mark as initialized
   window.__componentHighlighterInitialized = true
 
-  // Set the registry reference for overlay module and coverage-actions module
   setComponentRegistry(componentRegistry)
   setRegistryRef(componentRegistry)
+
+  // Create the machine actor with real side-effect actions
+  const actor = createHighlightActor({
+    createOverlayDOM: () => {
+      createOverlayDOM()
+      document.body.style.cursor = 'crosshair'
+    },
+    removeOverlayDOM: () => {
+      removeOverlayDOM()
+      document.body.style.cursor = ''
+    },
+    drawHighlights: ({ context }: { context: any }) => {
+      drawAllHighlights(
+        context.hoveredComponentId,
+        context.selectedComponentId,
+        isClickThrough(actor),
+        handleHighlightClick,
+      )
+    },
+    showContextMenu: ({ context }: { context: any }) => {
+      if (!context.selectedComponent) return
+      showContextMenu(
+        context.selectedComponent,
+        context.selectX,
+        context.selectY,
+        () => actor.send({ type: 'CONTEXT_MENU_CLOSED' }),
+      )
+    },
+    hideContextMenu: () => hideContextMenu(),
+    pushSelectedComponent: ({ context }: { context: any }) => {
+      pushSelectedComponentRPC(context.selectedComponent)
+    },
+    clearSelectedComponentRPC: () => {
+      pushSelectedComponentRPC(null)
+    },
+    syncHighlightActiveRPC: ({ context }: { context: any }) => {
+      syncHighlightState(context.mode === 'dock' || context.dockWasActive)
+    },
+    syncHighlighterTabInactiveRPC: () => {
+      syncHighlighterTabActive(false)
+    },
+    enableClickThroughDOM: () => {
+      setClickThroughDOM(true)
+      document.body.style.cursor = ''
+    },
+    disableClickThroughDOM: () => {
+      setClickThroughDOM(false)
+      if (isOverlayActive(actor)) {
+        document.body.style.cursor = 'crosshair'
+      }
+    },
+    notifyClickThrough: () => {
+      notifyClickThrough(isClickThrough(actor))
+    },
+    deactivateDock: () => {
+      const deactivate = (window as any).__componentHighlighterDeactivateDock
+      if (typeof deactivate === 'function') {
+        deactivate()
+      } else {
+        actor.send({ type: 'DOCK_DEACTIVATE' })
+      }
+    },
+    suspendForRecording: () => {
+      removeOverlayDOM()
+      document.body.style.cursor = ''
+    },
+    resumeAfterRecording: () => {
+      createOverlayDOM()
+      document.body.style.cursor = 'crosshair'
+      const ctx = actor.getSnapshot().context
+      drawAllHighlights(
+        ctx.hoveredComponentId,
+        ctx.selectedComponentId,
+        isClickThrough(actor),
+        handleHighlightClick,
+      )
+    },
+  })
+
+  // Expose machine send for overlay.ts (recording flow)
+  ;(window as any).__highlightMachineSend = (event: any) => actor.send(event)
 
   // Event listeners for registry synchronization
   window.addEventListener('component-highlighter:register', ((
@@ -512,7 +493,6 @@ function initialize() {
   ) => {
     const instance = event.detail
     componentRegistry.set(instance.id, instance)
-    // Track diff for server sync
     pendingDiff.added.push(serializeInstance(instance))
     scheduleRegistryPush()
   }) as EventListener)
@@ -522,7 +502,6 @@ function initialize() {
   ) => {
     const id = event.detail
     componentRegistry.delete(id)
-    // Track diff for server sync
     pendingDiff.removed.push(id)
     scheduleRegistryPush()
   }) as EventListener)
@@ -537,22 +516,27 @@ function initialize() {
       if (serializedProps) {
         instance.serializedProps = serializedProps
       }
-      // Track diff for server sync
       pendingDiff.updated.push(serializeInstance(instance))
       scheduleRegistryPush()
     }
   }) as EventListener)
 
-  // Initialize DOM event listeners
+  // DOM event listeners
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('keydown', handleKeyDown)
 
-  // Update component positions on scroll
   window.addEventListener(
     'scroll',
     () => {
-      if (isHighlightActive()) {
+      if (isOverlayActive(actor)) {
         updateInstanceRects()
+        const ctx = actor.getSnapshot().context
+        drawAllHighlights(
+          ctx.hoveredComponentId,
+          ctx.selectedComponentId,
+          isClickThrough(actor),
+          handleHighlightClick,
+        )
       }
     },
     { passive: true },
@@ -561,57 +545,69 @@ function initialize() {
   // Export for debugging and E2E testing
   window.__componentHighlighterRegistry = componentRegistry
 
-  // Test/automation hook: bypass DevTools dock activation when needed.
   ;(
     window as unknown as { __componentHighlighterEnable?: () => void }
   ).__componentHighlighterEnable = () => {
-    enableHighlightMode()
+    actor.send({ type: 'DOCK_ACTIVATE' })
   }
   ;(
     window as unknown as { __componentHighlighterDisable?: () => void }
   ).__componentHighlighterDisable = () => {
-    disableHighlightMode()
+    actor.send({ type: 'DOCK_DEACTIVATE' })
   }
   ;(
     window as unknown as { __componentHighlighterIsActive?: () => boolean }
-  ).__componentHighlighterIsActive = () => isHighlightActive()
+  ).__componentHighlighterIsActive = () => {
+    return actor.getSnapshot().context.mode !== 'inactive'
+  }
   ;(
     window as unknown as {
       __componentHighlighterSelectById?: (id: string) => boolean
     }
-  ).__componentHighlighterSelectById = (id: string) => selectComponentById(id)
+  ).__componentHighlighterSelectById = (id: string) =>
+    selectComponentById(id, (inst, x, y) => {
+      actor.send({ type: 'SELECT_COMPONENT', component: inst, x, y })
+    })
 
-  // Test/automation hooks for panel highlighter state simulation
+  // Test hooks for panel highlighter state simulation
   ;(
     window as unknown as {
       __componentHighlighterSetPanelActive?: (active: boolean) => void
     }
   ).__componentHighlighterSetPanelActive = (active: boolean) => {
-    const wasActive = getIsPanelHighlighterActive()
-    setIsPanelHighlighterActive(active)
-    if (active && !wasActive) {
-      enableOverlay()
-    } else if (!active && !wasActive) {
-      // no-op
-    } else if (!active && wasActive && !isDockActive) {
-      clearSelection()
-      disableOverlay()
-      hideHoverMenu()
+    if (active) {
+      actor.send({ type: 'PANEL_HIGHLIGHTER_ACTIVATE' })
+    } else {
+      actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
     }
   }
   ;(
     window as unknown as {
       __componentHighlighterIsDockActive?: () => boolean
     }
-  ).__componentHighlighterIsDockActive = () => isDockActive
+  ).__componentHighlighterIsDockActive = () => {
+    const ctx = actor.getSnapshot().context
+    return ctx.mode === 'dock' || ctx.dockWasActive
+  }
   ;(
     window as unknown as {
       __componentHighlighterIsPanelActive?: () => boolean
     }
-  ).__componentHighlighterIsPanelActive = () => getIsPanelHighlighterActive()
+  ).__componentHighlighterIsPanelActive = () =>
+    actor.getSnapshot().context.mode === 'panel'
 
-  // Start auto-initialization of RPC (registry sync + broadcast handlers)
+  // Start auto-initialization of RPC
   autoInitRpc()
+}
+
+// ─── Exports for vite-devtools.ts ────────────────────────────────────
+
+export function enableHighlightMode() {
+  getHighlightActor().send({ type: 'DOCK_ACTIVATE' })
+}
+
+export function disableHighlightMode() {
+  getHighlightActor().send({ type: 'DOCK_DEACTIVATE' })
 }
 
 // Run initialization

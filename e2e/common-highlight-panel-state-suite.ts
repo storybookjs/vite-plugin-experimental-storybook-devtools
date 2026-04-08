@@ -150,6 +150,43 @@ export function registerHighlightPanelStateSuite(test: TestLike) {
       expect(await isHighlightActive(page)).toBe(false)
     })
 
+    test('panel close then dock activate clears stale selection and shows context menu', async ({ page }) => {
+      // Enable dock first (reliable), then add panel as second source
+      await enableHighlighting(page)
+      await setPanelHighlighterActive(page, true)
+      expect(await isHighlightActive(page)).toBe(true)
+
+      // 1. Select component in panel mode (no context menu)
+      await clickComponentHighlight(page, TARGET_COMPONENT)
+      await expect(page.locator('#save-story-btn')).not.toBeVisible()
+
+      // Verify selection exists in machine context
+      const hasSelection = await page.evaluate(() => {
+        const actor = (window as any).__highlightMachineSend
+        return actor !== undefined
+      })
+      expect(hasSelection).toBe(true)
+
+      // 2. Panel closes, dock deactivates → overlay off, selection preserved
+      await setPanelHighlighterActive(page, false)
+      await disableHighlighting(page)
+      expect(await isHighlightActive(page)).toBe(false)
+      expect(await isOverlayVisible(page)).toBe(false)
+
+      // 3. Re-enable dock → should NOT restore stale panel selection
+      await enableHighlighting(page)
+      expect(await isDockActive(page)).toBe(true)
+      expect(await isHighlightActive(page)).toBe(true)
+      expect(await isOverlayVisible(page)).toBe(true)
+
+      // No stale context menu should be visible
+      await expect(page.locator('#save-story-btn')).not.toBeVisible()
+
+      // 4. Click a component → context menu SHOULD appear (dock mode)
+      await clickComponentHighlight(page, TARGET_COMPONENT)
+      await expect(page.locator('#save-story-btn')).toBeVisible({ timeout: 5000 })
+    })
+
     test('SB badge is conditional on story existence', async ({ page }) => {
       await enableHighlighting(page)
 

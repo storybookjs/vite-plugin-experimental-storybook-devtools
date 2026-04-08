@@ -9,6 +9,9 @@ catalogs:
     vite-plugin-vue-tracer:
       specifier: ^1.3.0
       version: 1.3.0
+    xstate:
+      specifier: ^5.30.0
+      version: 5.30.0
 
 importers:
 
@@ -32,6 +35,9 @@ importers:
       react-element-to-jsx-string:
         specifier: ^15.0.0
         version: 15.0.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      xstate:
+        specifier: 'catalog:'
+        version: 5.30.0
     devDependencies:
       '@babel/parser':
         specifier: ^7.28.6
@@ -3061,6 +3067,9 @@ packages:
     resolution: {integrity: sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg==}
     engines: {node: '>=20'}
 
+  xstate@5.30.0:
+    resolution: {integrity: sha512-mIzIuMjtYVkqXq9dUzYQoag7b/dF1CBS/yhliuPLfR0FwKPC18HiUivb/crcqY2gknhR8gJEhnppLg6ubQ0gGw==}
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -5849,6 +5858,8 @@ snapshots:
     dependencies:
       is-wsl: 3.1.0
       powershell-utils: 0.1.0
+
+  xstate@5.30.0: {}
 
   yallist@3.1.1: {}
 

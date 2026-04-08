@@ -78,6 +78,7 @@
     "@testing-library/dom": "^10.4.0",
     "dom-accessibility-api": "^0.6.3",
     "nanoevents": "^9.0.0",
-    "react-element-to-jsx-string": "^15.0.0"
+    "react-element-to-jsx-string": "^15.0.0",
+    "xstate": "catalog:"
   }
 }
