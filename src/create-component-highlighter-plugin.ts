@@ -31,6 +31,7 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
     'component-highlighter:visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
     'component-highlighter:notify': (data: { message: string; level?: string }) => void
+    'component-highlighter:select-component': (data: SerializedRegistryInstance | null) => void
   }
 
   interface DevToolsRpcClientFunctions {
@@ -42,6 +43,7 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:do-open-url': (data: { url: string }) => void
     'component-highlighter:do-open-panel-tab': (data: { tab: string }) => void
     'component-highlighter:do-switch-tab': (data: { tab: string }) => void
+    'component-highlighter:do-select-component': (data: SerializedRegistryInstance | null) => void
   }
 
   interface DevToolsRpcSharedStates {
@@ -49,6 +51,8 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:pending-visit': { relativeFilePath: string; preferredStoryName?: string } | null
     'component-highlighter:pending-tab': string | null
     'component-highlighter:highlight-active': boolean
+    'component-highlighter:selected-component': SerializedRegistryInstance | null
+    'component-highlighter:highlighter-tab-active': boolean
   }
 }
 
@@ -531,6 +535,14 @@ export function createComponentHighlighterPlugin(
           initialValue: false,
         })
 
+        ctx.rpc.sharedState.get('component-highlighter:selected-component', {
+          initialValue: null as SerializedRegistryInstance | null,
+        })
+
+        ctx.rpc.sharedState.get('component-highlighter:highlighter-tab-active', {
+          initialValue: false,
+        })
+
         // Register RPC functions for communication with the client
         ctx.rpc.register(
           defineRpcFunction({
@@ -870,6 +882,22 @@ export function createComponentHighlighterPlugin(
                 }
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-visit-story',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Client/overlay → server → panel: select a component in the highlighter panel
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:select-component',
+            type: 'action',
+            setup: () => ({
+              handler: (data: SerializedRegistryInstance | null) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-select-component',
                   args: [data],
                 })
               },

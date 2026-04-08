@@ -12,6 +12,7 @@ import {
 } from './interaction-recorder'
 import { createContextMenu, type ContextMenuHandle } from './context-menu'
 import { attachHighlightLabel, removeHighlightLabel } from './highlight-label'
+import { getIsPanelHighlighterActive } from './highlight-state'
 
 /**
  * Wraps an overlay operation in a try-catch so that errors in the
@@ -286,8 +287,9 @@ function updateHighlightElement(
   el.style.outlineOffset = '-1px'
 
   // Attach name label to hovered / selected highlights; remove for others
+  // Show the Storybook badge only when the component has story files
   if (type === 'hovered' || type === 'selected') {
-    attachHighlightLabel(el, rect, instance.meta.componentName, colorConfig.stroke)
+    attachHighlightLabel(el, rect, instance.meta.componentName, colorConfig.stroke, !!_hasStory)
   } else {
     removeHighlightLabel(el)
   }
@@ -512,6 +514,10 @@ async function showContextMenu(
   x: number,
   y: number,
 ) {
+  // When the highlighter tab is active in the panel, the selection is handled
+  // by the panel instead of the context menu — skip the context menu.
+  if (getIsPanelHighlighterActive()) return
+
   hideContextMenu()
 
   const meta = instance.meta
@@ -717,6 +723,9 @@ export function selectComponent(
     selectedComponentId = instance.id
     drawAllHighlights()
     showContextMenu(instance, x, y)
+
+    // Push selected component to shared state so the panel can react
+    pushSelectedComponent(instance)
   })
 }
 
@@ -725,7 +734,43 @@ export function clearSelection() {
   hideContextMenu()
   drawAllHighlights()
 
+  // Clear the selected component shared state
+  pushSelectedComponent(null)
+
   // Don't disable overlay - keep it enabled while dock is active
+}
+
+/** Serialize and push the selected component to the panel via RPC broadcast */
+function pushSelectedComponent(instance: ComponentInstance | null) {
+  try {
+    const ctx = getDevToolsClientContext()
+    if (!ctx?.rpc) return
+
+    const data = instance
+      ? {
+          id: instance.id,
+          meta: { ...instance.meta },
+          props: instance.props,
+          serializedProps: instance.serializedProps,
+          isConnected: instance.element?.isConnected ?? false,
+        }
+      : null
+
+    // Use RPC call → server broadcasts to the panel (most reliable path)
+    if (ctx.rpc.call) {
+      ;(ctx.rpc.call as any)('component-highlighter:select-component', data).catch(() => {})
+    }
+
+    // Also update shared state as a secondary sync mechanism
+    if (ctx.rpc.sharedState) {
+      ctx.rpc.sharedState
+        .get('component-highlighter:selected-component')
+        .then((state: any) => state.mutate(() => data))
+        .catch(() => {})
+    }
+  } catch {
+    // RPC not available
+  }
 }
 
 export function updateInstanceRects() {

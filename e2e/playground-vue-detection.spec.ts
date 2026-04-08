@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
+import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -80,3 +81,4 @@ test.describe('Vue playground detection coverage', () => {
 })
 
 registerCommonHighlighterSuite(test as any)
+registerHighlightPanelStateSuite(test as any)

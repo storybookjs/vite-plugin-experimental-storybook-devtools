@@ -37,12 +37,14 @@ export const LABEL_CLASS = 'ch-highlight-label'
  * @param rect       Bounding rect of the highlighted component (viewport coords).
  * @param name       Component name to display.
  * @param color      Highlight outline color (used for the SB icon badge bg).
+ * @param showBadge  Whether to show the Storybook icon badge (default true).
  */
 export function attachHighlightLabel(
   container: HTMLElement,
   rect: DOMRect,
   name: string,
   color: string,
+  showBadge = true,
 ): void {
   // Re-use existing wrapper if present
   let wrapper = container.querySelector(`.${LABEL_CLASS}`) as HTMLDivElement | null
@@ -115,9 +117,10 @@ export function attachHighlightLabel(
     line-height: 1;
   `
 
-  // Style the badge
+  // Style the badge — hidden when component has no stories
   const badge = wrapper.querySelector('.ch-label-badge') as HTMLDivElement
-  badge.style.cssText = `
+  badge.style.cssText = showBadge
+    ? `
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -127,6 +130,7 @@ export function attachHighlightLabel(
     border-radius: 3px;
     flex-shrink: 0;
   `
+    : `display: none;`
 
   // Style the name pill
   pill.style.cssText = `

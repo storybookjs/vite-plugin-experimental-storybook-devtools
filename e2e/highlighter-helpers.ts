@@ -66,6 +66,43 @@ export async function waitForCreateStoryRequest(page: Page, action: () => Promis
   return eventPromise
 }
 
+export async function disableHighlighting(page: Page) {
+  await page.evaluate(() => {
+    ;(window as any).__componentHighlighterDisable?.()
+  })
+  await page.waitForTimeout(300)
+}
+
+export async function setPanelHighlighterActive(page: Page, active: boolean) {
+  await page.evaluate((a) => {
+    ;(window as any).__componentHighlighterSetPanelActive?.(a)
+  }, active)
+  await page.waitForTimeout(300)
+}
+
+export async function isHighlightActive(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return (window as any).__componentHighlighterIsActive?.() ?? false
+  })
+}
+
+export async function isDockActive(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return (window as any).__componentHighlighterIsDockActive?.() ?? false
+  })
+}
+
+export async function isPanelActive(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return (window as any).__componentHighlighterIsPanelActive?.() ?? false
+  })
+}
+
+export async function isOverlayVisible(page: Page): Promise<boolean> {
+  const container = page.locator('#component-highlighter-container')
+  return container.isVisible().catch(() => false)
+}
+
 export async function exerciseTaskFormInteractions(page: Page) {
   await page.getByLabel('Task Name').fill('Ship highlighter tests')
   await page.getByLabel('Priority').selectOption('high')

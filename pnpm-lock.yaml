@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    vite-plugin-vue-tracer:
+      specifier: ^1.3.0
+      version: 1.3.0
+
 importers:
 
   .:
@@ -207,6 +213,9 @@ importers:
       vite:
         specifier: ^8.0.3
         version: 8.0.3(@types/node@25.0.8)(@vitejs/devtools@0.1.11)(esbuild@0.27.2)(jiti@2.6.1)(yaml@2.8.2)
+      vite-plugin-vue-tracer:
+        specifier: 'catalog:'
+        version: 1.3.0(vite@8.0.3)(vue@3.5.28(typescript@5.9.3))
       vitest:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@25.0.8)(@vitest/browser-playwright@4.1.2)(vite@8.0.3)
@@ -2849,6 +2858,12 @@ packages:
   validate-npm-package-name@5.0.1:
     resolution: {integrity: sha512-OljLrQ9SQdOUqTaQxqL5dEfZWrXExyyWsozYlAWFawPVNuD83igl7uJD2RTkNMbniIYgt8l81eCJGIdQF7avLQ==}
     engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
+
+  vite-plugin-vue-tracer@1.3.0:
+    resolution: {integrity: sha512-Cgfce6VikzOw5MUJTpeg50s5rRjzU1Vr61ZjuHunVVHLjZZ5AUlgyExHthZ3r59vtoz9W2rDt23FYG81avYBKw==}
+    peerDependencies:
+      vite: ^6.0.0 || ^7.0.0
+      vue: ^3.5.0
 
   vite@8.0.3:
     resolution: {integrity: sha512-B9ifbFudT1TFhfltfaIPgjo9Z3mDynBTJSUYxTjOQruf/zHH+ezCQKcoqO+h7a9Pw9Nm/OtlXAiGT1axBgwqrQ==}
@@ -5670,6 +5685,16 @@ snapshots:
       typescript: 5.9.3
 
   validate-npm-package-name@5.0.1: {}
+
+  vite-plugin-vue-tracer@1.3.0(vite@8.0.3)(vue@3.5.28(typescript@5.9.3)):
+    dependencies:
+      estree-walker: 3.0.3
+      exsolve: 1.0.8
+      magic-string: 0.30.21
+      pathe: 2.0.3
+      source-map-js: 1.2.1
+      vite: 8.0.3(@types/node@25.0.8)(@vitejs/devtools@0.1.11)(esbuild@0.27.2)(jiti@2.6.1)(yaml@2.8.2)
+      vue: 3.5.28(typescript@5.9.3)
 
   vite@8.0.3(@types/node@25.0.8)(@vitejs/devtools@0.1.11)(esbuild@0.27.2)(jiti@2.6.1)(yaml@2.8.2):
     dependencies:

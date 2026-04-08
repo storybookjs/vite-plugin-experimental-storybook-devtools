@@ -24,6 +24,10 @@ import {
 } from './coverage-actions'
 import { isCurrentlyRecording } from './interaction-recorder'
 import { warn } from './logger'
+import {
+  getIsPanelHighlighterActive,
+  setIsPanelHighlighterActive,
+} from './highlight-state'
 
 // Type declarations for globals
 declare global {
@@ -200,6 +204,32 @@ function autoInitRpc() {
           // Client RPC registration not supported
         }
       }
+
+      // Subscribe to highlighter-tab-active shared state so we can
+      // enable/disable the overlay when the panel switches tabs or closes.
+      if (ctx.rpc.sharedState) {
+        ctx.rpc.sharedState
+          .get('component-highlighter:highlighter-tab-active')
+          .then((state: any) => {
+            const handleTabChange = (active: boolean) => {
+              const wasActive = getIsPanelHighlighterActive()
+              setIsPanelHighlighterActive(active)
+              if (active && !wasActive) {
+                // Panel's highlighter tab just became active → enable overlay
+                enableOverlay()
+              } else if (!active && wasActive && !isDockActive) {
+                // Panel's highlighter tab deactivated and action button isn't on
+                clearSelection()
+                disableOverlay()
+                hideHoverMenu()
+              }
+            }
+            handleTabChange(!!state.value())
+            state.on('updated', (val: any) => handleTabChange(!!val))
+          })
+          .catch(() => {})
+      }
+
       return
     }
     // Retry for up to 30 seconds
@@ -260,8 +290,13 @@ function flushRegistryDiff() {
   }).catch(() => {})
 }
 
-// Track if the dock is active (highlight mode)
+// Track if the dock is active (highlight mode via action button)
 let isDockActive = false
+
+/** Whether the overlay should be active (either action button or panel tab) */
+function isHighlightActive(): boolean {
+  return isDockActive || getIsPanelHighlighterActive()
+}
 
 // Double-Escape to exit highlight mode
 let lastEscapeTime = 0
@@ -293,6 +328,9 @@ export function disableHighlightMode() {
   disableOverlay()
   hideHoverMenu()
   syncHighlightState(false)
+  // Reset highlighter-tab-active so the context menu works when
+  // highlight mode is re-enabled with the panel closed
+  syncHighlighterTabActive(false)
 }
 
 // Debounce function for performance
@@ -345,8 +383,8 @@ function findComponentAtPoint(x: number, y: number): ComponentInstance | null {
 
 // Mouse move handler with debouncing
 const handleMouseMove = debounce((event: MouseEvent) => {
-  // Only respond when dock is active (highlight mode is on)
-  if (!isDockActive) return
+  // Only respond when highlight mode is on (action button or panel tab)
+  if (!isHighlightActive()) return
 
   // Never render highlight UI while interactions are being recorded
   if (isCurrentlyRecording()) {
@@ -378,7 +416,7 @@ function handleKeyDown(event: KeyboardEvent) {
   // Alt/Option key: toggle click-through mode (press to toggle, not hold)
   // This allows clicking through highlights to interact with the app.
   // Using a toggle avoids modifier+click browser defaults (e.g. Alt+click downloads links).
-  if (event.key === 'Alt' && isDockActive) {
+  if (event.key === 'Alt' && isHighlightActive()) {
     event.preventDefault() // Suppress browser menu bar activation
     const newState = !isClickThroughEnabled()
     setClickThrough(newState)
@@ -390,7 +428,7 @@ function handleKeyDown(event: KeyboardEvent) {
   //   First press  → clear current selection (if any)
   //   Second press within DOUBLE_ESCAPE_MS → exit highlight mode entirely
   //   (the DevTools panel is automatically restored by disableHighlightMode)
-  if (event.key === 'Escape' && isDockActive) {
+  if (event.key === 'Escape' && isHighlightActive()) {
     const now = Date.now()
 
     if (now - lastEscapeTime < DOUBLE_ESCAPE_MS) {
@@ -423,6 +461,17 @@ function syncHighlightState(active: boolean) {
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlight-active')
+    .then((state: any) => state.mutate(() => active))
+    .catch(() => {})
+}
+
+/** Sync highlighter-tab-active shared state so the context menu knows whether the panel's highlighter tab is open */
+function syncHighlighterTabActive(active: boolean) {
+  if (!rpcCallFn) return
+  const ctx = getDevToolsClientContext()
+  if (!ctx?.rpc?.sharedState) return
+  ctx.rpc.sharedState
+    .get('component-highlighter:highlighter-tab-active')
     .then((state: any) => state.mutate(() => active))
     .catch(() => {})
 }
@@ -502,7 +551,7 @@ function initialize() {
   window.addEventListener(
     'scroll',
     () => {
-      if (isDockActive) {
+      if (isHighlightActive()) {
         updateInstanceRects()
       }
     },
@@ -525,12 +574,41 @@ function initialize() {
   }
   ;(
     window as unknown as { __componentHighlighterIsActive?: () => boolean }
-  ).__componentHighlighterIsActive = () => isDockActive
+  ).__componentHighlighterIsActive = () => isHighlightActive()
   ;(
     window as unknown as {
       __componentHighlighterSelectById?: (id: string) => boolean
     }
   ).__componentHighlighterSelectById = (id: string) => selectComponentById(id)
+
+  // Test/automation hooks for panel highlighter state simulation
+  ;(
+    window as unknown as {
+      __componentHighlighterSetPanelActive?: (active: boolean) => void
+    }
+  ).__componentHighlighterSetPanelActive = (active: boolean) => {
+    const wasActive = getIsPanelHighlighterActive()
+    setIsPanelHighlighterActive(active)
+    if (active && !wasActive) {
+      enableOverlay()
+    } else if (!active && !wasActive) {
+      // no-op
+    } else if (!active && wasActive && !isDockActive) {
+      clearSelection()
+      disableOverlay()
+      hideHoverMenu()
+    }
+  }
+  ;(
+    window as unknown as {
+      __componentHighlighterIsDockActive?: () => boolean
+    }
+  ).__componentHighlighterIsDockActive = () => isDockActive
+  ;(
+    window as unknown as {
+      __componentHighlighterIsPanelActive?: () => boolean
+    }
+  ).__componentHighlighterIsPanelActive = () => getIsPanelHighlighterActive()
 
   // Start auto-initialization of RPC (registry sync + broadcast handlers)
   autoInitRpc()
