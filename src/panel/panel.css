@@ -485,6 +485,18 @@ html, body, #app {
   pointer-events: none;
 }
 
+.hl-story-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.hl-story-name-row .hl-prop-input {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Component list (shared by Missing and Covered sections) */
 .cov-list-wrap {
   flex: 1;
@@ -747,7 +759,7 @@ html, body, #app {
 
 .hl-prop-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
   padding: 4px 0;
   border-bottom: 1px solid var(--sb-bordercolor-muted);
@@ -821,6 +833,63 @@ html, body, #app {
   color: var(--sb-fgcolor-muted);
   background: var(--sb-bgcolor-muted);
   border-radius: 3px;
+  cursor: pointer;
+}
+
+.hl-prop-fn {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--sb-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sb-color-secondary);
+  background: var(--sb-bgcolor-muted);
+  border-radius: 3px;
+}
+
+.hl-prop-jsx-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  font-family: var(--sb-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sb-color-secondary);
+  background: var(--sb-bgcolor-muted);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.hl-prop-details {
+  width: 100%;
+}
+
+.hl-prop-details summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.hl-prop-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.hl-prop-code {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  font-family: var(--sb-font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--sb-fgcolor-default);
+  background: var(--sb-bgcolor-muted);
+  border-radius: var(--sb-border-radius);
+  overflow-x: auto;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Stories section */
@@ -898,10 +967,10 @@ html, body, #app {
   cursor: not-allowed;
 }
 
-/* Stories grid */
+/* Stories list (row layout) */
 .hl-stories-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 0 16px 16px;
 }
@@ -921,7 +990,7 @@ html, body, #app {
 
 .hl-story-iframe {
   width: 100%;
-  height: 120px;
+  height: 200px;
   border: none;
   pointer-events: none;
   background: var(--sb-bgcolor-default);

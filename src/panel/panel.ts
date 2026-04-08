@@ -748,6 +748,24 @@ function propsFingerprint(props: Record<string, unknown>): string {
   return JSON.stringify(meaningful, Object.keys(meaningful).sort())
 }
 
+/** Suggest a story name based on meaningful prop values */
+function suggestStoryName(props: Record<string, unknown>): string {
+  const meaningfulProps = ['variant', 'type', 'size', 'mode', 'status', 'kind', 'color', 'intent', 'appearance']
+  for (const propName of meaningfulProps) {
+    const value = props[propName]
+    if (typeof value === 'string' && value.length > 0 && value.length < 30) {
+      return value.charAt(0).toUpperCase() + value.slice(1)
+    }
+  }
+  for (const [, value] of Object.entries(props)) {
+    if (typeof value === 'boolean' && value) continue
+    if (typeof value === 'string' && value.length > 0 && value.length < 30) {
+      return value.charAt(0).toUpperCase() + value.slice(1)
+    }
+  }
+  return 'Default'
+}
+
 /** Fetch the registry snapshot from the server (RPC) */
 /** Read the registry from shared state (synced automatically from client) */
 function fetchRegistry(): RegistryInstance[] {
@@ -1294,7 +1312,10 @@ async function buildHighlighterPanel() {
   root.appendChild(hdr)
 
   // ── Properties section ──
-  const propsEntries = Object.entries(comp.props || {})
+  // Use serializedProps when available (React) for __isJSX / __isFunction markers;
+  // fall back to raw props (Vue / Svelte where props are already serialized).
+  const displayProps = comp.serializedProps || comp.props || {}
+  const propsEntries = Object.entries(displayProps)
   if (propsEntries.length > 0) {
     const propsSection = document.createElement('div')
     propsSection.className = 'hl-section'
@@ -1318,9 +1339,29 @@ async function buildHighlighterPanel() {
       const val = document.createElement('div')
       val.className = 'hl-prop-val'
 
-      // Create an editable input for primitive values
       const valType = typeof value
-      if (valType === 'string' || valType === 'number' || valType === 'boolean') {
+      const isObj = value && typeof value === 'object'
+      const isFunction = isObj && (value as Record<string, unknown>).__isFunction
+      const isJSX = isObj && (value as Record<string, unknown>).__isJSX
+
+      if (isFunction) {
+        // Handler / function prop
+        const fn = value as { __isFunction: true; name: string }
+        val.innerHTML = `<span class="hl-prop-fn">${fn.name ? fn.name : '() => {}'}</span>`
+      } else if (isJSX) {
+        // JSX prop — show source in a collapsible code block
+        const jsx = value as { __isJSX: true; source: string }
+        const wrapper = document.createElement('details')
+        wrapper.className = 'hl-prop-details'
+        const summary = document.createElement('summary')
+        summary.innerHTML = `<span class="hl-prop-jsx-badge">JSX</span>`
+        wrapper.appendChild(summary)
+        const code = document.createElement('pre')
+        code.className = 'hl-prop-code'
+        code.textContent = jsx.source
+        wrapper.appendChild(code)
+        val.appendChild(wrapper)
+      } else if (valType === 'string' || valType === 'number' || valType === 'boolean') {
         const input = document.createElement('input')
         input.className = 'hl-prop-input'
         input.type = valType === 'boolean' ? 'checkbox' : valType === 'number' ? 'number' : 'text'
@@ -1330,7 +1371,6 @@ async function buildHighlighterPanel() {
           input.value = String(value)
         }
         input.addEventListener('change', () => {
-          // Update the local props for story creation
           if (valType === 'boolean') {
             comp.props[key] = input.checked
           } else if (valType === 'number') {
@@ -1343,8 +1383,21 @@ async function buildHighlighterPanel() {
       } else if (value === null || value === undefined) {
         val.innerHTML = `<span class="hl-prop-null">${String(value)}</span>`
       } else {
-        // Complex objects — show a collapsed badge
-        val.innerHTML = `<span class="hl-prop-obj">${Array.isArray(value) ? 'Array' : 'Object'}</span>`
+        // Complex objects/arrays — show collapsible JSON
+        const wrapper = document.createElement('details')
+        wrapper.className = 'hl-prop-details'
+        const summary = document.createElement('summary')
+        summary.innerHTML = `<span class="hl-prop-obj">${Array.isArray(value) ? `Array(${(value as unknown[]).length})` : 'Object'}</span>`
+        wrapper.appendChild(summary)
+        const code = document.createElement('pre')
+        code.className = 'hl-prop-code'
+        try {
+          code.textContent = JSON.stringify(value, null, 2)
+        } catch {
+          code.textContent = String(value)
+        }
+        wrapper.appendChild(code)
+        val.appendChild(wrapper)
       }
 
       row.appendChild(label)
@@ -1364,6 +1417,19 @@ async function buildHighlighterPanel() {
   createHdr.className = 'hl-section-hdr'
   createHdr.innerHTML = `<span class="hl-section-title">Create Story</span>`
 
+  createSection.appendChild(createHdr)
+
+  // Story name input
+  const storyNameRow = document.createElement('div')
+  storyNameRow.className = 'hl-story-name-row'
+  const storyNameInput = document.createElement('input')
+  storyNameInput.className = 'hl-prop-input'
+  storyNameInput.type = 'text'
+  storyNameInput.placeholder = 'Story name\u2026'
+  storyNameInput.value = suggestStoryName(comp.props)
+  storyNameInput.addEventListener('focus', () => storyNameInput.select())
+  storyNameRow.appendChild(storyNameInput)
+
   const addBtn = document.createElement('button')
   addBtn.className = 'create-all-btn'
   addBtn.textContent = 'Add'
@@ -1375,6 +1441,7 @@ async function buildHighlighterPanel() {
         meta: comp.meta,
         props: comp.props,
         serializedProps: comp.serializedProps,
+        storyName: storyNameInput.value.trim() || undefined,
       })
       // Bust the storybook index cache and retry until the new story appears
       const refreshAfterCreate = async () => {
@@ -1401,9 +1468,9 @@ async function buildHighlighterPanel() {
       addBtn.textContent = 'Add'
     }
   })
-  createHdr.appendChild(addBtn)
+  storyNameRow.appendChild(addBtn)
 
-  createSection.appendChild(createHdr)
+  createSection.appendChild(storyNameRow)
   root.appendChild(createSection)
 
   // ── Stories section ──
