@@ -1,5 +1,5 @@
 {
-  "name": " ",
+  "name": "vite-plugin-experimental-storybook-devtools",
   "type": "module",
   "version": "0.0.0",
   "description": "A Vite plugin for visual component highlighting and automatic Storybook story generation.",
