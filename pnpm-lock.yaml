@@ -4,12 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-catalogs:
-  default:
-    vite-plugin-vue-tracer:
-      specifier: ^1.3.0
-      version: 1.3.0
-
 importers:
 
   .:
@@ -217,7 +211,7 @@ importers:
         specifier: ^8.0.3
         version: 8.0.3(@types/node@25.0.8)(@vitejs/devtools@0.1.11)(esbuild@0.27.2)(jiti@2.6.1)(yaml@2.8.2)
       vite-plugin-vue-tracer:
-        specifier: 'catalog:'
+        specifier: ^1.3.0
         version: 1.3.0(vite@8.0.3)(vue@3.5.28(typescript@5.9.3))
       vitest:
         specifier: ^4.1.2
