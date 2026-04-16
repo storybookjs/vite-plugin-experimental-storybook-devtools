@@ -6,6 +6,7 @@ import { defineRpcFunction, defineCommand } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import type { NotificationService } from './notifications'
 import {
   ConsoleNotificationService,
@@ -245,11 +246,6 @@ export function createComponentHighlighterPlugin(
       // loaded as raw ESM. Pre-bundle it so Vite handles the CJS→ESM conversion.
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push('@testing-library/dom')
-      if (framework.name === 'react') {
-        viteConfig.optimizeDeps.include.push(
-          'react-element-to-jsx-string/dist/esm/index.js',
-        )
-      }
     },
     configureServer(srv) {
       server = srv
@@ -1077,6 +1073,13 @@ export function createComponentHighlighterPlugin(
       }
       if (id === framework.virtualModuleId) {
         return '\0' + id
+      }
+      // react-element-to-jsx-string is a dependency of this plugin, not the
+      // consumer's project. Resolve it from the plugin's own location so the
+      // consumer's Vite can find it even if it's not in their node_modules.
+      if (id === 'react-element-to-jsx-string/dist/esm/index.js') {
+        const require = createRequire(import.meta.url)
+        return require.resolve(id)
       }
       return null
     },
