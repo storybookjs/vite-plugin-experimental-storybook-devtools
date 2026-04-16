@@ -37,6 +37,7 @@ declare module 'react' {
   export default React
   export const useEffect: any
   export const useRef: any
+  export const useState: any
   export const isValidElement: any
   export const Fragment: any
   export type ReactElement = any

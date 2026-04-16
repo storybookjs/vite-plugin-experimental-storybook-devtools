@@ -1,5 +1,5 @@
 /// <reference path="../../runtime-module-shims.d.ts" />
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import reactElementToJSXString from 'react-element-to-jsx-string/dist/esm/index.js'
 import {
   cleanupInstanceTracking,
@@ -420,6 +420,11 @@ export const ComponentHighlighterBoundary = ({
   props: Record<string, unknown>
   children: ReactNode
 }) => {
+  // Render a Fragment on the first pass so the client tree matches the
+  // server-rendered HTML (which has no wrapper because the SSR transform is
+  // skipped). Switch to the tracking span only after the component mounts —
+  // at that point hydration is complete and inserting a DOM node is safe.
+  const [mounted, setMounted] = useState(false)
   const ref = useRef(null as HTMLSpanElement | null)
   // Track registration state with element reference to handle StrictMode and HMR correctly
   const registrationRef = useRef({
@@ -449,6 +454,10 @@ export const ComponentHighlighterBoundary = ({
   }
 
   useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
     if (!ref.current) return
 
     registerOrUpdateElement(resolveElementToTrack(ref.current))
@@ -465,6 +474,10 @@ export const ComponentHighlighterBoundary = ({
     // between null and rendered DOM (e.g. modals) can rebind correctly.
     registerOrUpdateElement(resolveElementToTrack(ref.current))
   }, [props])
+
+  if (!mounted) {
+    return React.createElement(React.Fragment, null, children)
+  }
 
   return React.createElement(
     'span',

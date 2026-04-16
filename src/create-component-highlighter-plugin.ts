@@ -275,10 +275,10 @@ export function createComponentHighlighterPlugin(
         'vite-plugin-experimental-storybook-devtools/client/overlay',
       )
 
-      // @testing-library/dom depends on aria-query (CJS) which breaks when
-      // loaded as raw ESM. Pre-bundle it so Vite handles the CJS→ESM conversion.
+      // @testing-library/dom and aria-query are CJS-only packages. Pre-bundle
+      // them so Vite handles the CJS→ESM conversion and named imports work.
       viteConfig.optimizeDeps.include ??= []
-      viteConfig.optimizeDeps.include.push('@testing-library/dom')
+      viteConfig.optimizeDeps.include.push('@testing-library/dom', 'aria-query')
 
       if (framework.name === 'react') {
         // react-element-to-jsx-string and its dependency react-is are CJS-only
