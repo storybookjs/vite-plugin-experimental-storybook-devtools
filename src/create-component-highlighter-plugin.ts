@@ -1155,9 +1155,15 @@ export function createComponentHighlighterPlugin(
       }
       return null
     },
-    transform(code, id) {
+    transform(code, id, options) {
       // Only transform in dev/serve mode unless force is enabled
       if (!isServe && !force) {
+        return
+      }
+
+      // Never instrument components for SSR builds — the runtime module uses
+      // browser-only APIs (CustomEvent, window) and would crash in Node.js.
+      if (options?.ssr) {
         return
       }
 

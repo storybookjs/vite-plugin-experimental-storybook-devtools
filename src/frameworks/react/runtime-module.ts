@@ -341,11 +341,13 @@ export function registerInstance(
   })
 
   // Dispatch event for listeners module
-  const event = new CustomEvent('component-highlighter:register', {
-    detail: instance,
-  })
-  window.dispatchEvent(event)
-  logDebug('dispatched register event for', id)
+  if (typeof window !== 'undefined') {
+    const event = new CustomEvent('component-highlighter:register', {
+      detail: instance,
+    })
+    window.dispatchEvent(event)
+    logDebug('dispatched register event for', id)
+  }
 
   return id
 }
@@ -356,10 +358,12 @@ export function unregisterInstance(id: string) {
   logDebug('unregistered', { id, remaining: componentRegistry.size })
 
   // Dispatch event for listeners module
-  const event = new CustomEvent('component-highlighter:unregister', {
-    detail: id,
-  })
-  window.dispatchEvent(event)
+  if (typeof window !== 'undefined') {
+    const event = new CustomEvent('component-highlighter:unregister', {
+      detail: id,
+    })
+    window.dispatchEvent(event)
+  }
 }
 
 export function updateInstanceProps(
@@ -373,10 +377,12 @@ export function updateInstanceProps(
     logDebug('updateInstanceProps', { id, props })
 
     // Dispatch event for listeners module
-    const event = new CustomEvent('component-highlighter:update-props', {
-      detail: { id, props, serializedProps: instance.serializedProps },
-    })
-    window.dispatchEvent(event)
+    if (typeof window !== 'undefined') {
+      const event = new CustomEvent('component-highlighter:update-props', {
+        detail: { id, props, serializedProps: instance.serializedProps },
+      })
+      window.dispatchEvent(event)
+    }
   }
 }
 
