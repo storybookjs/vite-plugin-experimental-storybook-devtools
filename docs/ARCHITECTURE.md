@@ -69,7 +69,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving |
 | `src/frameworks/<fw>/transform.ts` | Build-time instrumentation and metadata injection |
 | `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization |
-| `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers) |
+| `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer) |
 | `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
 | `src/client/overlay.ts` | Highlight rendering, story file cache, save actions, debug overlay |
 | `src/client/context-menu.ts` | Context menu UI (Shadow DOM), props display, action buttons |
@@ -104,6 +104,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterSelectById(id)` | Select a specific component instance by its registry ID |
 | `__componentHighlighterGetRegistry()` | Return the live component name→filePath registry Map |
 | `__componentHighlighterDebug` | Set to `true` to enable verbose debug logging in the console |
+| `__componentHighlighterActivateTracking()` | Turn on prop serialization + backfill (called automatically when a DevTools client connects) |
 
 ## Panel↔Client communication (RPC-based)
 
@@ -171,7 +172,16 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
    - Common behavior belongs in shared e2e helpers/suites.
    - Framework-specific specs should only contain true deltas.
 
-5. **Shadow DOM context menu**
+5. **Lazy prop serialization (zero overhead until DevTools connects)**
+   - Components register cheaply (id/meta/element) at all times, but prop
+     serialization is gated by `isTrackingActive()` and only turns on when a
+     DevTools RPC client connects (`setRegistryRpcCall` → `activateTracking()`).
+   - Per-render prop updates are coalesced to one serialization per animation
+     frame; instances removed before the frame flushes are skipped.
+   - Do not call `serializeProps` directly on the hot path — route it through
+     `scheduleSerialization` so this guarantee is preserved across frameworks.
+
+6. **Shadow DOM context menu**
    - The context menu is rendered inside Shadow DOM to isolate styles.
    - Key interactive elements have stable IDs for E2E: `#open-component-btn`, `#story-name-input`, `#save-story-btn`, `#save-story-with-interactions-btn`.
 

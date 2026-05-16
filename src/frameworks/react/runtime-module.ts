@@ -2,8 +2,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import reactElementToJSXString from 'react-element-to-jsx-string/dist/esm/index.js'
 import {
+  cancelScheduledSerialization,
   cleanupInstanceTracking,
   findFirstTrackableElement,
+  isTrackingActive,
+  onTrackingActivated,
+  scheduleSerialization,
   syncInstanceTracking,
 } from 'virtual:component-highlighter/runtime-helpers'
 
@@ -323,7 +327,8 @@ export function registerInstance(
   element: Element,
 ) {
   const id = generateInstanceId(meta['sourceId'] as string)
-  const serializedProps = serializeProps(props)
+  // Skip the expensive JSX serialization until a DevTools client is connected.
+  const serializedProps = isTrackingActive() ? serializeProps(props) : {}
 
   const instance = {
     id,
@@ -355,6 +360,7 @@ export function registerInstance(
 export function unregisterInstance(id: string) {
   // Always unregister when called - the cleanup function knows best
   componentRegistry.delete(id)
+  cancelScheduledSerialization(id)
   logDebug('unregistered', { id, remaining: componentRegistry.size })
 
   // Dispatch event for listeners module
@@ -366,25 +372,51 @@ export function unregisterInstance(id: string) {
   }
 }
 
+// Serialize the instance's current props and notify listeners. Expensive —
+// only ever run for live instances, coalesced to one call per frame.
+function serializeAndDispatch(id: string) {
+  const instance = componentRegistry.get(id)
+  if (!instance) return
+  instance.serializedProps = serializeProps(instance.props)
+  logDebug('updateInstanceProps', { id, props: instance.props })
+
+  if (typeof window !== 'undefined') {
+    const event = new CustomEvent('component-highlighter:update-props', {
+      detail: {
+        id,
+        props: instance.props,
+        serializedProps: instance.serializedProps,
+      },
+    })
+    window.dispatchEvent(event)
+  }
+}
+
 export function updateInstanceProps(
   id: string,
   props: Record<string, unknown>,
 ) {
   const instance = componentRegistry.get(id)
-  if (instance) {
-    instance.props = props
-    instance.serializedProps = serializeProps(props)
-    logDebug('updateInstanceProps', { id, props })
-
-    // Dispatch event for listeners module
-    if (typeof window !== 'undefined') {
-      const event = new CustomEvent('component-highlighter:update-props', {
-        detail: { id, props, serializedProps: instance.serializedProps },
-      })
-      window.dispatchEvent(event)
-    }
-  }
+  if (!instance) return
+  // Keep raw props in sync immediately (cheap, read by the context menu).
+  instance.props = props
+  // Nothing consumes serialized props until DevTools connects.
+  if (!isTrackingActive()) return
+  // Defer the expensive serialization; collapse repeated updates per frame.
+  scheduleSerialization(
+    id,
+    () => serializeAndDispatch(id),
+    () => componentRegistry.has(id),
+  )
 }
+
+// When DevTools connects after components already mounted, backfill the
+// serialized props that registration skipped and push them to the panel.
+onTrackingActivated(() => {
+  for (const id of componentRegistry.keys()) {
+    serializeAndDispatch(id)
+  }
+})
 
 /**
  * Get the component registry for import resolution

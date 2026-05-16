@@ -280,6 +280,19 @@ export function createComponentHighlighterPlugin(
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push('@testing-library/dom', 'aria-query')
 
+      // The client modules above are excluded from optimization, so Vite never
+      // crawls them at startup and never discovers their third-party imports.
+      // Without this, those deps are found lazily when DevTools connects,
+      // triggering a mid-session re-optimization + full page reload in every
+      // consuming app. Pre-declare them so they are bundled at server startup.
+      viteConfig.optimizeDeps.include.push(
+        'xstate',
+        'nanoevents',
+        '@medv/finder',
+        'dom-accessibility-api',
+        '@vitejs/devtools-kit/client',
+      )
+
       if (framework.name === 'react') {
         // react-element-to-jsx-string and its dependency react-is are CJS-only
         // packages that live in this plugin's node_modules, not the consumer's.

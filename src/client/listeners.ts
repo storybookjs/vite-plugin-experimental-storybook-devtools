@@ -60,6 +60,11 @@ export function setRegistryRpcCall(
 ) {
   if (rpcCallFn) return
   rpcCallFn = fn
+  // A DevTools client is now connected — turn on prop serialization. This
+  // synchronously backfills serialized props for already-mounted instances.
+  ;(
+    window as unknown as { __componentHighlighterActivateTracking?: () => void }
+  ).__componentHighlighterActivateTracking?.()
   pushFullRegistry()
 }
 
