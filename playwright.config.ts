@@ -14,15 +14,23 @@ export default defineConfig({
   projects: [
     {
       name: 'react-chromium',
-      testMatch: /.*react.*\.spec\.ts/,
+      testMatch: /playground-react-detection\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://127.0.0.1:5173',
       },
     },
     {
+      name: 'react18-chromium',
+      testMatch: /playground-react18-detection\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:5175',
+      },
+    },
+    {
       name: 'vue-chromium',
-      testMatch: /.*vue.*\.spec\.ts/,
+      testMatch: /playground-vue-detection\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://127.0.0.1:5174',
@@ -34,6 +42,13 @@ export default defineConfig({
     {
       command: 'pnpm --dir playground/react dev --host 127.0.0.1 --port 5173',
       url: 'http://127.0.0.1:5173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60000,
+    },
+    {
+      command:
+        'pnpm --dir playground/react18 dev --host 127.0.0.1 --port 5175',
+      url: 'http://127.0.0.1:5175',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
     },

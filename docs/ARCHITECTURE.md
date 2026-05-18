@@ -21,15 +21,27 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
    - Handles story file creation via RPC
 
 2. **Framework transform** (`src/frameworks/*/transform.ts`)
-   - React: Babel AST transform wraps components with `withComponentHighlighter` HOC
-   - Vue: SFC compiler injects `withComponentHighlighter` composable into `<script setup>`
+   - React: **non-intrusive** Babel AST transform — components are NOT wrapped.
+     It only appends an idempotent metadata tag `__chRegisterMeta(Component,
+     { componentName, filePath, relativeFilePath, sourceId, isDefaultExport })`.
+     The rendered fiber/DOM tree is untouched, so RSC works (only tagged client
+     components ever appear) and there is no tree pollution.
+   - Vue: SFC compiler injects `withComponentHighlighter` composable into
+     `<script setup>` (Vue lacks a DevTools-hook equivalent we rely on).
    - Both inject metadata (componentName, filePath, relativeFilePath, sourceId)
 
 3. **Browser runtime** (`src/frameworks/*/runtime-module.ts` + `src/runtime-helpers.ts`)
+   - React: an inline `<head>` script (`src/frameworks/react/devtools-hook.ts`,
+     injected via `transformIndexHtml`) installs a minimal
+     `__REACT_DEVTOOLS_GLOBAL_HOOK__` *before* react-dom registers. The runtime
+     module subscribes via `window.__chInstallCommitHandler` and walks the live
+     fiber tree on every commit, reading the `__chRegisterMeta` symbol off
+     `fiber.type`/`elementType`, resolving the nearest host DOM node, and
+     reconciling the registry. No component is wrapped.
+   - Vue: lifecycle-hook based registration via the injected composable.
    - Registers component instances in a global `Map` registry on `window`
    - Tracks props, serialized props, and DOM anchor elements
    - Emits `component-highlighter:register/unregister/update-props` custom events
-   - Framework-specific: React uses hooks/refs, Vue uses lifecycle hooks
 
 4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
    - Renders highlight rectangles in `#component-highlighter-container`
@@ -67,8 +79,9 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | Module | Responsibility |
 |--------|---------------|
 | `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving |
-| `src/frameworks/<fw>/transform.ts` | Build-time instrumentation and metadata injection |
-| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization |
+| `src/frameworks/<fw>/transform.ts` | Build-time metadata tagging (React: non-wrapping `__chRegisterMeta`) |
+| `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
+| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook) |
 | `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer) |
 | `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
 | `src/client/overlay.ts` | Highlight rendering, story file cache, save actions, debug overlay |
@@ -181,7 +194,45 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
    - Do not call `serializeProps` directly on the hot path — route it through
      `scheduleSerialization` so this guarantee is preserved across frameworks.
 
-6. **Shadow DOM context menu**
+6. **React detection is non-intrusive**
+   - Never reintroduce an HOC/boundary wrapper for React. Components must not
+     be wrapped: detection runs off the React DevTools fiber tree so the
+     rendered tree stays clean and RSC keeps working. The build-time transform
+     may only append the `__chRegisterMeta` tag.
+   - The inline DevTools hook script must be injected into `<head>` *before*
+     any module script (it must exist before react-dom registers its renderer).
+   - Must support **React 18 and 19** (both required, both E2E-gated via
+     `playground/react` + `playground/react18`). Do not depend on
+     `_debugSource` (removed in 19) or React-internal tag-number constants.
+     Use only the typeof-guarded reconciler hook contract and the fiber fields
+     stable since React 16. Source identity comes from the `__chRegisterMeta`
+     tag, not React.
+   - The bundled `react-element-to-jsx-string` is resolved from this plugin's
+     node_modules; if its React major differs from the app's, its internal
+     `React.isValidElement` rejects the app's elements and prop serialization
+     silently degrades. The `dedupeReact` option (default `'auto'`) handles
+     this: `'auto'` detects a React-major mismatch and adds `react`/
+     `react-dom` to `resolve.dedupe` **only then** — React 19 single-version
+     apps get no config mutation; React 18 apps get the fix automatically.
+     `false` opts out (advanced multi-React setups) but logs a warning on a
+     detected mismatch so it never fails silently. Do not make the dedupe
+     unconditional again — it must stay opt-in-when-needed.
+   - The inline hook script carries the app's CSP nonce when `html.cspNonce`
+     is configured (so it survives a strict Content-Security-Policy), and
+     rides along with (never clobbers) a real React DevTools extension hook —
+     it only defines the global when absent, and exposes a minimal pub/sub +
+     `renderers`/`rendererInterfaces` so a late-attaching backend still works.
+   - The fiber walk is intentionally **synchronous on commit**. React batches
+     a render pass into one commit, so it is one traversal per render pass
+     (not per `setState`), and synchronicity preserves deterministic
+     register/update event ordering the overlay + panel state machine rely
+     on. Do not move it to `requestAnimationFrame` (throttled in background
+     tabs → registry stalls) or a microtask/coalescer (reorders events vs the
+     commit → overlay/panel races). The expensive work (serialization) stays
+     gated by `isTrackingActive()`; per-instance rect observers match the
+     prior HOC approach (parity, not new overhead).
+
+7. **Shadow DOM context menu**
    - The context menu is rendered inside Shadow DOM to isolate styles.
    - Key interactive elements have stable IDs for E2E: `#open-component-btn`, `#story-name-input`, `#save-story-btn`, `#save-story-with-interactions-btn`.
 
@@ -198,7 +249,8 @@ Focused e2e entrypoints:
 
 ```bash
 # Framework-specific detection
-pnpm exec playwright test e2e/playground-react-detection.spec.ts
+pnpm exec playwright test e2e/playground-react-detection.spec.ts     # React 19
+pnpm exec playwright test e2e/playground-react18-detection.spec.ts    # React 18 + serialization fidelity
 pnpm exec playwright test e2e/playground-vue-detection.spec.ts
 
 # Highlighter interaction tests (context menu, story creation)
@@ -207,6 +259,27 @@ pnpm exec playwright test e2e/component-highlighter.spec.ts
 # Common highlighter features (runs for both frameworks)
 pnpm exec playwright test e2e/common-highlighter-suite.ts
 ```
+
+## Known caveats
+
+- **Pre-existing intermittent E2E flake** (not caused by the fiber refactor):
+  `common-highlight-panel-state-suite.ts` → "panel close then dock activate
+  clears stale selection and shows context menu" intermittently shows the
+  context menu when it expects it suppressed. It is **version-independent**
+  (reproduces on React 18 and 19), reproduces with the runtime reverted to
+  its pre-refactor-perf baseline, and is a race between
+  `PANEL_HIGHLIGHTER_ACTIVATE` propagation and `SELECT_COMPONENT` in the
+  xstate machine — not a detection/registry issue. Rate: low in the full
+  matrix (`pnpm exec playwright test`), higher when a single Playwright
+  project's parallel workers saturate one cold dev server. Proper fix is to
+  make the panel-active gate deterministic in `listeners.ts`/the highlight
+  machine (or web-first-assert the helper), tracked separately so the
+  detection contract stays unmodified.
+- **RSC**: client components only — server components never run the hook, so
+  they are invisible (by design; the win is it no longer forces client
+  boundaries / crashes).
+- **Detection scope**: only exported, statically-named, PascalCase components
+  are tagged — intentional, since only exported components can have stories.
 
 ## Agent maintenance rule
 

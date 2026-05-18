@@ -110,6 +110,18 @@ export function isFunctionSerializedValue(
   )
 }
 
+/** Type guard for Date serialized values */
+export function isDateSerializedValue(
+  value: unknown,
+): value is { __isDate: true; iso: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '__isDate' in value &&
+    (value as { __isDate?: unknown }).__isDate === true
+  )
+}
+
 /** Check if props contain any JSX values */
 export function hasAnyJSXProps(props: SerializedProps): boolean {
   for (const value of Object.values(props)) {
@@ -456,6 +468,10 @@ export function formatPropValue(
 
   if (isFunctionSerializedValue(value)) {
     return 'fn()'
+  }
+
+  if (isDateSerializedValue(value)) {
+    return `new Date(${JSON.stringify(value.iso)})`
   }
 
   if (value === null) return 'null'

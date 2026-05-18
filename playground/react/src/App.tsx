@@ -5,6 +5,7 @@ import { TaskCard, type Task } from './components/TaskCard'
 import { TaskList } from './components/TaskList'
 import { TaskForm, type TaskFormData } from './components/Form'
 import { Modal } from './components/Modal'
+import { PatternShowcase } from './components/patterns/PatternShowcase'
 
 const initialTasks: Task[] = [
   {
@@ -115,6 +116,9 @@ export const App = () => {
             Load more
           </Button>
         </TaskList>
+      {/* All React authoring patterns (export styles, wrappers, class,
+          generics, compound, prop kinds) — see docs/REACT_PATTERNS.md */}
+      <PatternShowcase />
       </main>
 
       {/* Task Creation Modal */}

@@ -382,6 +382,46 @@ describe('generateStory', () => {
       expect(result.content).toContain("import { Button } from './Button'")
     })
 
+    it('handles TaskList children built from a mapped list (regression: TaskCard wrongly flagged "not exported")', () => {
+      // Repro of the reported bug: <TaskList>{tasks.map(t => <TaskCard/>)}<Button/></TaskList>
+      // serializes children whose JSX source contains multiple <TaskCard>.
+      // Previously extractComponentRefs skipped nested arrays so componentRefs
+      // was ['Button'] only — but even with correct refs, the exported
+      // TaskCard must never be replaced with a div / flagged "not exported".
+      const result = generateStory({
+        meta: {
+          componentName: 'TaskList',
+          filePath: '/project/src/components/TaskList.tsx',
+          relativeFilePath: 'src/components/TaskList.tsx',
+          sourceId: 'tl1',
+          isDefaultExport: false,
+        },
+        props: {
+          title: 'All Tasks',
+          count: 3,
+          children: {
+            __isJSX: true,
+            source:
+              '<>\n  <TaskCard task={{ id: "1" }} />\n  <TaskCard task={{ id: "2" }} />\n  <TaskCard task={{ id: "3" }} />\n  <Button>Load more</Button>\n</>',
+            componentRefs: ['TaskCard', 'Button'],
+          },
+        },
+        componentRegistry: new Map([
+          ['TaskList', '/project/src/components/TaskList.tsx'],
+          ['TaskCard', '/project/src/components/TaskCard.tsx'],
+          ['Button', '/project/src/components/Button.tsx'],
+        ]),
+      })
+
+      // TaskCard is exported and in the registry → imported and used as-is.
+      expect(result.content).toContain("import { TaskCard } from './TaskCard'")
+      expect(result.content).toContain("import { Button } from './Button'")
+      expect(result.content).toContain('<TaskCard')
+      // It must NOT be downgraded to a div or labelled "not exported".
+      expect(result.content).not.toContain('not exported')
+      expect(result.content).not.toContain('data-important-read-this')
+    })
+
     it('should normalize styled-wrapper names in JSX source for imports and output', () => {
       const result = generateStory({
         meta: baseMeta,
@@ -562,6 +602,41 @@ export const Primary: Story = {
         /import.*fn.*from.*storybook\/test/g,
       )
       expect(fnImports?.length).toBe(1)
+    })
+  })
+
+  describe('special serialized values', () => {
+    it('emits Date props as new Date("ISO") (regression: was {})', () => {
+      const result = generateStory({
+        meta: baseMeta,
+        props: {
+          createdAt: { __isDate: true, iso: '2026-01-01T00:00:00.000Z' },
+          nested: {
+            when: { __isDate: true, iso: '2020-05-17T12:30:00.000Z' },
+          },
+        },
+      })
+
+      expect(result.content).toContain(
+        'createdAt: new Date("2026-01-01T00:00:00.000Z")',
+      )
+      expect(result.content).toContain(
+        'when: new Date("2020-05-17T12:30:00.000Z")',
+      )
+      expect(result.content).not.toContain('createdAt: {}')
+    })
+
+    it('does not emit ref/key as args (sanitized at the runtime serializer)', () => {
+      // The runtime serializer strips `ref`/`key`; if they ever reach the
+      // generator they must not produce broken args. Here they simply are
+      // absent from serialized props (the documented contract).
+      const result = generateStory({
+        meta: baseMeta,
+        props: { label: 'Field', placeholder: 'x' },
+      })
+      expect(result.content).toContain('label: "Field"')
+      expect(result.content).not.toContain('ref:')
+      expect(result.content).not.toContain('key:')
     })
   })
 

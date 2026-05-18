@@ -116,4 +116,10 @@ export interface FrameworkConfig {
   virtualModuleId: string
   /** Storybook framework package name */
   storybookFramework: string
+  /**
+   * Optional inline `<script>` body injected into the HTML <head> before any
+   * module scripts. Used by React to install the DevTools global hook before
+   * react-dom registers its renderer (non-intrusive fiber detection).
+   */
+  htmlHeadSnippet?: () => string | undefined
 }
