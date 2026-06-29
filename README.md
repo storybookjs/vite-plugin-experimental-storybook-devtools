@@ -172,6 +172,12 @@ componentHighlighter({
   // Single-React enforcement for the prop serializer (React only).
   // 'auto' (default) | true | false  — see "React version support" below.
   dedupeReact: 'auto',
+
+  // React Server Components mode (React only, default: false).
+  // When true, only modules with a "use client" directive are instrumented
+  // (for Vite-based RSC frameworks like TanStack Start). Leave false for SPAs.
+  // See "React Server Components" in docs/REACT_PATTERNS.md.
+  rsc: false,
 })
 ```
 
@@ -184,8 +190,10 @@ covered by E2E.**
 
 Which authoring patterns are detected (named/default exports, `memo`/
 `forwardRef`, `React.memo` member form, class components, generics, compound,
-barrel re-exports, every prop kind) and the documented limitations
-(anonymous default exports, arbitrary custom HOCs, RSC) are listed in
+barrel re-exports, every prop kind), the documented limitations (anonymous
+default exports, arbitrary custom HOCs), and **React Server Components support
+via the `rsc` option** (a `"use client"` gate for Vite-based RSC frameworks
+like TanStack Start) are all in
 **[docs/REACT_PATTERNS.md](./docs/REACT_PATTERNS.md)**.
 
 One detail matters for prop-serialization fidelity. The plugin's bundled

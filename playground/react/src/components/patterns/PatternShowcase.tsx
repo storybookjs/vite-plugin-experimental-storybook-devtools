@@ -53,6 +53,7 @@ export function PatternShowcase() {
         variant={{ kind: 'badge', tone: 'good' }}
         note={null}
         range={[2, 9]}
+        lookup={new Map([['a', 1], ['b', 2]])}
         onPick={(id) => console.log('picked', id)}
       >
         {(count) => <em>render-prop children: {count}</em>}

@@ -122,6 +122,21 @@ export function isDateSerializedValue(
   )
 }
 
+/**
+ * Type guard for non-plain object markers (Map, Set, class instances) that the
+ * runtime could not serialize into a story-safe value.
+ */
+export function isUnserializableObjectValue(
+  value: unknown,
+): value is { __isObject: true; name?: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    '__isObject' in value &&
+    (value as { __isObject?: unknown }).__isObject === true
+  )
+}
+
 /** Check if props contain any JSX values */
 export function hasAnyJSXProps(props: SerializedProps): boolean {
   for (const value of Object.values(props)) {
@@ -472,6 +487,12 @@ export function formatPropValue(
 
   if (isDateSerializedValue(value)) {
     return `new Date(${JSON.stringify(value.iso)})`
+  }
+
+  if (isUnserializableObjectValue(value)) {
+    // Map/Set/class instances can't be reconstructed as a literal — emit a
+    // placeholder the author can fill in rather than a bogus object.
+    return `undefined /* ${value.name || 'Object'}: non-serializable value, provide one */`
   }
 
   if (value === null) return 'null'

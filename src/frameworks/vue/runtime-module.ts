@@ -230,13 +230,25 @@ function serializeValue(value: unknown): unknown {
     } else if (Array.isArray(value)) {
       // Handle arrays
       return value.map((item) => serializeValue(item))
-    } else if ((value as { constructor?: unknown }).constructor === Object) {
-      // Plain objects
-      const serialized: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        serialized[k] = serializeValue(v)
+    } else {
+      const proto = Object.getPrototypeOf(value)
+      if (proto === Object.prototype || proto === null) {
+        // Plain objects
+        const serialized: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          serialized[k] = serializeValue(v)
+        }
+        return serialized
       }
-      return serialized
+      // Non-plain object (Map, Set, class instance, …): not round-trippable to
+      // a story arg nor reliably cloneable over RPC. Mark it (read-only in the
+      // UI) rather than leaking the live object onto the wire.
+      return {
+        __isObject: true,
+        name:
+          (value as { constructor?: { name?: string } }).constructor?.name ||
+          'Object',
+      }
     }
   }
 

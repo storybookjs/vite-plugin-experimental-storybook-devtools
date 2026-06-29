@@ -178,6 +178,46 @@ function autoInitRpc() {
           } as any)
 
           ctx.rpc.client.register({
+            name: 'component-highlighter:do-set-prop',
+            type: 'action',
+            handler: (data: {
+              id: string
+              path: Array<string | number>
+              payload: { kind: string; text: string }
+            }) => {
+              const setProp = (
+                window as unknown as {
+                  __componentHighlighterSetProp?: (
+                    id: string,
+                    path: Array<string | number>,
+                    payload: { kind: string; text: string },
+                  ) => { ok: boolean; error?: string }
+                }
+              ).__componentHighlighterSetProp
+              setProp?.(data.id, data.path, data.payload)
+            },
+          } as any)
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-reset-prop',
+            type: 'action',
+            handler: (data: {
+              id: string
+              path: Array<string | number>
+            }) => {
+              const resetProp = (
+                window as unknown as {
+                  __componentHighlighterResetProp?: (
+                    id: string,
+                    path: Array<string | number>,
+                  ) => { ok: boolean; error?: string }
+                }
+              ).__componentHighlighterResetProp
+              resetProp?.(data.id, data.path)
+            },
+          } as any)
+
+          ctx.rpc.client.register({
             name: 'component-highlighter:do-open-url',
             type: 'action',
             handler: (data: { url: string }) => {
@@ -234,11 +274,20 @@ function serializeInstance(
   const result: SerializedRegistryInstance = {
     id: instance.id,
     meta: { ...instance.meta },
-    props: instance.props,
     isConnected: instance.element?.isConnected ?? false,
   }
   if (instance.serializedProps !== undefined) {
     result.serializedProps = instance.serializedProps
+  }
+  // React only: which top-level props currently differ from their original.
+  const getEdited = (
+    window as unknown as {
+      __componentHighlighterGetEditedProps?: (id: string) => string[]
+    }
+  ).__componentHighlighterGetEditedProps
+  const edited = getEdited?.(instance.id)
+  if (edited && edited.length > 0) {
+    result.editedProps = edited
   }
   return result
 }

@@ -49,6 +49,15 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:select-component': (
       data: SerializedRegistryInstance | null,
     ) => void
+    'component-highlighter:set-prop': (data: {
+      id: string
+      path: Array<string | number>
+      payload: { kind: string; text: string }
+    }) => void
+    'component-highlighter:reset-prop': (data: {
+      id: string
+      path: Array<string | number>
+    }) => void
   }
 
   interface DevToolsRpcClientFunctions {
@@ -75,6 +84,15 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:do-select-component': (
       data: SerializedRegistryInstance | null,
     ) => void
+    'component-highlighter:do-set-prop': (data: {
+      id: string
+      path: Array<string | number>
+      payload: { kind: string; text: string }
+    }) => void
+    'component-highlighter:do-reset-prop': (data: {
+      id: string
+      path: Array<string | number>
+    }) => void
   }
 
   interface DevToolsRpcSharedStates {
@@ -111,7 +129,11 @@ interface ComponentStoryData {
     sourceId: string
     isDefaultExport?: boolean
   }
-  props: Record<string, unknown>
+  /**
+   * Story generation reads `serializedProps` only. Raw `props` is never sent
+   * over RPC (it holds unclonable live values); kept optional for back-compat.
+   */
+  props?: Record<string, unknown>
   serializedProps?: SerializedProps
   /** Component registry for import resolution: componentName -> filePath */
   componentRegistry?: Record<string, string>
@@ -194,6 +216,22 @@ export interface ComponentHighlighterOptions {
    * @default 'auto'
    */
   dedupeReact?: boolean | 'auto'
+  /**
+   * React Server Components mode (React only).
+   *
+   * When `true`, only modules declaring a `"use client"` directive are
+   * instrumented. Server components (no directive) are left untouched — they
+   * never mount a client fiber, so tagging is useless and would pull the
+   * client runtime into the server module graph. Use this for RSC frameworks
+   * such as TanStack Start.
+   *
+   * When `false` (default), every matching module is instrumented — correct
+   * for a plain SPA, where there is no `"use client"` directive but every
+   * component runs on the client.
+   *
+   * @default false
+   */
+  rsc?: boolean
 }
 
 /**
@@ -256,6 +294,7 @@ export function createComponentHighlighterPlugin(
     writeStoryFiles = true,
     storiesDir,
     dedupeReact = 'auto',
+    rsc = false,
   } = options
 
   const filter = createFilter(include, exclude)
@@ -782,6 +821,25 @@ export function createComponentHighlighterPlugin(
                         registryMap.set(name, filePath)
                       }
                     }
+                    // Augment/fallback from the server's synced registry so
+                    // referenced components (e.g. <TaskCard> inside
+                    // <TaskList>'s children) resolve to real imports even when
+                    // the caller didn't pass a componentRegistry — e.g.
+                    // coverage "Generate all" and the command palette. Without
+                    // this they'd be replaced with a "not exported" div.
+                    try {
+                      const all = (registryState?.value() ??
+                        []) as SerializedRegistryInstance[]
+                      for (const inst of all) {
+                        const n = inst?.meta?.componentName
+                        const fp = inst?.meta?.filePath
+                        if (n && fp && !registryMap.has(n)) {
+                          registryMap.set(n, fp)
+                        }
+                      }
+                    } catch {
+                      // registry not ready — fall back to caller-provided map
+                    }
 
                     // Determine the output path
                     const componentDir = path.dirname(data.meta.filePath)
@@ -1009,6 +1067,45 @@ export function createComponentHighlighterPlugin(
           }),
         )
 
+        // Panel → server → client: apply a live prop override
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:set-prop',
+            type: 'action',
+            setup: () => ({
+              handler: (data: {
+                id: string
+                path: Array<string | number>
+                payload: { kind: string; text: string }
+              }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-set-prop',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: reset a prop to its original value
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:reset-prop',
+            type: 'action',
+            setup: () => ({
+              handler: (data: {
+                id: string
+                path: Array<string | number>
+              }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-reset-prop',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
         // Panel → server → client: highlight coverage instances on the app page
         ctx.rpc.register(
           defineRpcFunction({
@@ -1216,7 +1313,6 @@ export function createComponentHighlighterPlugin(
                     'component-highlighter:create-story',
                     {
                       meta: inst.meta,
-                      props: inst.props,
                       serializedProps: inst.serializedProps,
                       skipNavigation: true,
                     },
@@ -1402,7 +1498,9 @@ export function createComponentHighlighterPlugin(
 
       logDebug(`Transforming ${id}`)
 
-      const result = framework.transform(code, id)
+      // NB: the `options` param of this hook is Vite's transform options
+      // (it shadows the plugin's options) — use the destructured `rsc`.
+      const result = framework.transform(code, id, { rsc })
 
       // Track transformed components for coverage
       if (result) {

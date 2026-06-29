@@ -19,7 +19,7 @@ import traverseModule from '@babel/traverse'
 import generatorModule from '@babel/generator'
 import * as t from '@babel/types'
 import * as path from 'path'
-import type { TransformFunction } from '../types'
+import type { TransformFunction, TransformOptions } from '../types'
 
 const traverse = (traverseModule as any).default ?? traverseModule
 const generate = (generatorModule as any).default ?? generatorModule
@@ -38,6 +38,19 @@ function createHash(data: string): string {
 export const VIRTUAL_MODULE_ID = 'virtual:component-highlighter/runtime'
 
 const TAG_FN = '__chRegisterMeta'
+
+/**
+ * Detect a module-level `"use client"` directive (the RSC client-boundary
+ * marker). Babel collects leading directive prologues into
+ * `program.directives`, so we read it from there rather than scanning text —
+ * this naturally handles either quote style and ignores `"use client"`
+ * strings that appear deeper in the module.
+ */
+function hasUseClientDirective(ast: t.File): boolean {
+  return (ast.program.directives ?? []).some(
+    (d) => d.value?.value === 'use client',
+  )
+}
 
 function isComponentName(name: string | undefined | null): boolean {
   return (
@@ -85,6 +98,7 @@ function isComponentInit(node: t.Expression | null | undefined): boolean {
 export const transform: TransformFunction = (
   code: string,
   id: string,
+  options: TransformOptions = {},
 ): string | undefined => {
   try {
     const ast = parse(code, {
@@ -96,6 +110,16 @@ export const transform: TransformFunction = (
       ],
       sourceFilename: id,
     })
+
+    // RSC gate: in `rsc` mode, only client components (modules with a
+    // `"use client"` directive) are instrumented. Server components never
+    // mount a client fiber, so tagging them is useless and would pull the
+    // client runtime into the server module graph. In a plain SPA (rsc off)
+    // there is no directive but every component is a client component, so we
+    // tag everything — hence this gate is opt-in.
+    if (options.rsc && !hasUseClientDirective(ast)) {
+      return undefined
+    }
 
     let hasJsx = false
     traverse(ast, {

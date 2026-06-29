@@ -92,7 +92,8 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `src/client/logger.ts` | Debug logging utility (`window.__componentHighlighterDebug`) |
 | `src/client/utils/format-utils.ts` | Value formatting helpers for context menu display |
 | `src/client/utils/html-preview.ts` | HTML preview rendering for prop values |
-| `src/client/utils/prop-utils.ts` | Prop type detection and badge utilities |
+| `src/client/utils/prop-utils.ts` | Prop classification, editability, and badge utilities (pure; shared by context menu + panel) |
+| `src/client/utils/prop-editor.ts` | Shared inline prop editor (`createPropEditor`): one form builder for both the context menu (in-page `overrideProps`) and the panel (RPC `set-prop`) |
 | `src/panel/panel.ts` | DevTools panel tabs (Storybook, Coverage, Terminal, Docs) |
 | `src/frameworks/<fw>/story-generator.ts` | Framework-specific story code output |
 | `src/utils/story-generator.ts` | Shared story generation utilities (name generation, args formatting) |
@@ -118,6 +119,10 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterGetRegistry()` | Return the live component name→filePath registry Map |
 | `__componentHighlighterDebug` | Set to `true` to enable verbose debug logging in the console |
 | `__componentHighlighterActivateTracking()` | Turn on prop serialization + backfill (called automatically when a DevTools client connects) |
+| `__componentHighlighterCanEditProps()` | React only: true when the renderer exposes `overrideProps` (dev builds) |
+| `__componentHighlighterSetProp(id, path, {kind,text})` | React only: live-edit a prop via React's `renderer.overrideProps`; returns `{ok, error?}`. Snapshots the pre-edit value (once) so the edit is resettable |
+| `__componentHighlighterResetProp(id, path)` | React only: revert a previously-edited prop to its original (pre-edit) value; returns `{ok, error?}` |
+| `__componentHighlighterGetEditedProps(id)` | React only: top-level prop keys whose current value differs from their original (drives the per-prop reset affordance) |
 
 ## Panel↔Client communication (RPC-based)
 
@@ -134,6 +139,8 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 | `component-highlighter:scroll-to-component` | `do-scroll-to-component` | Scroll app page to a component |
 | `component-highlighter:highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights on app page |
 | `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
+| `component-highlighter:set-prop` | `do-set-prop` | Panel live-edits a prop → client calls `__componentHighlighterSetProp` (React `overrideProps`) |
+| `component-highlighter:reset-prop` | `do-reset-prop` | Panel resets a prop to its original → client calls `__componentHighlighterResetProp` |
 | `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
 | `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |
 | — (command handler) | `do-open-url` | Open a URL in a new browser tab (e.g. Storybook docs) |
@@ -193,12 +200,30 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
      frame; instances removed before the frame flushes are skipped.
    - Do not call `serializeProps` directly on the hot path — route it through
      `scheduleSerialization` so this guarantee is preserved across frameworks.
+   - **Only `serializedProps` crosses RPC.** Raw live props hold unclonable
+     values (functions, DOM nodes via `ref`, circular structures) and are never
+     put on `SerializedRegistryInstance` / `create-story` / `select-component`
+     payloads. Every server + panel consumer (story generation, panel display,
+     fingerprinting, story-name suggestion) reads `serializedProps`. The
+     serializer reduces every non-story-safe value to a marker
+     (`__isJSX` / `__isFunction` / `__isDate` / `__isObject` for non-plain
+     objects like Map/Set/class instances) so the wire payload is always
+     structured-clone-safe and round-trippable.
 
 6. **React detection is non-intrusive**
    - Never reintroduce an HOC/boundary wrapper for React. Components must not
      be wrapped: detection runs off the React DevTools fiber tree so the
      rendered tree stays clean and RSC keeps working. The build-time transform
      may only append the `__chRegisterMeta` tag.
+   - **RSC (`rsc` option):** off by default (SPA — every component is a client
+     component, so all matching modules are tagged). When `rsc: true`
+     (Vite-based RSC frameworks like TanStack Start), the transform only tags
+     modules with a leading `"use client"` directive; server-component modules
+     are returned untouched so the client runtime is never injected into the
+     server graph. Do not make the gate unconditional — it must stay opt-in, or
+     it breaks plain SPAs. Gate is owned by `src/frameworks/react/transform.ts`
+     (`hasUseClientDirective`) and threaded via the `TransformOptions` arg.
+     Covered by the transform "RSC mode" unit tests (no dedicated playground).
    - The inline DevTools hook script must be injected into `<head>` *before*
      any module script (it must exist before react-dom registers its renderer).
    - Must support **React 18 and 19** (both required, both E2E-gated via

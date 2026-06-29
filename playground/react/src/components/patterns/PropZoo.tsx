@@ -23,6 +23,8 @@ export interface PropZooProps {
   note: string | null
   /** tuple */
   range: [number, number]
+  /** non-plain object (Map): not round-trippable to a story arg */
+  lookup?: Map<string, number>
   /** event handler with an argument */
   onPick?: (id: string) => void
 }
@@ -36,6 +38,7 @@ export function PropZoo({
   variant,
   note,
   range,
+  lookup,
   onPick,
 }: PropZooProps) {
   return (
@@ -50,6 +53,7 @@ export function PropZoo({
         </span>
         <span>range: {range[0]}–{range[1]}</span>
         <span>note: {note ?? '—'}</span>
+        <span>lookup: {lookup ? lookup.size : 0}</span>
       </div>
       <button
         className="btn btn-secondary btn-small"

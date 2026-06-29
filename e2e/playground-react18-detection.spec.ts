@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
+import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 
 /**
  * React 18 parity suite.
@@ -206,7 +207,33 @@ test.describe('React 18 playground detection coverage', () => {
     expect(result?.childrenSource).toContain('Button')
     expect(result?.childrenSource).not.toContain('Failed to serialize')
   })
+
+  test('serializes non-plain object props (Map) as a read-only marker', async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      ;(window as any).__componentHighlighterActivateTracking?.()
+    })
+    await page.waitForTimeout(500)
+
+    const lookup = await page.evaluate(() => {
+      const registry = (window as any).__componentHighlighterRegistry as
+        | Map<string, { meta?: { componentName?: string }; serializedProps?: Record<string, any> }>
+        | undefined
+      if (!registry) return null
+      const propZoo = Array.from(registry.values()).find(
+        (e) => e.meta?.componentName === 'PropZoo',
+      )
+      return propZoo?.serializedProps?.lookup ?? null
+    })
+
+    // PropZoo receives `lookup={new Map(...)}`. A Map can't be round-tripped to
+    // a story arg, so the serializer emits a marker instead of leaking the live
+    // object onto the wire.
+    expect(lookup).toEqual({ __isObject: true, name: 'Map' })
+  })
 })
 
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
+registerLivePropEditSuite(test as any)

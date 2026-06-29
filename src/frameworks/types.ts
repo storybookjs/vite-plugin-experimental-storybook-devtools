@@ -85,10 +85,31 @@ export interface HighlighterOptions {
 }
 
 /**
- * Transform function signature
- * Takes source code and file ID, returns transformed code or undefined
+ * Options passed to a framework transform per file.
  */
-export type TransformFunction = (code: string, id: string) => string | undefined
+export interface TransformOptions {
+  /**
+   * React Server Components mode. When `true`, only modules that declare a
+   * `"use client"` directive are instrumented; modules without it are treated
+   * as server components and left untouched (they never mount a client fiber,
+   * so tagging is useless and would pull the client runtime into the server
+   * module graph). When `false` (default), every matching module is tagged —
+   * the correct behavior for a plain SPA where there is no `"use client"`
+   * directive but every component runs on the client.
+   */
+  rsc?: boolean
+}
+
+/**
+ * Transform function signature
+ * Takes source code, file ID, and optional per-file options; returns
+ * transformed code or undefined (no transform).
+ */
+export type TransformFunction = (
+  code: string,
+  id: string,
+  options?: TransformOptions,
+) => string | undefined
 
 /**
  * Framework detection function signature

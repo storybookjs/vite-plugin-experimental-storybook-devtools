@@ -48,7 +48,6 @@ function disableOverlaySafe() {
 export interface OverlayEvents {
   'log-info': (data: {
     meta: ComponentInstance['meta']
-    props: Record<string, unknown>
     serializedProps?: SerializedProps
     componentRegistry?: Record<string, string>
     storyName?: string
@@ -403,7 +402,6 @@ function clearAllHighlights() {
 function emitCreateStory(
   data: {
     meta: ComponentInstance['meta']
-    props: Record<string, unknown>
     serializedProps?: SerializedProps
     storyName: string
   },
@@ -425,7 +423,6 @@ function emitCreateStory(
 
   const componentInfoBase = {
     meta: data.meta,
-    props: data.props,
     componentRegistry: componentRegistryObj,
     storyName: data.storyName,
     ...(playCode
@@ -474,8 +471,10 @@ export async function showContextMenu(
   hideContextMenu()
 
   const meta = instance.meta
-  const props = instance.props
-  const serializedProps = instance.serializedProps
+  // Resolve the *latest* registry entry at save time so live prop edits
+  // (renderer.overrideProps via the tooltip/panel pencil) are reflected in
+  // the generated story — not the snapshot captured when the menu opened.
+  const liveInstance = () => componentRegistry?.get(instance.id) ?? instance
 
   const storyInfo = await checkStoryFile(meta.filePath)
 
@@ -494,13 +493,13 @@ export async function showContextMenu(
         stopRecording()
       }
 
+      const live = liveInstance()
       const payload: Parameters<typeof emitCreateStory>[0] = {
         meta,
-        props,
         storyName,
       }
-      if (serializedProps) {
-        payload.serializedProps = serializedProps
+      if (live.serializedProps) {
+        payload.serializedProps = live.serializedProps
       }
       emitCreateStory(payload, false)
     },
@@ -536,13 +535,13 @@ export async function showContextMenu(
           },
         )
 
+        const live = liveInstance()
         const payload: Parameters<typeof emitCreateStory>[0] = {
           meta,
-          props,
           storyName,
         }
-        if (serializedProps) {
-          payload.serializedProps = serializedProps
+        if (live.serializedProps) {
+          payload.serializedProps = live.serializedProps
         }
 
         emitCreateStory(payload, true)
@@ -674,7 +673,6 @@ export function pushSelectedComponentRPC(
       ? {
           id: instance.id,
           meta: { ...instance.meta },
-          props: instance.props,
           serializedProps: instance.serializedProps,
           isConnected: instance.element?.isConnected ?? false,
         }

@@ -41,6 +41,15 @@ export function classifyProp(
   if (value && typeof value === 'object' && '__isFunction' in value) {
     return { typeClass: 'fn', display: '<fn>', viewable: false, raw: null }
   }
+  if (value && typeof value === 'object' && '__isObject' in value) {
+    const o = value as { __isObject: true; name?: string }
+    return {
+      typeClass: 'obj',
+      display: o.name || 'Object',
+      viewable: false,
+      raw: null,
+    }
+  }
   if (typeof value === 'function') {
     return { typeClass: 'fn', display: '<fn>', viewable: false, raw: null }
   }
@@ -84,6 +93,101 @@ export function classifyProp(
     display: String(value),
     viewable: false,
     raw: value,
+  }
+}
+
+/** Kinds of editable prop the inline editor supports. */
+export type EditKind =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'json' // objects, arrays, null, undefined, or any pure JSON value
+
+/** Payload sent to the runtime to apply a live prop override. */
+export interface SetPropPayload {
+  kind: EditKind
+  /** Raw text the user entered (interpreted by `kind`). */
+  text: string
+}
+
+/** Deep scan: does a serialized value contain a non-reconstructable marker? */
+function containsUnreconstructable(value: unknown, depth = 0): boolean {
+  if (depth > 8) return true
+  if (!value || typeof value !== 'object') return typeof value === 'function'
+  const v = value as Record<string, unknown>
+  if (v['__isJSX'] || v['__isFunction'] || v['__isVueSlot'] || v['__isObject'])
+    return true
+  if (v['__isDate']) return false
+  if (Array.isArray(value)) {
+    return value.some((it) => containsUnreconstructable(it, depth + 1))
+  }
+  return Object.values(v).some((it) => containsUnreconstructable(it, depth + 1))
+}
+
+/**
+ * Decide whether a (serialized) prop value can be live-edited and how.
+ * Functions / JSX / Vue slots are read-only (cannot be round-tripped).
+ */
+export function propEditability(value: unknown): {
+  editable: boolean
+  kind: EditKind
+  reason?: string
+} {
+  if (value && typeof value === 'object') {
+    const v = value as Record<string, unknown>
+    if (v['__isJSX'])
+      return { editable: false, kind: 'json', reason: 'JSX is read-only' }
+    if (v['__isVueSlot'])
+      return { editable: false, kind: 'json', reason: 'Slot is read-only' }
+    if (v['__isFunction'])
+      return {
+        editable: false,
+        kind: 'json',
+        reason: 'Functions are read-only',
+      }
+    if (v['__isObject'])
+      return {
+        editable: false,
+        kind: 'json',
+        reason: 'Non-plain object is read-only',
+      }
+    if (v['__isDate']) return { editable: true, kind: 'date' }
+  }
+  if (typeof value === 'function')
+    return { editable: false, kind: 'json', reason: 'Functions are read-only' }
+  if (typeof value === 'string') return { editable: true, kind: 'string' }
+  if (typeof value === 'number') return { editable: true, kind: 'number' }
+  if (typeof value === 'boolean') return { editable: true, kind: 'boolean' }
+  if (value === null || value === undefined)
+    return { editable: true, kind: 'json' }
+  if (typeof value === 'object') {
+    if (containsUnreconstructable(value))
+      return {
+        editable: false,
+        kind: 'json',
+        reason: 'Contains a function/JSX and cannot be edited',
+      }
+    return { editable: true, kind: 'json' }
+  }
+  return { editable: false, kind: 'json', reason: 'Unsupported value' }
+}
+
+/** Pretty default text to seed the editor input for a given value. */
+export function editInitialText(value: unknown, kind: EditKind): string {
+  if (kind === 'date') {
+    const iso = (value as { iso?: string })?.iso
+    return typeof iso === 'string' ? iso : new Date().toISOString()
+  }
+  if (kind === 'string') return String(value ?? '')
+  if (kind === 'number') return String(value ?? 0)
+  if (kind === 'boolean') return value ? 'true' : 'false'
+  // json
+  if (value === undefined) return 'null'
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return 'null'
   }
 }
 

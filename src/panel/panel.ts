@@ -11,6 +11,8 @@ import {
   getDevToolsRpcClient,
   type DevToolsRpcClient,
 } from '@vitejs/devtools-kit/client'
+import { propEditability } from '../client/utils/prop-utils'
+import { createPropEditor } from '../client/utils/prop-editor'
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
@@ -130,13 +132,16 @@ interface RegistryInstance {
     sourceId: string
     isDefaultExport?: boolean
   }
-  props: Record<string, unknown>
   serializedProps?: Record<string, unknown>
   isConnected: boolean
+  /** Top-level prop keys the user has live-edited (differ from original). */
+  editedProps?: string[]
 }
 
 // ─── Icons ──────────────────────────────────────────────────────────
 const CODE_ICON = `<svg width="12" height="12" viewBox="0 0 14 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7.53613 4.31055C7.63877 4.05443 7.92931 3.92987 8.18555 4.03223C8.44167 4.13483 8.56617 4.4254 8.46387 4.68164L6.46387 9.68164C6.36117 9.93761 6.07062 10.0623 5.81445 9.95996C5.55837 9.85739 5.43397 9.56674 5.53613 9.31055L7.53613 4.31055Z" fill="currentColor"/><path d="M3.64648 5.14258C3.84175 4.94762 4.15834 4.94747 4.35352 5.14258C4.5486 5.33775 4.54846 5.65435 4.35352 5.84961L3.20703 6.99609L4.35352 8.14258C4.5486 8.33775 4.54846 8.65435 4.35352 8.84961C4.15826 9.04458 3.84166 9.0447 3.64648 8.84961L2.14648 7.34961C2.04896 7.25205 2.00006 7.12393 2 6.99609C2.00001 6.93207 2.01266 6.86784 2.03711 6.80762C2.04931 6.77763 2.06475 6.74834 2.08301 6.7207L2.14648 6.64258L3.64648 5.14258Z" fill="currentColor"/><path d="M9.64648 5.14258C9.84174 4.94763 10.1583 4.9475 10.3535 5.14258L11.8535 6.64258L11.918 6.7207C11.9363 6.7484 11.9517 6.77755 11.9639 6.80762C11.9883 6.86782 12 6.93209 12 6.99609C11.9999 7.12383 11.9509 7.25208 11.8535 7.34961L10.3535 8.84961C10.1583 9.04455 9.84166 9.0447 9.64648 8.84961C9.45144 8.65443 9.45155 8.33782 9.64648 8.14258L10.793 6.99609L9.64648 5.84961C9.45142 5.65445 9.45158 5.33784 9.64648 5.14258Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M13.5 0C13.7761 0 14 0.223858 14 0.5V11.5L13.9902 11.6006C13.9503 11.7961 13.7961 11.9503 13.6006 11.9902L13.5 12H0.5L0.399414 11.9902C0.203918 11.9503 0.0496648 11.7961 0.00976562 11.6006L0 11.5V0.5C1.28852e-07 0.223858 0.223858 1.20798e-08 0.5 0H13.5ZM1 11H13V3H1V11ZM1.5 1C1.22386 1 1 1.22386 1 1.5C1 1.77614 1.22386 2 1.5 2C1.77614 2 2 1.77614 2 1.5C2 1.22386 1.77614 1 1.5 1ZM3.5 1C3.22386 1 3 1.22386 3 1.5C3 1.77614 3.22386 2 3.5 2C3.77614 2 4 1.77614 4 1.5C4 1.22386 3.77614 1 3.5 1ZM5.5 1C5.22386 1 5 1.22386 5 1.5C5 1.77614 5.22386 2 5.5 2C5.77614 2 6 1.77614 6 1.5C6 1.22386 5.77614 1 5.5 1Z" fill="currentColor"/></svg>`
+const PENCIL_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`
+const RESET_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 // SB_LOGO_FULL — dual-color Storybook logo for the rail (pink bg + white S)
 const SB_LOGO_FULL = `<svg width="20" height="20" viewBox="-31.5 0 319 319" xmlns="http://www.w3.org/2000/svg"><path fill="#FF4785" d="M9.87,293.32L0.01,30.57C-0.31,21.9,6.34,14.54,15.01,14L238.49,0.03C247.32,-0.52,254.91,6.18,255.47,15.01C255.49,15.34,255.5,15.67,255.5,16V302.32C255.5,311.16,248.33,318.32,239.49,318.32C239.25,318.32,239.01,318.32,238.77,318.31L25.15,308.71C16.83,308.34,10.18,301.65,9.87,293.32Z"/><path fill="#FFF" d="M188.67,39.13L190.19,2.41L220.88,0L222.21,37.86C222.25,39.18,221.22,40.29,219.9,40.33C219.34,40.35,218.79,40.17,218.34,39.82L206.51,30.5L192.49,41.13C191.44,41.93,189.95,41.72,189.15,40.67C188.81,40.23,188.64,39.68,188.67,39.13ZM149.41,119.98C149.41,126.21,191.36,123.22,196.99,118.85C196.99,76.45,174.23,54.17,132.57,54.17C90.91,54.17,67.57,76.79,67.57,110.74C67.57,169.85,147.35,170.98,147.35,203.23C147.35,212.28,142.91,217.65,133.16,217.65C120.46,217.65,115.43,211.17,116.02,189.1C116.02,184.32,67.57,182.82,66.09,189.1C62.33,242.57,95.64,257.99,133.75,257.99C170.69,257.99,199.65,238.3,199.65,202.66C199.65,139.3,118.68,141,118.68,109.6C118.68,96.88,128.14,95.18,133.75,95.18C139.66,95.18,150.3,96.22,149.41,119.98Z"/></svg>`
 const COVERAGE_TAB_ICON = `<svg width="16" height="16" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.76464 1.0757C9.90598 1.16404 10 1.32104 10 1.5V7.5L9.99992 7.50892C9.9987 7.57865 9.98321 7.64491 9.95623 7.70488C9.92676 7.77041 9.88358 7.82845 9.83035 7.87534L5.3369 11.8695C5.30013 11.9031 5.25937 11.9303 5.21616 11.951C5.14779 11.9838 5.0738 12 5 12C4.9262 12 4.85221 11.9838 4.78384 11.951C4.74062 11.9303 4.69986 11.9031 4.66308 11.8695L0.169665 7.87535L0.161201 7.86772C0.109893 7.82048 0.0706711 7.76488 0.0437672 7.70488C0.0169921 7.64535 0.0015266 7.57963 0.000107183 7.51046L0 7.5V1.5C0 1.32103 0.0940346 1.16401 0.235393 1.07568L0.252579 1.06477C0.268532 1.0548 0.290464 1.04142 0.318377 1.02514C0.374201 0.992577 0.453956 0.94838 0.557643 0.896536C0.765036 0.79284 1.06813 0.658576 1.46689 0.525658C2.2651 0.259589 3.44341 0 5 0C6.55659 0 7.7349 0.259589 8.53311 0.525658C8.93187 0.658576 9.23496 0.79284 9.44236 0.896536C9.54604 0.94838 9.6258 0.992577 9.68162 1.02514C9.70954 1.04142 9.73147 1.0548 9.74742 1.06477L9.76464 1.0757ZM1 1.7934V7.27547L2.06804 8.22483L8.65573 1.63719C8.53022 1.58541 8.38394 1.53003 8.21689 1.47434C7.5151 1.24041 6.44341 1 5 1C3.55659 1 2.4849 1.24041 1.78311 1.47434C1.43187 1.59142 1.17246 1.70716 1.00486 1.79096L1 1.7934ZM5 10.831L2.81674 8.89035L9 2.70713V7.27547L5 10.831Z" fill="currentColor"/></svg>`
@@ -423,13 +428,13 @@ function makePopoverItem(
 function showActionPopover(anchor: HTMLElement, entry: CoverageEntry) {
   const popover = getActionPopover()
   // Toggle off if already open for this entry
-  if (!popover.hidden && popover.dataset.entry === entry.componentName) {
+  if (!popover.hidden && popover.dataset['entry'] === entry.componentName) {
     popover.hidden = true
     return
   }
 
   popover.innerHTML = ''
-  popover.dataset.entry = entry.componentName
+  popover.dataset['entry'] = entry.componentName
 
   popover.appendChild(
     makePopoverItem(BULLSEYE_ICON, 'Locate component', () => {
@@ -829,7 +834,6 @@ async function createStoryForComponent(filePath: string): Promise<boolean> {
     try {
       await rpcCall('component-highlighter:create-story', {
         meta: instance.meta,
-        props: instance.props,
         serializedProps: instance.serializedProps,
       })
     } catch {
@@ -1031,7 +1035,6 @@ async function buildCoveragePanel(coverage: CoverageData) {
           try {
             await rpcCall('component-highlighter:create-story', {
               meta: instance.meta,
-              props: instance.props,
               serializedProps: instance.serializedProps,
               skipNavigation: true,
             })
@@ -1312,9 +1315,9 @@ async function buildHighlighterPanel() {
   root.appendChild(hdr)
 
   // ── Properties section ──
-  // Use serializedProps when available (React) for __isJSX / __isFunction markers;
-  // fall back to raw props (Vue / Svelte where props are already serialized).
-  const displayProps = comp.serializedProps || comp.props || {}
+  // serializedProps is the single RPC-safe representation for every framework
+  // (React markers, Vue/Svelte already-serialized values).
+  const displayProps = comp.serializedProps || {}
   const propsEntries = Object.entries(displayProps)
   if (propsEntries.length > 0) {
     const propsSection = document.createElement('div')
@@ -1328,7 +1331,7 @@ async function buildHighlighterPanel() {
     const propsTable = document.createElement('div')
     propsTable.className = 'hl-props-table'
 
-    for (const [key, value] of propsEntries) {
+    for (const [key, initialValue] of propsEntries) {
       const row = document.createElement('div')
       row.className = 'hl-prop-row'
 
@@ -1339,67 +1342,152 @@ async function buildHighlighterPanel() {
       const val = document.createElement('div')
       val.className = 'hl-prop-val'
 
-      const valType = typeof value
-      const isObj = value && typeof value === 'object'
-      const isFunction = isObj && (value as Record<string, unknown>).__isFunction
-      const isJSX = isObj && (value as Record<string, unknown>).__isJSX
+      // The value captured when the panel was built goes stale after an edit
+      // (the app pushes the new value back via the registry shared state, with
+      // a short debounce). Read the freshest value + edited-state from the
+      // registry so re-opening the editor seeds the *current* value and the
+      // reset button reflects reality.
+      const liveInstance = () => fetchRegistry().find((i) => i.id === comp.id)
+      const liveValue = (): unknown => {
+        const sp = liveInstance()?.serializedProps
+        return sp && key in sp ? sp[key] : initialValue
+      }
+      const isEdited = (): boolean =>
+        (liveInstance()?.editedProps ?? []).includes(key)
 
-      if (isFunction) {
-        // Handler / function prop
-        const fn = value as { __isFunction: true; name: string }
-        val.innerHTML = `<span class="hl-prop-fn">${fn.name ? fn.name : '() => {}'}</span>`
-      } else if (isJSX) {
-        // JSX prop — show source in a collapsible code block
-        const jsx = value as { __isJSX: true; source: string }
-        const wrapper = document.createElement('details')
-        wrapper.className = 'hl-prop-details'
-        const summary = document.createElement('summary')
-        summary.innerHTML = `<span class="hl-prop-jsx-badge">JSX</span>`
-        wrapper.appendChild(summary)
-        const code = document.createElement('pre')
-        code.className = 'hl-prop-code'
-        code.textContent = jsx.source
-        wrapper.appendChild(code)
-        val.appendChild(wrapper)
-      } else if (valType === 'string' || valType === 'number' || valType === 'boolean') {
-        const input = document.createElement('input')
-        input.className = 'hl-prop-input'
-        input.type = valType === 'boolean' ? 'checkbox' : valType === 'number' ? 'number' : 'text'
-        if (valType === 'boolean') {
-          input.checked = value as boolean
+      // Read-only renderer for the current value (+ edit / reset affordances).
+      const renderValue = () => {
+        val.innerHTML = ''
+        const value = liveValue()
+        const isObj = value && typeof value === 'object'
+        const isFunction =
+          isObj && (value as Record<string, unknown>)['__isFunction']
+        const isJSX = isObj && (value as Record<string, unknown>)['__isJSX']
+        const isObjMarker =
+          isObj && (value as Record<string, unknown>)['__isObject']
+        const edit = propEditability(value)
+
+        if (isFunction) {
+          const fn = value as { __isFunction: true; name: string }
+          val.innerHTML = `<span class="hl-prop-fn">${fn.name ? fn.name : '() => {}'}</span>`
+        } else if (isJSX) {
+          const jsx = value as { __isJSX: true; source: string }
+          const wrapper = document.createElement('details')
+          wrapper.className = 'hl-prop-details'
+          const summary = document.createElement('summary')
+          summary.innerHTML = `<span class="hl-prop-jsx-badge">JSX</span>`
+          wrapper.appendChild(summary)
+          const code = document.createElement('pre')
+          code.className = 'hl-prop-code'
+          code.textContent = jsx.source
+          wrapper.appendChild(code)
+          val.appendChild(wrapper)
+        } else if (
+          typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean'
+        ) {
+          const span = document.createElement('span')
+          span.className = `hl-prop-scalar hl-prop-${typeof value}`
+          span.textContent = String(value)
+          val.appendChild(span)
+        } else if (value === null || value === undefined) {
+          val.innerHTML = `<span class="hl-prop-null">${String(value)}</span>`
+        } else if (isObjMarker) {
+          const o = value as { name?: string }
+          val.innerHTML = `<span class="hl-prop-obj">${o.name || 'Object'}</span>`
+        } else if (isObj && (value as Record<string, unknown>)['__isDate']) {
+          const span = document.createElement('span')
+          span.className = 'hl-prop-scalar'
+          span.textContent = String(
+            (value as { iso?: string }).iso ?? 'Invalid Date',
+          )
+          val.appendChild(span)
         } else {
-          input.value = String(value)
-        }
-        input.addEventListener('change', () => {
-          if (valType === 'boolean') {
-            comp.props[key] = input.checked
-          } else if (valType === 'number') {
-            comp.props[key] = Number(input.value)
-          } else {
-            comp.props[key] = input.value
+          const wrapper = document.createElement('details')
+          wrapper.className = 'hl-prop-details'
+          const summary = document.createElement('summary')
+          summary.innerHTML = `<span class="hl-prop-obj">${Array.isArray(value) ? `Array(${(value as unknown[]).length})` : 'Object'}</span>`
+          wrapper.appendChild(summary)
+          const code = document.createElement('pre')
+          code.className = 'hl-prop-code'
+          try {
+            code.textContent = JSON.stringify(value, null, 2)
+          } catch {
+            code.textContent = String(value)
           }
-        })
-        val.appendChild(input)
-      } else if (value === null || value === undefined) {
-        val.innerHTML = `<span class="hl-prop-null">${String(value)}</span>`
-      } else {
-        // Complex objects/arrays — show collapsible JSON
-        const wrapper = document.createElement('details')
-        wrapper.className = 'hl-prop-details'
-        const summary = document.createElement('summary')
-        summary.innerHTML = `<span class="hl-prop-obj">${Array.isArray(value) ? `Array(${(value as unknown[]).length})` : 'Object'}</span>`
-        wrapper.appendChild(summary)
-        const code = document.createElement('pre')
-        code.className = 'hl-prop-code'
-        try {
-          code.textContent = JSON.stringify(value, null, 2)
-        } catch {
-          code.textContent = String(value)
+          wrapper.appendChild(code)
+          val.appendChild(wrapper)
         }
-        wrapper.appendChild(code)
-        val.appendChild(wrapper)
+        if (edit.editable) {
+          const editBtn = document.createElement('button')
+          editBtn.className = 'hl-prop-edit-btn'
+          editBtn.title = `Edit ${key} live`
+          editBtn.innerHTML = PENCIL_ICON
+          editBtn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            openEditor()
+          })
+          val.appendChild(editBtn)
+        }
+        if (isEdited()) {
+          const resetBtn = document.createElement('button')
+          resetBtn.className = 'hl-prop-reset-btn'
+          resetBtn.title = `Reset ${key} to original`
+          resetBtn.innerHTML = RESET_ICON
+          resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            rpcCall('component-highlighter:reset-prop', {
+              id: comp.id,
+              path: [key],
+            })
+            // Re-render now, then again after the debounced registry push so
+            // the reverted value + cleared reset state are reflected.
+            renderValue()
+            setTimeout(renderValue, 600)
+          })
+          val.appendChild(resetBtn)
+        }
       }
 
+      const openEditor = () => {
+        val.innerHTML = ''
+        // Seed from the CURRENT value, not the value captured at build time.
+        const current = liveValue()
+        createPropEditor({
+          parent: val,
+          value: current,
+          kind: propEditability(current).kind,
+          classes: {
+            form: 'hl-prop-edit-form',
+            input: 'hl-prop-input',
+            textarea: 'hl-prop-input hl-prop-textarea',
+            actions: 'hl-prop-edit-actions',
+            save: 'act-btn create',
+            cancel: 'act-btn',
+            error: 'hl-prop-edit-error',
+          },
+          // Panel: route the edit through RPC (relayed to the client's
+          // __componentHighlighterSetProp). Fire-and-forget — the live app is
+          // the source of truth and pushes the new value back via the registry.
+          onApply: (payload) => {
+            rpcCall('component-highlighter:set-prop', {
+              id: comp.id,
+              path: [key],
+              payload,
+            })
+          },
+          onApplied: () => {
+            renderValue()
+            // Pick up the serialized value + edited-state after the debounced
+            // registry push settles.
+            setTimeout(renderValue, 600)
+          },
+          onCancel: () => renderValue(),
+        })
+      }
+
+      renderValue()
       row.appendChild(label)
       row.appendChild(val)
       propsTable.appendChild(row)
@@ -1426,7 +1514,7 @@ async function buildHighlighterPanel() {
   storyNameInput.className = 'hl-prop-input'
   storyNameInput.type = 'text'
   storyNameInput.placeholder = 'Story name\u2026'
-  storyNameInput.value = suggestStoryName(comp.props)
+  storyNameInput.value = suggestStoryName(comp.serializedProps || {})
   storyNameInput.addEventListener('focus', () => storyNameInput.select())
   storyNameRow.appendChild(storyNameInput)
 
@@ -1437,10 +1525,14 @@ async function buildHighlighterPanel() {
     addBtn.disabled = true
     addBtn.textContent = 'Creating\u2026'
     try {
+      // Re-resolve the latest registry entry so live prop edits (the panel
+      // pencil → set-prop → overrideProps) are reflected in the story file,
+      // not the snapshot captured when this inspector was rendered.
+      const latest =
+        fetchRegistry().find((i) => i.id === comp.id) ?? comp
       await rpcCall('component-highlighter:create-story', {
-        meta: comp.meta,
-        props: comp.props,
-        serializedProps: comp.serializedProps,
+        meta: latest.meta,
+        serializedProps: latest.serializedProps,
         storyName: storyNameInput.value.trim() || undefined,
       })
       // Bust the storybook index cache and retry until the new story appears
@@ -1595,13 +1687,13 @@ function showHighlighterPopover(
   storyPath: string | null,
 ) {
   const popover = getActionPopover()
-  if (!popover.hidden && popover.dataset.entry === `hl-${comp.meta.componentName}`) {
+  if (!popover.hidden && popover.dataset['entry'] === `hl-${comp.meta.componentName}`) {
     popover.hidden = true
     return
   }
 
   popover.innerHTML = ''
-  popover.dataset.entry = `hl-${comp.meta.componentName}`
+  popover.dataset['entry'] = `hl-${comp.meta.componentName}`
   const relPath = comp.meta.relativeFilePath || comp.meta.filePath
 
   popover.appendChild(

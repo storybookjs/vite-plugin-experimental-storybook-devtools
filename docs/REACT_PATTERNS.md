@@ -48,6 +48,33 @@ DOM nodes / `Window` / circular or very deep structures are replaced with
 safe markers, so a `forwardRef`'s `ref` can never blow the call stack
 ("Maximum call stack size exceeded").
 
+## Live prop editing (tooltip + panel)
+
+Each editable prop row has a pencil; clicking it turns the value into a typed
+form (Apply / Cancel). Edits drive React's own
+`renderer.overrideProps(fiber, path, value)` — the exact API React DevTools'
+props editor uses — reached through the DevTools hook we already install.
+Available in the **tooltip** (in-app overlay, direct call) and the **panel**
+(via `set-prop` RPC → `do-set-prop` → runtime). No remount; component state
+is preserved; the next commit re-syncs the registry/UI.
+
+| Value kind | Editor control | Notes |
+|---|---|---|
+| string | text input | |
+| number | number input | rejects non-numeric (`{ok:false,error}`) |
+| boolean | `<select>` true/false | |
+| `Date` (`__isDate`) | text input (ISO) | reconstructed as `new Date(iso)` |
+| object / array / `null` / `undefined` | JSON `<textarea>` | parsed; nested `__isDate` revived |
+| function / JSX / Vue slot | **read-only** (no pencil) | cannot be round-tripped |
+| object/array containing a fn/JSX | **read-only** | not reconstructable |
+
+Constraints (same as React DevTools): **dev builds only** — `overrideProps`
+is stripped from production react-dom; `__componentHighlighterCanEditProps()`
+feature-detects and the pencil is omitted when unavailable. Overrides are
+**ephemeral**: a parent re-render that passes a fresh prop replaces them.
+Invalid input (bad JSON / NaN / editing a fn) reports an inline error and
+changes nothing.
+
 ## ⚠️ Supported with a nuance
 
 | Pattern | Nuance |
@@ -66,7 +93,35 @@ safe markers, so a `forwardRef`'s `ref` can never blow the call stack
 | Non-exported / local components | Only exported components can have stories, so detection is intentionally export-scoped. | Export it if you want a story. |
 | Non-PascalCase functions | Not treated as components by design. | — |
 | Object-of-components — `export const Icons = { Star: () => … }` | Not a function/class binding. | Export each as its own named component. |
-| Server Components (RSC) | The DevTools hook runs only on the client; server components never reach it. | Client components are detected normally; this is expected, not a bug. |
+
+## React Server Components (RSC) — the `rsc` option
+
+The detection model is RSC-safe by design: the DevTools hook only sees client
+commits, so Server Components are invisible (they never mount a client fiber).
+The remaining concern is purely build-time — the transform should not inject
+the client runtime import into a server-component module.
+
+The **`rsc` plugin option** (default `false`) handles this with a `"use client"`
+gate:
+
+```ts
+componentHighlighter({ rsc: true }) // e.g. TanStack Start
+```
+
+| Mode | Behavior |
+|---|---|
+| `rsc: false` (default, SPA) | Every matching module is instrumented. A plain SPA has no `"use client"` directive yet every component runs on the client, so gating would be wrong. |
+| `rsc: true` (RSC frameworks) | Only modules declaring a leading `"use client"` directive are instrumented. Server components (no directive) are returned untouched — no tag, no runtime import. |
+
+The directive is read from Babel's `program.directives` (handles either quote
+style; a `"use client"` string elsewhere in the module does not count). The
+gate is covered by `src/frameworks/react/transform.test.ts` ("RSC mode"):
+client modules are tagged, server modules (no directive) are returned
+untouched, and the SPA default (`rsc: false`) still tags everything.
+
+**Caveat:** this targets Vite-based RSC (TanStack Start). Next.js is not Vite
+(webpack/Turbopack), so this Vite plugin does not apply there regardless of the
+gate.
 
 ## How to extend support
 

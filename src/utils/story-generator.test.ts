@@ -626,6 +626,20 @@ export const Primary: Story = {
       expect(result.content).not.toContain('createdAt: {}')
     })
 
+    it('emits a placeholder for non-plain object markers (Map/Set/class)', () => {
+      const result = generateStory({
+        meta: baseMeta,
+        props: {
+          lookup: { __isObject: true, name: 'Map' },
+        },
+      })
+
+      // Must NOT emit a bogus object literal for an unreconstructable value.
+      expect(result.content).not.toContain('__isObject')
+      expect(result.content).toContain('lookup: undefined')
+      expect(result.content).toContain('Map')
+    })
+
     it('does not emit ref/key as args (sanitized at the runtime serializer)', () => {
       // The runtime serializer strips `ref`/`key`; if they ever reach the
       // generator they must not produce broken args. Here they simply are

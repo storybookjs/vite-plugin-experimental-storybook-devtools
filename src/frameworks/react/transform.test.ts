@@ -412,4 +412,82 @@ export function Counter() {
       expect(result).not.toContain('ComponentHighlighterBoundary')
     })
   })
+
+  describe('RSC mode ("use client" gate)', () => {
+    const clientComponent = `'use client'
+import React from 'react'
+
+export function ClientWidget() {
+  return <div>client</div>
+}
+`
+    const serverComponent = `import React from 'react'
+
+export function ServerWidget() {
+  return <div>server</div>
+}
+`
+
+    it('tags server components when rsc is off (SPA default)', () => {
+      // A plain SPA has no "use client" directive but every component is a
+      // client component — must still be tagged.
+      const result = transform(serverComponent, '/src/ServerWidget.tsx')
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(ServerWidget, {')
+    })
+
+    it('tags server components when rsc is explicitly false', () => {
+      const result = transform(serverComponent, '/src/ServerWidget.tsx', {
+        rsc: false,
+      })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(ServerWidget, {')
+    })
+
+    it('tags "use client" components in rsc mode', () => {
+      const result = transform(clientComponent, '/src/ClientWidget.tsx', {
+        rsc: true,
+      })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(ClientWidget, {')
+      // The directive is preserved (must stay the first statement).
+      expect(result).toContain("'use client'")
+    })
+
+    it('does NOT tag server components in rsc mode (left untouched)', () => {
+      const result = transform(serverComponent, '/src/ServerWidget.tsx', {
+        rsc: true,
+      })
+      // No transform at all — the module is returned untouched (undefined).
+      expect(result).toBeUndefined()
+    })
+
+    it('recognizes a double-quoted "use client" directive', () => {
+      const code = `"use client"
+import React from 'react'
+
+export function Dq() {
+  return <div>dq</div>
+}
+`
+      const result = transform(code, '/src/Dq.tsx', { rsc: true })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Dq, {')
+    })
+
+    it('ignores a "use client" string that is not a leading directive', () => {
+      // A "use client" appearing as a value (not a directive prologue) must
+      // NOT flip the module into client mode.
+      const code = `import React from 'react'
+
+const label = 'use client'
+
+export function NotADirective() {
+  return <div>{label}</div>
+}
+`
+      const result = transform(code, '/src/NotADirective.tsx', { rsc: true })
+      expect(result).toBeUndefined()
+    })
+  })
 })

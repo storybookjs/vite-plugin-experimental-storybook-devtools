@@ -32,4 +32,11 @@ Current integrations:
     mutation while React 18 apps are fixed automatically (`false` opts out
     with a warning; never silent). The `react18-chromium` spec asserts no
     degraded fallback and real JSX children source.
+  - **RSC (React Server Components):** opt-in via the `rsc: true` option for
+    Vite-based RSC frameworks (e.g. TanStack Start). It enables a `"use client"`
+    transform gate so only client components are instrumented; server
+    components are left untouched. Covered by the transform unit tests
+    (`src/frameworks/react/transform.test.ts` → "RSC mode"). Next.js is not
+    Vite, so this plugin does not apply there. See
+    [docs/REACT_PATTERNS.md](./REACT_PATTERNS.md) → "React Server Components".
 - Vue (`src/frameworks/vue`)

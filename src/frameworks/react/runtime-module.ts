@@ -280,19 +280,27 @@ function serializeValue(
       serializeValue(item, depth + 1, seen),
     )
   }
-  if (
-    value !== null &&
-    typeof value === 'object' &&
-    (value as { constructor?: unknown }).constructor === Object
-  ) {
-    if (depth >= MAX_SERIALIZE_DEPTH) return '[Depth limit]'
-    if (seen.has(value as object)) return '[Circular]'
-    seen.add(value as object)
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = serializeValue(v, depth + 1, seen)
+  if (value !== null && typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value)
+    if (proto === Object.prototype || proto === null) {
+      if (depth >= MAX_SERIALIZE_DEPTH) return '[Depth limit]'
+      if (seen.has(value as object)) return '[Circular]'
+      seen.add(value as object)
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        out[k] = serializeValue(v, depth + 1, seen)
+      }
+      return out
     }
-    return out
+    // Non-plain object (Map, Set, class instance, …): not round-trippable to a
+    // story arg nor reliably cloneable over RPC. Mark it (read-only in the UI)
+    // rather than leaking the live object onto the wire.
+    return {
+      __isObject: true,
+      name:
+        (value as { constructor?: { name?: string } }).constructor?.name ||
+        'Object',
+    }
   }
   if (typeof value === 'function') {
     return { __isFunction: true, name: (value as { name?: string }).name || 'anonymous' }
@@ -484,10 +492,19 @@ function attachRect(id: string, element: Element | null) {
   }
 }
 
+// id → latest current-tree fiber, for live prop overrides.
+const fibersById = new Map<string, Fiber>()
+// The react-dom renderer object registered on the DevTools hook. It exposes
+// `overrideProps` in dev builds — the exact API React DevTools' props editor
+// uses. Captured on first commit.
+let reactRenderer: any = null
+
 function teardownId(id: string) {
   rectDisconnects.get(id)?.()
   rectDisconnects.delete(id)
   instanceElements.delete(id)
+  fibersById.delete(id)
+  originalProps.delete(id)
   unregisterInstance(id)
 }
 
@@ -497,7 +514,12 @@ function walkRoot(root: Fiber) {
 
   const seen = new Map<
     string,
-    { meta: Meta; props: Record<string, unknown>; element: Element | null }
+    {
+      meta: Meta
+      props: Record<string, unknown>
+      element: Element | null
+      fiber: Fiber
+    }
   >()
 
   // Iterative DFS carrying the nearest *contiguous* tagged ancestor's
@@ -528,6 +550,7 @@ function walkRoot(root: Fiber) {
             meta,
             props: (fiber.memoizedProps || {}) as Record<string, unknown>,
             element: findHostElement(fiber, meta.sourceId),
+            fiber,
           })
         }
         parentSourceId = meta.sourceId
@@ -559,6 +582,7 @@ function walkRoot(root: Fiber) {
     const element = rawElement
       ? findFirstTrackableElement(rawElement) || rawElement
       : null
+    fibersById.set(id, data.fiber)
     if (!componentRegistry.has(id)) {
       registerInstance(id, data.meta, data.props, element)
       attachRect(id, element)
@@ -573,7 +597,22 @@ function walkRoot(root: Fiber) {
   rootLiveIds.set(root, nextIds)
 }
 
-function handleCommit(_rendererId: number, root: Fiber) {
+function handleCommit(rendererId: number, root: Fiber) {
+  // Capture the react-dom renderer (exposes `overrideProps` in dev builds).
+  if (!reactRenderer && typeof window !== 'undefined') {
+    try {
+      const hook = (
+        window as unknown as {
+          __REACT_DEVTOOLS_GLOBAL_HOOK__?: {
+            renderers?: Map<number, unknown>
+          }
+        }
+      ).__REACT_DEVTOOLS_GLOBAL_HOOK__
+      reactRenderer = hook?.renderers?.get(rendererId) ?? null
+    } catch {
+      // ignore — overrides will report unavailable
+    }
+  }
   // Walk synchronously on commit. React batches a render pass into a single
   // commit, so this is one traversal per render pass (not a per-setState
   // storm); keeping it synchronous preserves deterministic register/update
@@ -584,6 +623,249 @@ function handleCommit(_rendererId: number, root: Fiber) {
   } catch (err) {
     logError('fiber walk failed:', err)
   }
+}
+
+// ─── Live prop editing (React DevTools `overrideProps`) ──────────────────
+
+type SetPropPayload = { kind: string; text: string }
+
+/** Recursively revive `{__isDate,iso}` markers; reject fn/JSX markers. */
+function reviveEdited(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const v = value as Record<string, unknown>
+  if (v['__isDate'] && typeof v['iso'] === 'string')
+    return new Date(v['iso'] as string)
+  if (v['__isJSX'] || v['__isFunction'] || v['__isVueSlot']) {
+    throw new Error('functions/JSX cannot be edited')
+  }
+  if (Array.isArray(value)) return value.map(reviveEdited)
+  const out: Record<string, unknown> = {}
+  for (const [k, val] of Object.entries(v)) out[k] = reviveEdited(val)
+  return out
+}
+
+/** Immutably set `value` at `path` within `obj`, cloning along the path. */
+function setAtPath(
+  obj: Record<string, unknown>,
+  path: Array<string | number>,
+  value: unknown,
+): Record<string, unknown> {
+  if (path.length === 0) return obj
+  const [head, ...rest] = path
+  const base: any = Array.isArray(obj) ? [...(obj as any)] : { ...obj }
+  if (rest.length === 0) {
+    base[head as any] = value
+  } else {
+    const child = base[head as any]
+    base[head as any] = setAtPath(
+      child && typeof child === 'object' ? child : {},
+      rest,
+      value,
+    )
+  }
+  return base
+}
+
+/** Read the value at `path` within `obj` (undefined if any segment is missing). */
+function getAtPath(obj: unknown, path: Array<string | number>): unknown {
+  let cur: any = obj
+  for (const key of path) {
+    if (cur == null) return undefined
+    cur = cur[key as any]
+  }
+  return cur
+}
+
+// ─── Original (pre-edit) prop values, for reset ──────────────────────────
+//
+// The first time a path is overridden we snapshot its pre-edit value here
+// (raw). It lets the UI offer a "reset to original" affordance and detect
+// which props currently differ from their original. Entries persist across
+// further edits (the original stays stable) and are cleared on unmount.
+const originalProps = new Map<string, Map<string, unknown>>()
+
+function rememberOriginal(id: string, path: Array<string | number>) {
+  const inst = componentRegistry.get(id)
+  if (!inst) return
+  const pathKey = JSON.stringify(path)
+  let perInstance = originalProps.get(id)
+  if (!perInstance) {
+    perInstance = new Map()
+    originalProps.set(id, perInstance)
+  }
+  if (!perInstance.has(pathKey)) {
+    perInstance.set(pathKey, getAtPath(inst.props, path))
+  }
+}
+
+/** Two values serialize to the same story-safe shape? */
+function sameSerialized(a: unknown, b: unknown): boolean {
+  try {
+    return (
+      JSON.stringify(serializeValue(a)) === JSON.stringify(serializeValue(b))
+    )
+  } catch {
+    return a === b
+  }
+}
+
+/** Top-level prop keys whose current value differs from its original. */
+function getEditedProps(id: string): string[] {
+  const perInstance = originalProps.get(id)
+  const inst = componentRegistry.get(id)
+  if (!perInstance || !inst) return []
+  const edited: string[] = []
+  for (const [pathKey, original] of perInstance) {
+    let path: Array<string | number>
+    try {
+      path = JSON.parse(pathKey)
+    } catch {
+      continue
+    }
+    // The UI only edits top-level props (path === [key]).
+    if (path.length !== 1) continue
+    if (!sameSerialized(getAtPath(inst.props, path), original)) {
+      edited.push(String(path[0]))
+    }
+  }
+  return edited
+}
+
+function decodeValue(payload: SetPropPayload): unknown {
+  const { kind, text } = payload
+  switch (kind) {
+    case 'string':
+      return text
+    case 'number': {
+      const n = Number(text)
+      if (Number.isNaN(n)) throw new Error(`"${text}" is not a number`)
+      return n
+    }
+    case 'boolean':
+      return text === 'true'
+    case 'date': {
+      const d = new Date(text)
+      if (Number.isNaN(d.getTime()))
+        throw new Error(`"${text}" is not a valid date`)
+      return d
+    }
+    case 'json':
+    default: {
+      const trimmed = text.trim()
+      if (trimmed === 'undefined') return undefined
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(trimmed)
+      } catch (e) {
+        throw new Error(
+          `Invalid JSON: ${(e as Error).message}`,
+        )
+      }
+      return reviveEdited(parsed)
+    }
+  }
+}
+
+/** Apply a live prop override via React's renderer internals. */
+function overrideProp(
+  id: string,
+  path: Array<string | number>,
+  payload: SetPropPayload,
+): { ok: boolean; error?: string } {
+  const fiber = fibersById.get(id)
+  if (!fiber) return { ok: false, error: 'Component instance not found' }
+  if (!reactRenderer || typeof reactRenderer.overrideProps !== 'function') {
+    return {
+      ok: false,
+      error:
+        'Live editing unavailable (production React build or unsupported version)',
+    }
+  }
+  let value: unknown
+  try {
+    value = decodeValue(payload)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  // Snapshot the pre-edit value (once) so the edit is resettable.
+  rememberOriginal(id, path)
+  try {
+    reactRenderer.overrideProps(fiber, path, value)
+    logDebug('overrideProp', { id, path, value })
+    // Synchronously reflect the edit in the registry + serialized props so a
+    // story saved right after an edit uses the NEW value. The lazy
+    // commit-driven serialization (gated by isTrackingActive) is not
+    // guaranteed to have run yet — and an explicit user edit is exactly when
+    // we *want* to serialize regardless of that gate.
+    const inst = componentRegistry.get(id)
+    if (inst) {
+      inst.props = setAtPath(inst.props, path, value)
+      inst.serializedProps = serializeProps(inst.props)
+      dispatch('component-highlighter:update-props', {
+        id,
+        props: inst.props,
+        serializedProps: inst.serializedProps,
+      })
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** Revert a previously-edited prop to its original (pre-edit) value. */
+function resetProp(
+  id: string,
+  path: Array<string | number>,
+): { ok: boolean; error?: string } {
+  const fiber = fibersById.get(id)
+  if (!fiber) return { ok: false, error: 'Component instance not found' }
+  if (!reactRenderer || typeof reactRenderer.overrideProps !== 'function') {
+    return { ok: false, error: 'Live editing unavailable' }
+  }
+  const perInstance = originalProps.get(id)
+  const pathKey = JSON.stringify(path)
+  if (!perInstance || !perInstance.has(pathKey)) {
+    return { ok: false, error: 'No original value to reset to' }
+  }
+  const original = perInstance.get(pathKey)
+  try {
+    reactRenderer.overrideProps(fiber, path, original)
+    const inst = componentRegistry.get(id)
+    if (inst) {
+      inst.props = setAtPath(inst.props, path, original)
+      inst.serializedProps = serializeProps(inst.props)
+      dispatch('component-highlighter:update-props', {
+        id,
+        props: inst.props,
+        serializedProps: inst.serializedProps,
+      })
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  const w = window as unknown as {
+    __componentHighlighterSetProp?: (
+      id: string,
+      path: Array<string | number>,
+      payload: SetPropPayload,
+    ) => { ok: boolean; error?: string }
+    __componentHighlighterResetProp?: (
+      id: string,
+      path: Array<string | number>,
+    ) => { ok: boolean; error?: string }
+    __componentHighlighterGetEditedProps?: (id: string) => string[]
+    __componentHighlighterCanEditProps?: () => boolean
+  }
+  w.__componentHighlighterSetProp = overrideProp
+  w.__componentHighlighterResetProp = resetProp
+  w.__componentHighlighterGetEditedProps = getEditedProps
+  w.__componentHighlighterCanEditProps = () =>
+    !!reactRenderer && typeof reactRenderer.overrideProps === 'function'
 }
 
 if (typeof window !== 'undefined') {

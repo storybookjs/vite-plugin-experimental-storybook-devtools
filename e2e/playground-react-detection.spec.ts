@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
+import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -158,3 +159,4 @@ test.describe('React playground detection coverage', () => {
 
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
+registerLivePropEditSuite(test as any)
