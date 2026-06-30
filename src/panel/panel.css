@@ -886,6 +886,34 @@ html, body, #app {
   display: flex;
   gap: 6px;
 }
+/* Apply/Cancel — match the in-page tooltip editor (filled primary + bordered
+   ghost) instead of the 28px square icon `.act-btn`. */
+.hl-prop-edit-save,
+.hl-prop-edit-cancel {
+  font-size: var(--sb-font-size-s1);
+  line-height: 1.2;
+  padding: 4px 10px;
+  border-radius: var(--sb-input-border-radius, 4px);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.hl-prop-edit-save {
+  background: var(--sb-color-secondary);
+  color: #fff;
+}
+.hl-prop-edit-save:hover {
+  background: color-mix(in srgb, var(--sb-color-secondary) 88%, #000);
+}
+.hl-prop-edit-cancel {
+  background: transparent;
+  color: var(--sb-fgcolor-muted);
+  border-color: var(--sb-color-border);
+}
+.hl-prop-edit-cancel:hover {
+  background: var(--sb-bgcolor-hover);
+  color: var(--sb-fgcolor-default);
+}
 .hl-prop-edit-error {
   color: var(--sb-color-negative, #d9304f);
   font-size: var(--sb-font-size-s1);

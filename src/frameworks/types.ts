@@ -85,6 +85,26 @@ export interface HighlighterOptions {
 }
 
 /**
+ * A non-fatal instrumentation issue surfaced by a transform — reported to the
+ * plugin (via {@link TransformOptions.onIssue}) so it can raise a structured
+ * DevTools diagnostic. Distinct from a hard failure: the file is still served,
+ * the component just isn't (fully) detectable.
+ */
+export interface TransformIssue {
+  /** `transform-failed`: the file couldn't be parsed/instrumented at all.
+   *  `unsupported-pattern`: a component-shaped binding can't be tagged. */
+  code: 'transform-failed' | 'unsupported-pattern'
+  /** Absolute path of the offending module. */
+  file: string
+  /** Human-readable detail (used as the diagnostic message). */
+  detail: string
+  /** For `unsupported-pattern`: the binding name (or `'default'`). */
+  name?: string
+  /** `file:line:column` of the offending source, when known. */
+  loc?: string
+}
+
+/**
  * Options passed to a framework transform per file.
  */
 export interface TransformOptions {
@@ -98,6 +118,12 @@ export interface TransformOptions {
    * directive but every component runs on the client.
    */
   rsc?: boolean
+  /**
+   * Reporter for non-fatal instrumentation issues (unsupported patterns, parse
+   * failures). The plugin forwards these to `ctx.diagnostics`. Optional so the
+   * transform stays usable standalone (e.g. in unit tests).
+   */
+  onIssue?: (issue: TransformIssue) => void
 }
 
 /**

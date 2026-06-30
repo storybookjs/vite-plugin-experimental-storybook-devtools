@@ -85,6 +85,14 @@ changes nothing.
 
 ## ❌ Unsupported (documented limitations)
 
+The two most common cases below — **anonymous default exports** and
+**custom-HOC bindings** — are also surfaced at dev time as structured DevTools
+diagnostics (`CH_UNSUPPORTED_PATTERN`, via `ctx.diagnostics`) with the source
+`file:line:column`, so contributors see them in context instead of only here.
+Parse failures surface as `CH_TRANSFORM_FAILED`. Detection lives in
+`src/frameworks/react/transform.ts` (reported through `TransformOptions.onIssue`)
+and is wired to the diagnostics host in `create-component-highlighter-plugin.ts`.
+
 | Pattern | Why | Workaround |
 |---|---|---|
 | Anonymous default export — `export default () => {}` / `export default function(){}` | No stable binding name to tag. | Name it: `function Foo(){}; export default Foo`. (`patterns/AnonWidget.tsx`) |

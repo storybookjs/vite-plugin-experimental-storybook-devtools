@@ -2,7 +2,15 @@
 import type { Plugin, ViteDevServer } from 'vite'
 import { createFilter } from 'vite'
 import type { FrameworkConfig, SerializedProps } from './frameworks'
-import { defineRpcFunction, defineCommand } from '@vitejs/devtools-kit'
+import {
+  defineRpcFunction,
+  defineCommand,
+  defineDockEntry,
+} from '@vitejs/devtools-kit'
+import type {
+  DevToolsViewAction,
+  DevToolsViewIframe,
+} from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
@@ -17,9 +25,9 @@ import { computeCoverage } from './coverage-dashboard'
 import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
 export type { SerializedRegistryInstance, RegistryDiff }
 
-// RPC function type declarations
+// RPC function type declarations (kit-documented augmentation surface).
 declare module '@vitejs/devtools-kit' {
-  interface DevToolsRpcFunctions {
+  interface DevToolsRpcServerFunctions {
     'component-highlighter:highlight-target': (
       data: ComponentHighlightData | null,
     ) => void
@@ -305,6 +313,26 @@ export function createComponentHighlighterPlugin(
   let cspNonce: string | undefined
   let server: ViteDevServer | undefined
   let notifications: NotificationService = new ConsoleNotificationService()
+  // Structured diagnostics (DevTools `ctx.diagnostics`), wired in
+  // `devtools.setup`. Handles surface non-fatal instrumentation issues —
+  // parse failures and unsupported authoring patterns — to the DevTools UI.
+  type ChDiagnostics = {
+    CH_TRANSFORM_FAILED: (p: {
+      file: string
+      detail: string
+      sources?: string[]
+    }) => unknown
+    CH_UNSUPPORTED_PATTERN: (p: {
+      name: string
+      file: string
+      detail: string
+      sources?: string[]
+    }) => unknown
+  }
+  let chDiagnostics: ChDiagnostics | null = null
+  // Diagnostics dedupe — a file re-transforms on every HMR edit; emit each
+  // distinct issue once so the UI isn't spammed.
+  const reportedDiagnostics = new Set<string>()
   // Track transformed components for coverage dashboard: componentName → filePath
   const transformedComponents = new Map<string, string>()
   let coverageCwd = ''
@@ -691,40 +719,83 @@ export function createComponentHighlighterPlugin(
     },
     devtools: {
       setup(ctx) {
-        // Upgrade to DevTools notifications when the Logs API is available
-        if (ctx.logs) {
-          notifications = new DevToolsNotificationService(ctx.logs)
+        // Upgrade to DevTools notifications when the Messages API is available
+        // (devtools-kit 0.3 renamed the `logs` host to `messages`).
+        if (ctx.messages) {
+          notifications = new DevToolsNotificationService(ctx.messages)
         }
+
+        // Structured diagnostics: a coded catalog of the plugin's non-fatal
+        // detection gaps, surfaced through the DevTools diagnostics host instead
+        // of bare console warnings. Emitted from the transform hook.
+        if (ctx.diagnostics) {
+          const diagnostics = ctx.diagnostics.defineDiagnostics({
+            // Function form returns a clean URL for every code (the string form
+            // would append the lowercased code as a path segment).
+            docsBase: () =>
+              'https://github.com/yannbf/vite-plugin-experimental-storybook-devtools/blob/main/docs/REACT_PATTERNS.md',
+            codes: {
+              CH_TRANSFORM_FAILED: {
+                why: (p: { file: string; detail: string }) =>
+                  `Failed to instrument ${p.file} for component detection: ${p.detail}`,
+                fix: 'The file was served unmodified, so its components have no stories/highlights. Check that it parses as valid TS/JSX.',
+              },
+              CH_UNSUPPORTED_PATTERN: {
+                why: (p: { name: string; detail: string }) =>
+                  `Component "${p.name}" can’t be detected: ${p.detail}`,
+                fix: 'See the supported authoring-pattern matrix for the recommended form.',
+              },
+            },
+          })
+          ctx.diagnostics.register(diagnostics)
+          chDiagnostics = diagnostics as ChDiagnostics
+        }
+
+        // The kit's `defineRpcFunction` types its definitions with
+        // `ViteDevToolsNodeContext`, whereas `ctx.rpc.register` is typed for the
+        // base `DevframeNodeContext` — and the definition's optional props trip
+        // `exactOptionalPropertyTypes`. Both are type-only mismatches (the
+        // shapes are runtime-identical), so centralize the single cast here
+        // rather than scattering `as` across every register call site.
+        const registerRpc = (def: unknown) =>
+          ctx.rpc.register(
+            def as Parameters<typeof ctx.rpc.register>[0],
+          )
 
         // Store terminals reference for use by middleware
         devtoolsTerminals = ctx.terminals
 
         // Register dock entry for component highlighter UI
-        ctx.docks.register({
-          id: devtoolsDockId,
-          title: 'Component Highlighter',
-          icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>",
-          type: 'action',
-          action: {
-            importFrom:
-              'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
-            importName: 'default',
-          },
-        })
+        ctx.docks.register(
+          defineDockEntry<DevToolsViewAction>({
+            id: devtoolsDockId,
+            title: 'Component Highlighter',
+            icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>",
+            type: 'action',
+            action: {
+              importFrom:
+                'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
+              importName: 'default',
+            },
+          }),
+        )
 
         // Merged Storybook + Coverage panel (iframe dock served via hostStatic)
         if (ctx.mode === 'dev') {
           const panelDist = path.join(packageRoot, 'dist', 'panel')
           ctx.views.hostStatic('/.storybook-devtools/', panelDist)
 
-          ctx.docks.register({
-            id: 'storybook-devtools-panel',
-            title: 'Storybook',
-            icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><g transform='translate(1.49,0)'><path d='M0.424547 12.6139L0.000492865 1.31474C-0.013512 0.941579 0.272618 0.625325 0.645319 0.602032L10.256 0.00136365C10.6354 -0.0223467 10.9621 0.265968 10.9858 0.645333C10.9867 0.659626 10.9872 0.673944 10.9872 0.688265V13.0006C10.9872 13.3808 10.679 13.6889 10.2989 13.6889C10.2886 13.6889 10.2783 13.6887 10.2681 13.6882L1.08142 13.2756C0.723641 13.2595 0.437978 12.9717 0.424547 12.6139Z' fill='%23FF4785'/></g><g transform='translate(4.32,0.05)'><path d='M2.8709 2.41309C4.66253 2.41309 5.64141 3.37189 5.64141 5.19531C5.39918 5.38328 3.59731 5.51136 3.59551 5.24414C3.63363 4.2224 3.17581 4.17676 2.92168 4.17676C2.6802 4.17684 2.27422 4.25082 2.27422 4.79785C2.27474 6.1477 5.75567 6.07536 5.75567 8.7998C5.75543 10.3321 4.50986 11.1787 2.92168 11.1787C1.28271 11.1786 -0.149264 10.5148 0.0125021 8.21582C0.0781737 7.94653 2.15713 8.01044 2.15996 8.21582C2.13456 9.16434 2.35021 9.4442 2.89629 9.44434C3.31561 9.44434 3.50664 9.21248 3.50664 8.82324C3.50588 7.43713 0.0764084 7.38812 0.0759787 4.84668C0.0759787 3.38715 1.07952 2.41323 2.8709 2.41309ZM6.72637 1.58008C6.72811 1.63655 6.68328 1.68357 6.62676 1.68555C6.60253 1.68637 6.57842 1.67907 6.55938 1.66406L6.05059 1.2627L5.44805 1.71973C5.40288 1.75399 5.33876 1.74536 5.30449 1.7002C5.29007 1.68118 5.28299 1.65764 5.28399 1.63379L5.34844 0.0830078L6.67071 0L6.72637 1.58008Z' fill='white'/></g></svg>",
-            type: 'iframe',
-            url:
-              '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
-          })
+          ctx.docks.register(
+            defineDockEntry<DevToolsViewIframe>({
+              id: 'storybook-devtools-panel',
+              title: 'Storybook',
+              icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><g transform='translate(1.49,0)'><path d='M0.424547 12.6139L0.000492865 1.31474C-0.013512 0.941579 0.272618 0.625325 0.645319 0.602032L10.256 0.00136365C10.6354 -0.0223467 10.9621 0.265968 10.9858 0.645333C10.9867 0.659626 10.9872 0.673944 10.9872 0.688265V13.0006C10.9872 13.3808 10.679 13.6889 10.2989 13.6889C10.2886 13.6889 10.2783 13.6887 10.2681 13.6882L1.08142 13.2756C0.723641 13.2595 0.437978 12.9717 0.424547 12.6139Z' fill='%23FF4785'/></g><g transform='translate(4.32,0.05)'><path d='M2.8709 2.41309C4.66253 2.41309 5.64141 3.37189 5.64141 5.19531C5.39918 5.38328 3.59731 5.51136 3.59551 5.24414C3.63363 4.2224 3.17581 4.17676 2.92168 4.17676C2.6802 4.17684 2.27422 4.25082 2.27422 4.79785C2.27474 6.1477 5.75567 6.07536 5.75567 8.7998C5.75543 10.3321 4.50986 11.1787 2.92168 11.1787C1.28271 11.1786 -0.149264 10.5148 0.0125021 8.21582C0.0781737 7.94653 2.15713 8.01044 2.15996 8.21582C2.13456 9.16434 2.35021 9.4442 2.89629 9.44434C3.31561 9.44434 3.50664 9.21248 3.50664 8.82324C3.50588 7.43713 0.0764084 7.38812 0.0759787 4.84668C0.0759787 3.38715 1.07952 2.41323 2.8709 2.41309ZM6.72637 1.58008C6.72811 1.63655 6.68328 1.68357 6.62676 1.68555C6.60253 1.68637 6.57842 1.67907 6.55938 1.66406L6.05059 1.2627L5.44805 1.71973C5.40288 1.75399 5.33876 1.74536 5.30449 1.7002C5.29007 1.68118 5.28299 1.65764 5.28399 1.63379L5.34844 0.0830078L6.67071 0L6.72637 1.58008Z' fill='white'/></g></svg>",
+              type: 'iframe',
+              url:
+                '/.storybook-devtools/?sbUrl=' +
+                encodeURIComponent(storybookUrl),
+            }),
+          )
         }
 
         // ─── Shared state initialization ─────────────────────────────────
@@ -772,7 +843,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Register RPC functions for communication with the client
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:highlight-target',
             type: 'action',
@@ -784,7 +855,7 @@ export function createComponentHighlighterPlugin(
           }),
         )
 
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:toggle-overlay',
             type: 'action',
@@ -796,7 +867,7 @@ export function createComponentHighlighterPlugin(
           }),
         )
 
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:create-story',
             type: 'action',
@@ -989,7 +1060,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Coverage dashboard — RPC to fetch coverage data
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:get-coverage',
             type: 'query',
@@ -1009,7 +1080,7 @@ export function createComponentHighlighterPlugin(
         // ─── Registry sync & panel→client relay RPCs ───────────────────
 
         // Client pushes incremental diffs; server applies them to shared state
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:push-registry-diff',
             type: 'action',
@@ -1052,7 +1123,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: scroll to a component
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:scroll-to-component',
             type: 'action',
@@ -1068,7 +1139,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: apply a live prop override
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:set-prop',
             type: 'action',
@@ -1088,7 +1159,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: reset a prop to its original value
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:reset-prop',
             type: 'action',
@@ -1107,7 +1178,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: highlight coverage instances on the app page
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:highlight-coverage-instances',
             type: 'action',
@@ -1125,7 +1196,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: batch highlight coverage instances (Preview button)
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:highlight-coverage-batch',
             type: 'action',
@@ -1143,7 +1214,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Panel → server → client: toggle highlight mode
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:set-highlight-mode',
             type: 'action',
@@ -1161,7 +1232,7 @@ export function createComponentHighlighterPlugin(
         // Client/overlay → server → panel: navigate to a story
         // Stores as pending visit AND broadcasts so the panel can pick it up
         // either via client RPC handler or by polling the pending-visit endpoint
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:visit-story',
             type: 'action',
@@ -1183,7 +1254,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Client/overlay → server → panel: select a component in the highlighter panel
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:select-component',
             type: 'action',
@@ -1199,7 +1270,7 @@ export function createComponentHighlighterPlugin(
         )
 
         // Client → server: show a toast notification
-        ctx.rpc.register(
+        registerRpc(
           defineRpcFunction({
             name: 'component-highlighter:notify',
             type: 'action',
@@ -1500,7 +1571,31 @@ export function createComponentHighlighterPlugin(
 
       // NB: the `options` param of this hook is Vite's transform options
       // (it shadows the plugin's options) — use the destructured `rsc`.
-      const result = framework.transform(code, id, { rsc })
+      const result = framework.transform(code, id, {
+        rsc,
+        onIssue: (issue) => {
+          if (!chDiagnostics) return
+          // Dedupe per (file, code, name) — files re-transform on every edit.
+          const key = `${issue.code}:${issue.file}:${issue.name ?? ''}`
+          if (reportedDiagnostics.has(key)) return
+          reportedDiagnostics.add(key)
+          const sources = issue.loc ? [issue.loc] : undefined
+          if (issue.code === 'transform-failed') {
+            chDiagnostics.CH_TRANSFORM_FAILED({
+              file: issue.file,
+              detail: issue.detail,
+              ...(sources ? { sources } : {}),
+            })
+          } else {
+            chDiagnostics.CH_UNSUPPORTED_PATTERN({
+              name: issue.name ?? 'component',
+              file: issue.file,
+              detail: issue.detail,
+              ...(sources ? { sources } : {}),
+            })
+          }
+        },
+      })
 
       // Track transformed components for coverage
       if (result) {

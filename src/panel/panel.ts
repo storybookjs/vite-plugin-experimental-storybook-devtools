@@ -1463,8 +1463,8 @@ async function buildHighlighterPanel() {
             input: 'hl-prop-input',
             textarea: 'hl-prop-input hl-prop-textarea',
             actions: 'hl-prop-edit-actions',
-            save: 'act-btn create',
-            cancel: 'act-btn',
+            save: 'hl-prop-edit-save',
+            cancel: 'hl-prop-edit-cancel',
             error: 'hl-prop-edit-error',
           },
           // Panel: route the edit through RPC (relayed to the client's

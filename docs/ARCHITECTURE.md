@@ -78,8 +78,8 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving |
-| `src/frameworks/<fw>/transform.ts` | Build-time metadata tagging (React: non-wrapping `__chRegisterMeta`) |
+| `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving. Registers docks via `defineDockEntry`; registers a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/frameworks/<fw>/transform.ts` | Build-time metadata tagging (React: non-wrapping `__chRegisterMeta`). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
 | `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook) |
 | `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer) |

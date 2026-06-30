@@ -490,4 +490,84 @@ export function NotADirective() {
       expect(result).toBeUndefined()
     })
   })
+
+  describe('diagnostics (onIssue reporting)', () => {
+    type Issue = {
+      code: string
+      file: string
+      name?: string
+      detail: string
+      loc?: string
+    }
+    const collect = (code: string, id: string) => {
+      const issues: Issue[] = []
+      const result = transform(code, id, { onIssue: (i) => issues.push(i) })
+      return { issues, result }
+    }
+
+    it('reports an anonymous default export as unsupported', () => {
+      const { issues } = collect(
+        `import React from 'react'\nexport default () => <div>hi</div>\n`,
+        '/src/AnonWidget.tsx',
+      )
+      const issue = issues.find((i) => i.name === 'default')
+      expect(issue).toBeDefined()
+      expect(issue?.code).toBe('unsupported-pattern')
+      expect(issue?.file).toBe('/src/AnonWidget.tsx')
+      expect(issue?.loc).toMatch(/AnonWidget\.tsx:\d+:\d+$/)
+    })
+
+    it('reports an exported PascalCase custom-HOC binding as unsupported', () => {
+      const { issues } = collect(
+        `import React from 'react'
+function Base() { return <div /> }
+export const Framed = withFrame(Base)
+`,
+        '/src/FramedNote.tsx',
+      )
+      const issue = issues.find((i) => i.name === 'Framed')
+      expect(issue).toBeDefined()
+      expect(issue?.code).toBe('unsupported-pattern')
+    })
+
+    it('reports a parse failure as transform-failed (and does not throw)', () => {
+      const { issues, result } = collect(
+        `import React from 'react'\nexport default function ( {\n`,
+        '/src/Broken.tsx',
+      )
+      expect(result).toBeUndefined()
+      const issue = issues.find((i) => i.code === 'transform-failed')
+      expect(issue).toBeDefined()
+      expect(issue?.file).toBe('/src/Broken.tsx')
+    })
+
+    it('does NOT flag a PascalCase factory export in a non-JSX module', () => {
+      // No JSX → not a component module → no unsupported-pattern noise.
+      const { issues } = collect(
+        `export const Store = createStore()\n`,
+        '/src/store.ts',
+      )
+      expect(issues).toHaveLength(0)
+    })
+
+    it('reports nothing for a normal named component', () => {
+      const { issues } = collect(
+        `import React from 'react'\nexport function Button() { return <button /> }\n`,
+        '/src/Button.tsx',
+      )
+      expect(issues).toHaveLength(0)
+    })
+
+    it('does not flag a non-exported local component (intentional limitation)', () => {
+      // `Base` is local; only the HOC binding `Framed` (exported) is flagged.
+      const { issues } = collect(
+        `import React from 'react'
+function Base() { return <div /> }
+export const Framed = withFrame(Base)
+`,
+        '/src/FramedNote.tsx',
+      )
+      expect(issues.find((i) => i.name === 'Base')).toBeUndefined()
+    })
+  })
 })
