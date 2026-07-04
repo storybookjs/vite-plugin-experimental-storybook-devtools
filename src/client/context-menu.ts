@@ -6,7 +6,14 @@
  */
 import type { ComponentInstance } from '../frameworks/types'
 import { UI_MARKER, isCurrentlyRecording } from './interaction-recorder'
-import { esc, classifyProp, renderObjectTree } from './utils/prop-utils'
+import {
+  esc,
+  classifyProp,
+  renderObjectTree,
+  propEditability,
+  type SetPropPayload,
+} from './utils/prop-utils'
+import { createPropEditor } from './utils/prop-editor'
 import { buildLLMPrompt } from './utils/html-preview'
 import { toBreadcrumbs, suggestStoryName } from './utils/format-utils'
 
@@ -323,6 +330,114 @@ const STYLES = /* css */ `
   }
   .prop-copy-btn.copied {
     color: var(--sb-fgcolor-positive);
+  }
+  .prop-edit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .prop-val:hover .prop-edit-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .prop-edit-btn:hover {
+    background: var(--sb-bgcolor-hover);
+    color: var(--sb-color-secondary, var(--sb-fgcolor-default));
+  }
+  .prop-reset-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--sb-border-radius);
+    color: var(--sb-fgcolor-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .prop-val:hover .prop-reset-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .prop-reset-btn:hover {
+    background: var(--sb-bgcolor-hover);
+    color: var(--sb-color-warning, var(--sb-fgcolor-default));
+  }
+  .prop-edit-form {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .prop-edit-input,
+  .prop-edit-textarea {
+    flex: 1 1 auto;
+    min-width: 90px;
+    font-family: var(--sb-font-mono);
+    font-size: 11px;
+    padding: 3px 6px;
+    background: var(--sb-input-background, var(--sb-bgcolor-default));
+    color: var(--sb-input-color, var(--sb-fgcolor-default));
+    border: 1px solid var(--sb-input-border, var(--sb-color-border));
+    border-radius: var(--sb-input-border-radius, 4px);
+    outline: none;
+  }
+  .prop-edit-textarea {
+    min-height: 60px;
+    resize: vertical;
+    white-space: pre;
+  }
+  .prop-edit-input:focus,
+  .prop-edit-textarea:focus {
+    border-color: var(--sb-color-secondary, #029cfd);
+  }
+  .prop-edit-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .prop-edit-save,
+  .prop-edit-cancel {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .prop-edit-save {
+    background: var(--sb-color-secondary, #029cfd);
+    color: #fff;
+  }
+  .prop-edit-cancel {
+    background: transparent;
+    color: var(--sb-fgcolor-muted);
+    border-color: var(--sb-color-border);
+  }
+  .prop-edit-error {
+    flex: 1 0 100%;
+    color: var(--sb-fgcolor-negative, #d9304f);
+    font-size: 10px;
+  }
+  .badge.prop-edited {
+    outline: 1px dashed var(--sb-color-secondary, #029cfd);
   }
 
   /* ── Value badge (the colored chip) ──── */
@@ -912,6 +1027,8 @@ export function createContextMenu(
 
   const COPY_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`
   const CHECK_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`
+  const PENCIL_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`
+  const RESET_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`
 
   for (const [key, value] of propEntries) {
     const displayKey = key.startsWith('slot:') ? key.slice(5) : key
@@ -946,8 +1063,10 @@ export function createContextMenu(
     valCell.appendChild(badge)
 
     // Per-prop copy button (visible on hover)
+    let propCopyBtnRef: HTMLButtonElement | null = null
     if (info.raw != null) {
       const propCopyBtn = document.createElement('button')
+      propCopyBtnRef = propCopyBtn
       propCopyBtn.className = 'prop-copy-btn'
       propCopyBtn.innerHTML = COPY_ICON_SVG
       propCopyBtn.title = 'Copy value'
@@ -969,6 +1088,151 @@ export function createContextMenu(
         })
       })
       valCell.appendChild(propCopyBtn)
+    }
+
+    // ── Live value accessors ──
+    // The captured `value` goes stale after an edit (the menu DOM isn't
+    // rebuilt). Read the freshest serialized value + edited-state from the
+    // live registry so re-opening the editor seeds the *current* value and the
+    // reset button reflects reality.
+    const readLiveValue = (): unknown => {
+      const reg = (
+        window as unknown as {
+          __componentHighlighterRegistry?: Map<
+            string,
+            { serializedProps?: Record<string, unknown> }
+          >
+        }
+      ).__componentHighlighterRegistry
+      const sp = reg?.get(instance.id)?.serializedProps
+      return sp && key in sp ? sp[key] : value
+    }
+    const isEdited = (): boolean =>
+      (
+        (
+          window as unknown as {
+            __componentHighlighterGetEditedProps?: (id: string) => string[]
+          }
+        ).__componentHighlighterGetEditedProps?.(instance.id) ?? []
+      ).includes(key)
+    const refreshBadge = () => {
+      const i = classifyProp(key, readLiveValue())
+      badge.textContent = i.display
+      badge.title = i.display.length > 18 ? i.display : ''
+      badge.classList.toggle('prop-edited', isEdited())
+    }
+
+    // ── Inline live editor (React: drives renderer.overrideProps) ──
+    const canEdit =
+      (
+        window as unknown as {
+          __componentHighlighterCanEditProps?: () => boolean
+        }
+      ).__componentHighlighterCanEditProps?.() ?? false
+    const editability = propEditability(value)
+
+    if (canEdit && editability.editable && !recording) {
+      // Reset-to-original button — visible on hover, only when the prop
+      // currently differs from its original value.
+      const resetBtn = document.createElement('button')
+      resetBtn.className = 'prop-reset-btn'
+      resetBtn.innerHTML = RESET_ICON_SVG
+      resetBtn.title = `Reset ${displayKey} to original`
+      const refreshReset = () => {
+        resetBtn.style.display = isEdited() ? '' : 'none'
+      }
+      resetBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        const reset = (
+          window as unknown as {
+            __componentHighlighterResetProp?: (
+              id: string,
+              path: Array<string | number>,
+            ) => { ok: boolean; error?: string }
+          }
+        ).__componentHighlighterResetProp
+        const res = reset?.(instance.id, [key]) ?? { ok: false }
+        if (res.ok) {
+          refreshBadge()
+          refreshReset()
+        }
+      })
+      valCell.appendChild(resetBtn)
+
+      const editBtn = document.createElement('button')
+      editBtn.className = 'prop-edit-btn'
+      editBtn.innerHTML = PENCIL_ICON_SVG
+      editBtn.title = `Edit ${displayKey} live`
+
+      const openEditor = () => {
+        badge.style.display = 'none'
+        if (propCopyBtnRef) propCopyBtnRef.style.display = 'none'
+        editBtn.style.display = 'none'
+        resetBtn.style.display = 'none'
+
+        // Seed from the CURRENT value, not the value captured at menu build.
+        const current = readLiveValue()
+        const currentKind = propEditability(current).kind
+
+        let form: HTMLElement
+        const closeEditor = () => {
+          form?.remove()
+          badge.style.display = ''
+          if (propCopyBtnRef) propCopyBtnRef.style.display = ''
+          editBtn.style.display = ''
+          refreshReset()
+        }
+
+        form = createPropEditor({
+          parent: valCell,
+          value: current,
+          kind: currentKind,
+          classes: {
+            form: 'prop-edit-form',
+            input: 'prop-edit-input',
+            textarea: 'prop-edit-textarea',
+            actions: 'prop-edit-actions',
+            save: 'prop-edit-save',
+            cancel: 'prop-edit-cancel',
+            error: 'prop-edit-error',
+          },
+          // In-page: drive React's renderer.overrideProps synchronously.
+          onApply: (payload) => {
+            const setProp = (
+              window as unknown as {
+                __componentHighlighterSetProp?: (
+                  id: string,
+                  path: Array<string | number>,
+                  p: SetPropPayload,
+                ) => { ok: boolean; error?: string }
+              }
+            ).__componentHighlighterSetProp
+            return (
+              setProp?.(instance.id, [key], payload) ?? {
+                ok: false,
+                error: 'Editor unavailable',
+              }
+            )
+          },
+          onApplied: () => {
+            // Live app is the source of truth — re-read it for the badge.
+            refreshBadge()
+            closeEditor()
+          },
+          onCancel: closeEditor,
+        })
+      }
+
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        openEditor()
+      })
+      valCell.appendChild(editBtn)
+
+      // Initial badge/reset state (the prop may already be edited from a prior
+      // interaction before this menu was (re)built).
+      refreshBadge()
+      refreshReset()
     }
 
     propsTable.appendChild(keyCell)

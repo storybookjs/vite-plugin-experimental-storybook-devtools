@@ -69,11 +69,12 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
     )
 
     try {
-      // Pass serialized props and component registry to the server
+      // Pass serialized props and component registry to the server. Raw props
+      // are intentionally NOT sent — they hold unclonable live values and the
+      // server generates stories from serializedProps only.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (ctx.rpc.call as any)('component-highlighter:create-story', {
         meta: data.meta,
-        props: data.props,
         serializedProps: data.serializedProps,
         componentRegistry: data.componentRegistry,
         storyName: data.storyName,

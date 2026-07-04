@@ -1,4 +1,13 @@
 declare module 'virtual:component-highlighter/runtime-helpers' {
+  export function isTrackingActive(): boolean
+  export function onTrackingActivated(cb: () => void): void
+  export function activateTracking(): void
+  export function scheduleSerialization(
+    id: string,
+    run: () => void,
+    isAlive: () => boolean,
+  ): void
+  export function cancelScheduledSerialization(id: string): void
   export function findFirstTrackableElement(root: Node | null): Element | null
   export function attachRectObservers(
     getInstance: (

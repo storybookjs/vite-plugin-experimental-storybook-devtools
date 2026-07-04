@@ -1,8 +1,16 @@
 /**
  * React Transform
  *
- * Babel-based AST transformation that instruments React components
- * with the withComponentHighlighter HOC.
+ * Non-intrusive instrumentation. Instead of wrapping components in an HOC
+ * (which pollutes the fiber/DOM tree and forces every component into a client
+ * boundary — breaking RSC), this only appends a single idempotent metadata
+ * tag per exported component:
+ *
+ *   __chRegisterMeta(Button, { componentName, filePath, ... })
+ *
+ * The tag attaches a non-enumerable symbol to the component function. The
+ * runtime reads it off the live fiber tree via the React DevTools global hook.
+ * The rendered tree is left completely untouched.
  */
 
 // @ts-nocheck
@@ -11,35 +19,88 @@ import traverseModule from '@babel/traverse'
 import generatorModule from '@babel/generator'
 import * as t from '@babel/types'
 import * as path from 'path'
-import type { TransformFunction } from '../types'
+import type { TransformFunction, TransformOptions } from '../types'
 
 const traverse = (traverseModule as any).default ?? traverseModule
 const generate = (generatorModule as any).default ?? generatorModule
 
-/**
- * Simple hash function for generating source IDs
- */
 function createHash(data: string): string {
   let hash = 0
   for (let i = 0; i < data.length; i++) {
     const char = data.charCodeAt(i)
     hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32-bit integer
+    hash = hash & hash
   }
   return Math.abs(hash).toString(36)
 }
 
-/**
- * Virtual module ID for React runtime
- */
+/** Virtual module ID for React runtime */
 export const VIRTUAL_MODULE_ID = 'virtual:component-highlighter/runtime'
 
+const TAG_FN = '__chRegisterMeta'
+
 /**
- * Transform React JSX/TSX files to wrap components with the highlighter HOC
+ * Detect a module-level `"use client"` directive (the RSC client-boundary
+ * marker). Babel collects leading directive prologues into
+ * `program.directives`, so we read it from there rather than scanning text —
+ * this naturally handles either quote style and ignores `"use client"`
+ * strings that appear deeper in the module.
  */
-export const transform: TransformFunction = (code: string, id: string): string | undefined => {
+function hasUseClientDirective(ast: t.File): boolean {
+  return (ast.program.directives ?? []).some(
+    (d) => d.value?.value === 'use client',
+  )
+}
+
+function isComponentName(name: string | undefined | null): boolean {
+  return (
+    !!name &&
+    name[0] === name[0].toUpperCase() &&
+    name[0] !== name[0].toLowerCase()
+  )
+}
+
+function isMemoOrForwardRef(node: t.Expression | null | undefined): boolean {
+  if (!node || node.type !== 'CallExpression') return false
+  const callee = node.callee
+  // Bare form: memo(...) / forwardRef(...)
+  if (
+    callee.type === 'Identifier' &&
+    (callee.name === 'memo' || callee.name === 'forwardRef')
+  ) {
+    return true
+  }
+  // Member form: React.memo(...) / React.forwardRef(...)
+  if (
+    callee.type === 'MemberExpression' &&
+    callee.property.type === 'Identifier' &&
+    (callee.property.name === 'memo' || callee.property.name === 'forwardRef')
+  ) {
+    return true
+  }
+  return false
+}
+
+function isComponentInit(node: t.Expression | null | undefined): boolean {
+  if (!node) return false
+  return (
+    node.type === 'ArrowFunctionExpression' ||
+    node.type === 'FunctionExpression' ||
+    isMemoOrForwardRef(node)
+  )
+}
+
+/**
+ * Transform React JSX/TSX files: collect exported component bindings and
+ * append metadata tags. The component declarations themselves are never
+ * modified.
+ */
+export const transform: TransformFunction = (
+  code: string,
+  id: string,
+  options: TransformOptions = {},
+): string | undefined => {
   try {
-    // Parse the file as TypeScript/JSX
     const ast = parse(code, {
       sourceType: 'module',
       plugins: [
@@ -50,22 +111,17 @@ export const transform: TransformFunction = (code: string, id: string): string |
       sourceFilename: id,
     })
 
-    let hasJsx = false
-    let hasReactImport = false
-    const componentsToWrap: Array<{
-      name: string
-      node:
-      | t.VariableDeclarator
-      | t.FunctionDeclaration
-      | t.ExportDefaultDeclaration
-      | t.ExportNamedDeclaration
-      isDefaultExport: boolean
-      isMemo: boolean
-      isForwardRef: boolean
-    }> = []
-    const exportedNames = new Set<string>()
+    // RSC gate: in `rsc` mode, only client components (modules with a
+    // `"use client"` directive) are instrumented. Server components never
+    // mount a client fiber, so tagging them is useless and would pull the
+    // client runtime into the server module graph. In a plain SPA (rsc off)
+    // there is no directive but every component is a client component, so we
+    // tag everything — hence this gate is opt-in.
+    if (options.rsc && !hasUseClientDirective(ast)) {
+      return undefined
+    }
 
-    // Check if file contains JSX and collect component exports
+    let hasJsx = false
     traverse(ast, {
       JSXElement() {
         hasJsx = true
@@ -73,178 +129,130 @@ export const transform: TransformFunction = (code: string, id: string): string |
       JSXFragment() {
         hasJsx = true
       },
-      ImportDeclaration(path) {
-        // Check for React import
+    })
+
+    // Top-level component declarations by name, the set of names that are
+    // exported (inline, via specifier, or as default), and the default name.
+    const topLevelComponents = new Set<string>()
+    const exportedNames = new Set<string>()
+    let defaultExportName: string | null = null
+
+    const considerFunction = (decl: t.FunctionDeclaration) => {
+      const name = decl.id?.name
+      if (name && isComponentName(name)) topLevelComponents.add(name)
+    }
+    const considerVariable = (varDecl: t.VariableDeclaration) => {
+      for (const d of varDecl.declarations) {
         if (
-          path.node.source.value === 'react' ||
-          path.node.source.value === 'React'
+          d.id.type === 'Identifier' &&
+          isComponentName(d.id.name) &&
+          isComponentInit(d.init)
         ) {
-          hasReactImport = true
+          topLevelComponents.add(d.id.name)
         }
-      },
-      ExportDefaultDeclaration(path) {
-        const { declaration } = path.node
+      }
+    }
+    const considerClass = (decl: t.ClassDeclaration) => {
+      const name = decl.id?.name
+      if (name && isComponentName(name)) topLevelComponents.add(name)
+    }
 
-        if (isComponentDeclaration(declaration)) {
-          let name = getDeclarationName(declaration) || 'DefaultExport'
-          let isMemo = false
-          let isForwardRef = false
-
-          // Special handling for default export of identifier (e.g., export default Button)
-          if (declaration.type === 'Identifier') {
-            name = declaration.name
-            // Mark as exported for later collection of the variable declaration
-            exportedNames.add(name)
-            // Don't add the export node to componentsToWrap - the variable will be wrapped instead
-            return
-          } else {
-            isMemo =
-              declaration.type === 'CallExpression' && isMemoWrapper(declaration)
-            isForwardRef =
-              declaration.type === 'CallExpression' &&
-              isForwardRefWrapper(declaration)
-          }
-
-          componentsToWrap.push({
-            name,
-            node: path.node,
-            isDefaultExport: true,
-            isMemo,
-            isForwardRef,
-          })
-        }
-      },
-      ExportNamedDeclaration(path) {
-        // Handle export declarations like "export function Component() {}" or "export const Component = () => {}"
-        if (path.node.declaration) {
-          const { declaration } = path.node
-
-          if (
-            declaration.type === 'FunctionDeclaration' &&
-            isComponentFunction(declaration)
-          ) {
-            const name = declaration.id?.name || 'ExportedFunction'
-            exportedNames.add(name)
-            componentsToWrap.push({
-              name,
-              node: path.node,
-              isDefaultExport: false,
-              isMemo: false,
-              isForwardRef: false,
-            })
-          } else if (declaration.type === 'VariableDeclaration') {
-            declaration.declarations.forEach((decl) => {
-              if (isComponentVariable(decl)) {
-                const name = getVariableName(decl)
-                exportedNames.add(name)
-                const isMemo = isMemoWrapper(decl.init)
-                const isForwardRef = isForwardRefWrapper(decl.init)
-
-                componentsToWrap.push({
-                  name,
-                  node: path.node,
-                  isDefaultExport: false,
-                  isMemo,
-                  isForwardRef,
-                })
-              }
-            })
-          }
-        } else if (path.node.specifiers) {
-          // Handle export specifiers like "export { Component }" or "export { Component as C }"
-          path.node.specifiers.forEach((specifier) => {
-            if (specifier.type === 'ExportSpecifier') {
-              exportedNames.add(specifier.exported.name)
-            }
-          })
-        }
-      },
-    })
-
-    // Second pass: collect top-level component declarations that are exported
-    traverse(ast, {
-      FunctionDeclaration(path) {
-        if (path.parent.type === 'Program' && isComponentFunction(path.node)) {
-          const name = path.node.id?.name
-          if (name && exportedNames.has(name)) {
-            componentsToWrap.push({
-              name,
-              node: path.node,
-              isDefaultExport: false,
-              isMemo: false,
-              isForwardRef: false,
-            })
+    for (const stmt of ast.program.body) {
+      if (stmt.type === 'FunctionDeclaration') {
+        considerFunction(stmt)
+      } else if (stmt.type === 'VariableDeclaration') {
+        considerVariable(stmt)
+      } else if (stmt.type === 'ClassDeclaration') {
+        considerClass(stmt)
+      } else if (stmt.type === 'ExportNamedDeclaration') {
+        if (stmt.declaration?.type === 'FunctionDeclaration') {
+          considerFunction(stmt.declaration)
+          if (stmt.declaration.id) exportedNames.add(stmt.declaration.id.name)
+        } else if (stmt.declaration?.type === 'ClassDeclaration') {
+          considerClass(stmt.declaration)
+          if (stmt.declaration.id) exportedNames.add(stmt.declaration.id.name)
+        } else if (stmt.declaration?.type === 'VariableDeclaration') {
+          considerVariable(stmt.declaration)
+          for (const d of stmt.declaration.declarations) {
+            if (d.id.type === 'Identifier') exportedNames.add(d.id.name)
           }
         }
-      },
-      VariableDeclaration(path) {
-        if (path.parent.type === 'Program') {
-          path.node.declarations.forEach((decl) => {
-            if (isComponentVariable(decl)) {
-              const name = getVariableName(decl)
-              if (exportedNames.has(name)) {
-                const isMemo = isMemoWrapper(decl.init)
-                const isForwardRef = isForwardRefWrapper(decl.init)
-
-                componentsToWrap.push({
-                  name,
-                  node: decl,
-                  isDefaultExport: false,
-                  isMemo,
-                  isForwardRef,
-                })
-              }
-            }
-          })
+        for (const spec of stmt.specifiers ?? []) {
+          if (spec.type === 'ExportSpecifier' && spec.local) {
+            exportedNames.add(spec.local.name)
+          }
         }
-      },
-    })
+      } else if (stmt.type === 'ExportDefaultDeclaration') {
+        const decl = stmt.declaration
+        if (decl.type === 'FunctionDeclaration' && decl.id) {
+          considerFunction(decl)
+          defaultExportName = decl.id.name
+        } else if (decl.type === 'ClassDeclaration' && decl.id) {
+          considerClass(decl)
+          defaultExportName = decl.id.name
+        } else if (decl.type === 'Identifier') {
+          defaultExportName = decl.name
+        }
+        // Anonymous default expressions are skipped: no stable binding to tag.
+      }
+    }
 
-    // Skip if no JSX or no components to wrap
-    if (!hasJsx || componentsToWrap.length === 0) {
+    if (defaultExportName) exportedNames.add(defaultExportName)
+
+    // name -> isDefaultExport
+    const componentBindings = new Map<string, boolean>()
+    for (const name of topLevelComponents) {
+      if (exportedNames.has(name)) {
+        componentBindings.set(name, name === defaultExportName)
+      }
+    }
+
+    if (!hasJsx || componentBindings.size === 0) {
       return undefined
     }
 
-    // Add import for the highlighter
-    if (!hasReactImport) {
-      // Add React import if not present
-      const reactImport = t.importDeclaration(
-        [t.importDefaultSpecifier(t.identifier('React'))],
-        t.stringLiteral('react')
+    const relativeFilePath = path.relative(process.cwd(), id)
+
+    // import { __chRegisterMeta } from 'virtual:...'
+    ast.program.body.unshift(
+      t.importDeclaration(
+        [t.importSpecifier(t.identifier(TAG_FN), t.identifier(TAG_FN))],
+        t.stringLiteral(VIRTUAL_MODULE_ID),
+      ),
+    )
+
+    // Append tag statements at the end so const bindings are initialized.
+    for (const [name, isDefaultExport] of componentBindings) {
+      const sourceId = createHash(id + ':' + name)
+      const meta = t.objectExpression([
+        t.objectProperty(
+          t.identifier('componentName'),
+          t.stringLiteral(name),
+        ),
+        t.objectProperty(t.identifier('filePath'), t.stringLiteral(id)),
+        t.objectProperty(
+          t.identifier('relativeFilePath'),
+          t.stringLiteral(relativeFilePath),
+        ),
+        t.objectProperty(
+          t.identifier('sourceId'),
+          t.stringLiteral(sourceId),
+        ),
+        t.objectProperty(
+          t.identifier('isDefaultExport'),
+          t.booleanLiteral(isDefaultExport),
+        ),
+      ])
+      ast.program.body.push(
+        t.expressionStatement(
+          t.callExpression(t.identifier(TAG_FN), [
+            t.identifier(name),
+            meta,
+          ]),
+        ),
       )
-      ast.program.body.unshift(reactImport)
     }
 
-    // Add highlighter import
-    const highlighterImport = t.importDeclaration(
-      [
-        t.importSpecifier(
-          t.identifier('withComponentHighlighter'),
-          t.identifier('withComponentHighlighter')
-        ),
-      ],
-      t.stringLiteral(VIRTUAL_MODULE_ID)
-    )
-    ast.program.body.unshift(highlighterImport)
-
-    // Transform components
-    const relativeFilePath = path.relative(process.cwd(), id)
-    componentsToWrap.forEach(
-      ({ name, node, isDefaultExport, isMemo, isForwardRef }) => {
-        wrapComponent(
-          ast,
-          node,
-          name,
-          isDefaultExport,
-          isMemo,
-          isForwardRef,
-          id,
-          relativeFilePath
-        )
-      }
-    )
-
-    // Generate transformed code
     const output = generate(ast, {
       sourceMaps: true,
       sourceFileName: id,
@@ -252,281 +260,18 @@ export const transform: TransformFunction = (code: string, id: string): string |
 
     return output.code
   } catch (error) {
-    console.warn(
-      `[component-highlighter] Failed to transform ${id}:`,
-      error
-    )
+    console.warn(`[component-highlighter] Failed to transform ${id}:`, error)
     return undefined
   }
 }
 
-/**
- * Check if a function declaration is a React component (PascalCase name)
- */
-function isComponentFunction(node: t.FunctionDeclaration): boolean {
-  return !!(
-    node.id &&
-    node.id.name[0] === node.id.name[0].toUpperCase() &&
-    node.id.name[0] !== node.id.name[0].toLowerCase()
-  )
-}
-
-/**
- * Check if a variable declarator is a React component
- */
-function isComponentVariable(node: t.VariableDeclarator): boolean {
-  if (!node.id || node.id.type !== 'Identifier') return false
-
-  const name = node.id.name
-  if (name[0] !== name[0].toUpperCase() || name[0] === name[0].toLowerCase())
-    return false
-
-  if (!node.init) return false
-
-  return (
-    node.init.type === 'ArrowFunctionExpression' ||
-    node.init.type === 'FunctionExpression' ||
-    isMemoWrapper(node.init) ||
-    isForwardRefWrapper(node.init)
-  )
-}
-
-/**
- * Check if a declaration is a React component
- */
-function isComponentDeclaration(
-  node: t.Expression | t.Pattern | t.Statement
-): boolean {
-  if (node.type === 'FunctionDeclaration' && isComponentFunction(node))
-    return true
-  if (
-    node.type === 'ArrowFunctionExpression' ||
-    node.type === 'FunctionExpression'
-  )
-    return true
-  if (node.type === 'Identifier')
-    return node.name[0] === node.name[0].toUpperCase()
-  if (node.type === 'CallExpression')
-    return isMemoWrapper(node) || isForwardRefWrapper(node)
-  return false
-}
-
-/**
- * Check if expression is a React.memo() call
- */
-function isMemoWrapper(node: t.Expression | null): boolean {
-  return !!(
-    node &&
-    node.type === 'CallExpression' &&
-    node.callee.type === 'Identifier' &&
-    node.callee.name === 'memo'
-  )
-}
-
-/**
- * Check if expression is a React.forwardRef() call
- */
-function isForwardRefWrapper(node: t.Expression | null): boolean {
-  return !!(
-    node &&
-    node.type === 'CallExpression' &&
-    node.callee.type === 'Identifier' &&
-    node.callee.name === 'forwardRef'
-  )
-}
-
-/**
- * Get the variable name from a declarator
- */
-function getVariableName(node: t.VariableDeclarator): string {
-  return node.id.type === 'Identifier' ? node.id.name : 'AnonymousVariable'
-}
-
-/**
- * Get the name from various declaration types
- */
-function getDeclarationName(
-  node: t.Expression | t.Pattern | t.Statement
-): string | null {
-  if (node.type === 'FunctionDeclaration' && node.id) return node.id.name
-  if (node.type === 'Identifier') return node.name
-  if (node.type === 'CallExpression' && node.callee.type === 'Identifier') {
-    if (node.callee.name === 'memo' || node.callee.name === 'forwardRef') {
-      const arg = node.arguments[0]
-      if (arg.type === 'FunctionDeclaration' && arg.id) return arg.id.name
-      if (arg.type === 'ArrowFunctionExpression') return 'AnonymousWrapped'
-    }
-  }
-  return null
-}
-
-/**
- * Wrap a component with withComponentHighlighter HOC
- */
-function wrapComponent(
-  ast: t.File,
-  node:
-    | t.VariableDeclarator
-    | t.FunctionDeclaration
-    | t.ExportDefaultDeclaration
-    | t.ExportNamedDeclaration,
-  componentName: string,
-  isDefaultExport: boolean,
-  isMemo: boolean,
-  isForwardRef: boolean,
-  filePath: string,
-  relativeFilePath: string
-): void {
-  const sourceId = createHash(filePath + ':' + componentName)
-
-  const metaObject = t.objectExpression([
-    t.objectProperty(
-      t.identifier('componentName'),
-      t.stringLiteral(componentName)
-    ),
-    t.objectProperty(t.identifier('filePath'), t.stringLiteral(filePath)),
-    t.objectProperty(
-      t.identifier('relativeFilePath'),
-      t.stringLiteral(relativeFilePath)
-    ),
-    t.objectProperty(t.identifier('sourceId'), t.stringLiteral(sourceId)),
-    t.objectProperty(
-      t.identifier('isDefaultExport'),
-      t.booleanLiteral(isDefaultExport)
-    ),
-  ])
-
-  if (isDefaultExport) {
-    // Handle default export
-    const exportDecl = node as t.ExportDefaultDeclaration
-    const originalDeclaration = exportDecl.declaration
-
-    if (
-      originalDeclaration.type === 'FunctionDeclaration' ||
-      originalDeclaration.type === 'ArrowFunctionExpression' ||
-      originalDeclaration.type === 'FunctionExpression' ||
-      (originalDeclaration.type === 'CallExpression' &&
-        (isMemo || isForwardRef))
-    ) {
-      let componentExpression: t.Expression
-
-      if (originalDeclaration.type === 'FunctionDeclaration') {
-        // Convert FunctionDeclaration to FunctionExpression
-        componentExpression = t.functionExpression(
-          originalDeclaration.id,
-          originalDeclaration.params,
-          originalDeclaration.body,
-          originalDeclaration.generator,
-          originalDeclaration.async
-        )
-      } else {
-        componentExpression = originalDeclaration as t.Expression
-      }
-
-      // Wrap the component
-      const wrappedComponent = t.callExpression(
-        t.identifier('withComponentHighlighter'),
-        [componentExpression, metaObject]
-      )
-
-      exportDecl.declaration = wrappedComponent
-    }
-  } else if (node.type === 'ExportNamedDeclaration') {
-    // Handle named export
-    const exportDecl = node as t.ExportNamedDeclaration
-
-    if (exportDecl.declaration?.type === 'FunctionDeclaration') {
-      // Named exported function
-      const funcDecl = exportDecl.declaration
-
-      // Create wrapped version
-      const wrappedComponent = t.callExpression(
-        t.identifier('withComponentHighlighter'),
-        [
-          t.functionExpression(
-            funcDecl.id,
-            funcDecl.params,
-            funcDecl.body,
-            funcDecl.generator,
-            funcDecl.async
-          ),
-          metaObject,
-        ]
-      )
-
-      // Replace the function with a variable declaration
-      const variableDecl = t.variableDeclaration('const', [
-        t.variableDeclarator(funcDecl.id!, wrappedComponent),
-      ])
-
-      exportDecl.declaration = variableDecl
-    } else if (exportDecl.declaration?.type === 'VariableDeclaration') {
-      // Named exported variable
-      const varDecl = exportDecl.declaration
-      varDecl.declarations.forEach((decl) => {
-        if (decl.init) {
-          decl.init = t.callExpression(
-            t.identifier('withComponentHighlighter'),
-            [decl.init, metaObject]
-          )
-        }
-      })
-    }
-  } else if (node.type === 'FunctionDeclaration') {
-    // Top-level function declaration
-    const funcDecl = node as t.FunctionDeclaration
-
-    // Create wrapped version
-    const wrappedComponent = t.callExpression(
-      t.identifier('withComponentHighlighter'),
-      [
-        t.functionExpression(
-          funcDecl.id,
-          funcDecl.params,
-          funcDecl.body,
-          funcDecl.generator,
-          funcDecl.async
-        ),
-        metaObject,
-      ]
-    )
-
-    // Replace with variable declaration
-    const variableDecl = t.variableDeclaration('const', [
-      t.variableDeclarator(funcDecl.id!, wrappedComponent),
-    ])
-
-    // Find and replace in program body
-    const index = ast.program.body.indexOf(funcDecl)
-    if (index !== -1) {
-      ast.program.body[index] = variableDecl
-    }
-  } else if (node.type === 'VariableDeclarator') {
-    // Top-level variable declaration
-    const varDecl = node as t.VariableDeclarator
-
-    if (varDecl.init) {
-      varDecl.init = t.callExpression(
-        t.identifier('withComponentHighlighter'),
-        [varDecl.init, metaObject]
-      )
-    }
-  }
-}
-
-/**
- * Detect if a file is a React file
- */
+/** Detect if a file is a React file */
 export function detectReact(code: string, id: string): boolean {
-  // Check file extension
   if (!id.match(/\.(tsx|jsx)$/)) {
     return false
   }
-
-  // Check for React imports or JSX
-  const hasReactImport = /import\s+(?:React|\{[^}]*\})\s+from\s+['"]react['"]/.test(code)
+  const hasReactImport =
+    /import\s+(?:React|\{[^}]*\})\s+from\s+['"]react['"]/.test(code)
   const hasJSX = /<[A-Z][a-zA-Z]*|<[a-z]+[^>]*>/.test(code)
-
   return hasReactImport || hasJSX
 }
-

@@ -6,6 +6,7 @@
 
 import type { FrameworkConfig } from '../types'
 import { transform, detectReact, VIRTUAL_MODULE_ID } from './transform'
+import { getDevToolsHookScript } from './devtools-hook'
 
 /**
  * React framework configuration
@@ -19,6 +20,7 @@ export const reactFramework: FrameworkConfig = {
   runtimeModuleFile: 'frameworks/react/runtime-module',
   virtualModuleId: VIRTUAL_MODULE_ID,
   storybookFramework: '@storybook/react-vite',
+  htmlHeadSnippet: getDevToolsHookScript,
 }
 
 // Re-export for convenience

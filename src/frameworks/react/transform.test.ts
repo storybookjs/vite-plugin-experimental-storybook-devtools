@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { transform } from './transform'
 
-describe('transform', () => {
+// The React transform is non-intrusive: it never wraps components in an HOC
+// (which pollutes the tree and breaks RSC). It only appends an idempotent
+// metadata tag — `__chRegisterMeta(Component, { ... })` — and the original
+// declarations are left byte-for-byte intact.
+
+describe('transform (non-intrusive tagging)', () => {
   describe('basic transformations', () => {
-    it('should transform a simple function component', () => {
+    it('tags a simple function component', () => {
       const code = `
 import React from 'react'
 
@@ -11,16 +16,18 @@ export function MyComponent(props) {
   return <div>Hello {props.name}</div>
 }
 `
-
       const result = transform(code, '/src/MyComponent.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('MyComponent')
+      expect(result).toContain('__chRegisterMeta(MyComponent, {')
       expect(result).toContain('filePath')
+      // Never wraps.
+      expect(result).not.toContain('withComponentHighlighter')
+      // Original declaration is preserved.
+      expect(result).toContain('function MyComponent(props)')
     })
 
-    it('should transform a default export arrow function component', () => {
+    it('tags a default-export arrow function component', () => {
       const code = `
 import React from 'react'
 
@@ -30,41 +37,34 @@ const MyComponent = (props) => {
 
 export default MyComponent
 `
-
       const result = transform(code, '/src/MyComponent.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('MyComponent')
+      expect(result).toContain('__chRegisterMeta(MyComponent, {')
+      expect(result).toContain('isDefaultExport: true')
     })
 
-    it('should not transform non-JSX files', () => {
+    it('does not transform non-JSX files', () => {
       const code = `
 export function helper() {
   return 'hello'
 }
 `
-
-      const result = transform(code, '/src/helper.ts')
-
-      expect(result).toBeUndefined()
+      expect(transform(code, '/src/helper.ts')).toBeUndefined()
     })
 
-    it('should not transform files without JSX', () => {
+    it('does not transform JSX-less component files', () => {
       const code = `
 export function MyComponent(props) {
   return 'Hello ' + props.name
 }
 `
-
-      const result = transform(code, '/src/MyComponent.tsx')
-
-      expect(result).toBeUndefined()
+      expect(transform(code, '/src/MyComponent.tsx')).toBeUndefined()
     })
   })
 
   describe('export variations', () => {
-    it('should transform named export function declaration', () => {
+    it('tags a named export function declaration', () => {
       const code = `
 import React from 'react'
 
@@ -72,17 +72,15 @@ export function Button({ label }) {
   return <button>{label}</button>
 }
 `
-
       const result = transform(code, '/src/Button.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('componentName')
-      expect(result).toContain('Button')
-      expect(result).toContain('isDefaultExport')
+      expect(result).toContain('__chRegisterMeta(Button, {')
+      expect(result).toContain('componentName: "Button"')
+      expect(result).toContain('isDefaultExport: false')
     })
 
-    it('should transform default export function declaration', () => {
+    it('tags a default export via identifier', () => {
       const code = `
 import React from 'react'
 
@@ -92,15 +90,14 @@ const Button = ({ label }) => {
 
 export default Button
 `
-
       const result = transform(code, '/src/Button.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('isDefaultExport')
+      expect(result).toContain('__chRegisterMeta(Button, {')
+      expect(result).toContain('isDefaultExport: true')
     })
 
-    it('should transform default export function declaration directly', () => {
+    it('tags a direct default export function declaration', () => {
       const code = `
 import React from 'react'
 
@@ -108,16 +105,15 @@ export default function App({ name }) {
   return <div>Hello {name}</div>
 }
 `
-
       const result = transform(code, '/src/App.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('isDefaultExport')
-      expect(result).toContain('"App"')
+      expect(result).toContain('__chRegisterMeta(App, {')
+      expect(result).toContain('isDefaultExport: true')
+      expect(result).toContain('componentName: "App"')
     })
 
-    it('should transform const arrow function with export', () => {
+    it('tags a const arrow function export', () => {
       const code = `
 import React from 'react'
 
@@ -125,17 +121,16 @@ export const Button = ({ label }) => {
   return <button>{label}</button>
 }
 `
-
       const result = transform(code, '/src/Button.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('"Button"')
+      expect(result).toContain('__chRegisterMeta(Button, {')
+      expect(result).toContain('componentName: "Button"')
     })
   })
 
   describe('React patterns', () => {
-    it('should transform React.memo wrapped components', () => {
+    it('tags React.memo wrapped components', () => {
       const code = `
 import React, { memo } from 'react'
 
@@ -143,14 +138,13 @@ export const Button = memo(({ label }) => {
   return <button>{label}</button>
 })
 `
-
       const result = transform(code, '/src/Button.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Button, {')
     })
 
-    it('should transform React.forwardRef wrapped components', () => {
+    it('tags React.forwardRef wrapped components', () => {
       const code = `
 import React, { forwardRef } from 'react'
 
@@ -158,59 +152,117 @@ export const Button = forwardRef(({ label }, ref) => {
   return <button ref={ref}>{label}</button>
 })
 `
-
       const result = transform(code, '/src/Button.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Button, {')
+    })
+
+    it('tags React.memo member-expression wrapper form', () => {
+      const code = `
+import React from 'react'
+
+export const Card = React.memo(function Card({ title }) {
+  return <div>{title}</div>
+})
+`
+      const result = transform(code, '/src/Card.tsx')
+
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Card, {')
+    })
+
+    it('tags React.forwardRef member-expression wrapper form', () => {
+      const code = `
+import React from 'react'
+
+export const Field = React.forwardRef(function Field(props, ref) {
+  return <input ref={ref} />
+})
+`
+      const result = transform(code, '/src/Field.tsx')
+
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Field, {')
+    })
+
+    it('tags class components (named export)', () => {
+      const code = `
+import React from 'react'
+
+export class Counter extends React.Component {
+  render() { return <div>{this.state?.n}</div> }
+}
+`
+      const result = transform(code, '/src/Counter.tsx')
+
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Counter, {')
+    })
+
+    it('tags class components (default export)', () => {
+      const code = `
+import React from 'react'
+
+export default class Counter extends React.Component {
+  render() { return <div /> }
+}
+`
+      const result = transform(code, '/src/Counter.tsx')
+
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Counter, {')
+      expect(result).toContain('isDefaultExport: true')
+    })
+
+    it('does NOT tag anonymous default exports (documented limitation)', () => {
+      const code = `
+import React from 'react'
+export default () => <div />
+`
+      const result = transform(code, '/src/Anon.tsx')
+      // No stable binding to tag → transform returns undefined (no change).
+      expect(result).toBeUndefined()
+    })
+
+    it('does NOT tag arbitrary HOC-wrapped bindings (documented limitation)', () => {
+      const code = `
+import React from 'react'
+function Base() { return <div /> }
+const withX = (C) => (p) => <C {...p} />
+export const Wrapped = withX(Base)
+`
+      const result = transform(code, '/src/Wrapped.tsx')
+      // withX(...) is not provably a component at build time.
+      expect(result === undefined || !result.includes('__chRegisterMeta(Wrapped'))
+        .toBe(true)
     })
   })
 
   describe('metadata', () => {
-    it('should include filePath in meta', () => {
+    it('includes the absolute filePath', () => {
       const code = `
 import React from 'react'
-
-export function Button() {
-  return <button>Click</button>
-}
+export function Button() { return <button>Click</button> }
 `
-
       const result = transform(code, '/project/src/components/Button.tsx')
 
       expect(result).toContain('filePath')
       expect(result).toContain('/project/src/components/Button.tsx')
     })
 
-    it('should include relativeFilePath in meta', () => {
+    it('includes relativeFilePath and sourceId', () => {
       const code = `
 import React from 'react'
-
-export function Button() {
-  return <button>Click</button>
-}
+export function Button() { return <button>Click</button> }
 `
-
-      const result = transform(code, '/project/src/components/Button.tsx')
-
-      expect(result).toContain('relativeFilePath')
-    })
-
-    it('should include sourceId in meta', () => {
-      const code = `
-import React from 'react'
-
-export function Button() {
-  return <button>Click</button>
-}
-`
-
       const result = transform(code, '/src/Button.tsx')
 
+      expect(result).toContain('relativeFilePath')
       expect(result).toContain('sourceId')
     })
 
-    it('should generate unique sourceId for different components', () => {
+    it('generates distinct sourceIds for distinct file paths', () => {
       const code1 = `
 import React from 'react'
 export function Button() { return <button>1</button> }
@@ -219,21 +271,19 @@ export function Button() { return <button>1</button> }
 import React from 'react'
 export function Button() { return <button>2</button> }
 `
+      const r1 = transform(code1, '/src/Button1.tsx')
+      const r2 = transform(code2, '/src/Button2.tsx')
 
-      const result1 = transform(code1, '/src/Button1.tsx')
-      const result2 = transform(code2, '/src/Button2.tsx')
-
-      // The sourceIds should be different since the file paths are different
-      expect(result1).toBeDefined()
-      expect(result2).toBeDefined()
-      // Both should have sourceId but they should be different
-      expect(result1).toContain('sourceId')
-      expect(result2).toContain('sourceId')
+      const id1 = r1?.match(/sourceId: "([^"]+)"/)?.[1]
+      const id2 = r2?.match(/sourceId: "([^"]+)"/)?.[1]
+      expect(id1).toBeTruthy()
+      expect(id2).toBeTruthy()
+      expect(id1).not.toBe(id2)
     })
   })
 
   describe('multiple components', () => {
-    it('should transform multiple exported components', () => {
+    it('tags every exported component', () => {
       const code = `
 import React from 'react'
 
@@ -245,54 +295,39 @@ export const Icon = ({ name }) => {
   return <span>{name}</span>
 }
 `
-
       const result = transform(code, '/src/components.tsx')
 
       expect(result).toBeDefined()
-      // Should have withComponentHighlighter calls (one import + two usages)
-      expect(result).toContain('withComponentHighlighter')
-      // Both components should be wrapped
-      expect(result).toContain('Button = withComponentHighlighter')
-      expect(result).toContain('Icon = withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Button, {')
+      expect(result).toContain('__chRegisterMeta(Icon, {')
     })
   })
 
   describe('import injection', () => {
-    it('should add withComponentHighlighter import', () => {
+    it('imports __chRegisterMeta from the virtual runtime', () => {
       const code = `
 import React from 'react'
-
-export function Button() {
-  return <button>Click</button>
-}
+export function Button() { return <button>Click</button> }
 `
-
       const result = transform(code, '/src/Button.tsx')
 
-      expect(result).toContain('import { withComponentHighlighter }')
+      expect(result).toContain('__chRegisterMeta')
       expect(result).toContain('virtual:component-highlighter/runtime')
     })
 
-    it('should not duplicate imports on re-transform', () => {
+    it('still produces valid output if re-transformed', () => {
       const code = `
 import React from 'react'
-import { withComponentHighlighter } from 'virtual:component-highlighter/runtime'
+import { __chRegisterMeta } from 'virtual:component-highlighter/runtime'
 
-export function Button() {
-  return <button>Click</button>
-}
+export function Button() { return <button>Click</button> }
 `
-
-      // Simulating a re-transform (in reality this might happen with HMR)
-      // The transform should still work
-      const result = transform(code, '/src/Button.tsx')
-
-      expect(result).toBeDefined()
+      expect(transform(code, '/src/Button.tsx')).toBeDefined()
     })
   })
 
   describe('non-exported components', () => {
-    it('should not wrap non-exported components', () => {
+    it('does not tag non-exported components', () => {
       const code = `
 import React from 'react'
 
@@ -310,44 +345,36 @@ export const Header = ({ sticky }: { sticky?: boolean }) => {
   )
 }
 `
-
       const result = transform(code, '/src/Test.tsx')
 
       expect(result).toBeDefined()
-      // Should wrap exported Header component
-      expect(result).toContain('Header = withComponentHighlighter')
-      // Should NOT wrap non-exported ThemeToggle component
-      expect(result).not.toContain('ThemeToggle = withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Header, {')
+      expect(result).not.toContain('__chRegisterMeta(ThemeToggle')
     })
   })
 
   describe('edge cases', () => {
-    it('should handle components with complex JSX', () => {
+    it('handles complex JSX', () => {
       const code = `
 import React from 'react'
 
 export function Card({ title, children }) {
   return (
     <div className="card">
-      <header>
-        <h2>{title}</h2>
-      </header>
+      <header><h2>{title}</h2></header>
       <main>{children}</main>
-      <footer>
-        <button onClick={() => {}}>Action</button>
-      </footer>
+      <footer><button onClick={() => {}}>Action</button></footer>
     </div>
   )
 }
 `
-
       const result = transform(code, '/src/Card.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Card, {')
     })
 
-    it('should handle TypeScript generic components', () => {
+    it('handles TypeScript generic components', () => {
       const code = `
 import React from 'react'
 
@@ -360,53 +387,107 @@ export function List<T>({ items, renderItem }: Props<T>) {
   return <ul>{items.map(renderItem)}</ul>
 }
 `
-
       const result = transform(code, '/src/List.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(List, {')
     })
 
-    it('should handle components with hooks', () => {
+    it('handles components with hooks (no extra render boundary)', () => {
       const code = `
 import React, { useState, useEffect } from 'react'
 
 export function Counter() {
   const [count, setCount] = useState(0)
-  
-  useEffect(() => {
-    console.log('Count changed:', count)
-  }, [count])
-  
-  return (
-    <div>
-      <span>{count}</span>
-      <button onClick={() => setCount(c => c + 1)}>+</button>
-    </div>
-  )
+  useEffect(() => { console.log(count) }, [count])
+  return <button onClick={() => setCount(c => c + 1)}>{count}</button>
 }
 `
-
       const result = transform(code, '/src/Counter.tsx')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(Counter, {')
+      // No HOC / boundary wrapper is introduced.
+      expect(result).not.toContain('withComponentHighlighter')
+      expect(result).not.toContain('ComponentHighlighterBoundary')
     })
+  })
 
-    it('should wrap exported components', () => {
-      const code = `
+  describe('RSC mode ("use client" gate)', () => {
+    const clientComponent = `'use client'
 import React from 'react'
 
-export const DateDisplay = ({ date }) => {
-  return <span>{date}</span>
+export function ClientWidget() {
+  return <div>client</div>
+}
+`
+    const serverComponent = `import React from 'react'
+
+export function ServerWidget() {
+  return <div>server</div>
 }
 `
 
-      const result = transform(code, '/src/DateDisplay.tsx')
-
+    it('tags server components when rsc is off (SPA default)', () => {
+      // A plain SPA has no "use client" directive but every component is a
+      // client component — must still be tagged.
+      const result = transform(serverComponent, '/src/ServerWidget.tsx')
       expect(result).toBeDefined()
-      // The exported component should be wrapped
-      expect(result).toContain('DateDisplay = withComponentHighlighter')
+      expect(result).toContain('__chRegisterMeta(ServerWidget, {')
+    })
+
+    it('tags server components when rsc is explicitly false', () => {
+      const result = transform(serverComponent, '/src/ServerWidget.tsx', {
+        rsc: false,
+      })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(ServerWidget, {')
+    })
+
+    it('tags "use client" components in rsc mode', () => {
+      const result = transform(clientComponent, '/src/ClientWidget.tsx', {
+        rsc: true,
+      })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(ClientWidget, {')
+      // The directive is preserved (must stay the first statement).
+      expect(result).toContain("'use client'")
+    })
+
+    it('does NOT tag server components in rsc mode (left untouched)', () => {
+      const result = transform(serverComponent, '/src/ServerWidget.tsx', {
+        rsc: true,
+      })
+      // No transform at all — the module is returned untouched (undefined).
+      expect(result).toBeUndefined()
+    })
+
+    it('recognizes a double-quoted "use client" directive', () => {
+      const code = `"use client"
+import React from 'react'
+
+export function Dq() {
+  return <div>dq</div>
+}
+`
+      const result = transform(code, '/src/Dq.tsx', { rsc: true })
+      expect(result).toBeDefined()
+      expect(result).toContain('__chRegisterMeta(Dq, {')
+    })
+
+    it('ignores a "use client" string that is not a leading directive', () => {
+      // A "use client" appearing as a value (not a directive prologue) must
+      // NOT flip the module into client mode.
+      const code = `import React from 'react'
+
+const label = 'use client'
+
+export function NotADirective() {
+  return <div>{label}</div>
+}
+`
+      const result = transform(code, '/src/NotADirective.tsx', { rsc: true })
+      expect(result).toBeUndefined()
     })
   })
 })

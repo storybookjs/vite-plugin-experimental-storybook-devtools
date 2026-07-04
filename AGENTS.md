@@ -19,6 +19,16 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
 2. **Keep framework playgrounds aligned**
    - Component naming and app structure should stay equivalent across supported frameworks when possible.
    - If one framework playground changes, review whether the others should match.
+   - `playground/react` (React 19) and `playground/react18` (React 18) share
+     ONE source tree: `playground/react18/src` is a symlink to
+     `playground/react/src` (canonical). Edit components once in
+     `playground/react/src`; both playgrounds and their shared E2E suites pick
+     it up. React 18 and 19 are both required and both E2E-gated. Do not
+     replace the symlink with a copy.
+   - The `rsc` option's `"use client"` transform gate is covered by unit tests
+     (`src/frameworks/react/transform.test.ts` → "RSC mode"), not a playground.
+     If you add runtime RSC coverage later, it needs its own playground in
+     `rsc: true` mode — it cannot share the `rsc: false` SPA playgrounds.
    - Keep `docs/SUPPORTED_FRAMEWORKS.md` current.
 
 3. **Use shared test primitives**

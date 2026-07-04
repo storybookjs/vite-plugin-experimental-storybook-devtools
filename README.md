@@ -168,6 +168,57 @@ componentHighlighter({
 
   // Force instrumentation in production (default: false)
   force: false,
+
+  // Single-React enforcement for the prop serializer (React only).
+  // 'auto' (default) | true | false  — see "React version support" below.
+  dedupeReact: 'auto',
+
+  // React Server Components mode (React only, default: false).
+  // When true, only modules with a "use client" directive are instrumented
+  // (for Vite-based RSC frameworks like TanStack Start). Leave false for SPAs.
+  // See "React Server Components" in docs/REACT_PATTERNS.md.
+  rsc: false,
+})
+```
+
+### React version support (18 and 19)
+
+React detection is non-intrusive — it reads the live React fiber tree via the
+DevTools global hook and never wraps your components, so the rendered tree
+stays clean and RSC keeps working. **React 18 and 19 are both supported and
+covered by E2E.**
+
+Which authoring patterns are detected (named/default exports, `memo`/
+`forwardRef`, `React.memo` member form, class components, generics, compound,
+barrel re-exports, every prop kind), the documented limitations (anonymous
+default exports, arbitrary custom HOCs), and **React Server Components support
+via the `rsc` option** (a `"use client"` gate for Vite-based RSC frameworks
+like TanStack Start) are all in
+**[docs/REACT_PATTERNS.md](./docs/REACT_PATTERNS.md)**.
+
+One detail matters for prop-serialization fidelity. The plugin's bundled
+`react-element-to-jsx-string` resolves *its own* React copy. If that major
+differs from your app's React (e.g. your app is on React 18 but the plugin's
+copy is 19), the library's internal `React.isValidElement` rejects your
+elements and serialized props silently degrade to a "Failed to serialize"
+placeholder. Forcing a single React instance via Vite's `resolve.dedupe`
+fixes it.
+
+The `dedupeReact` option controls this:
+
+| Value | Behavior |
+|-------|----------|
+| `'auto'` *(default)* | Detects a React major mismatch and adds `react`/`react-dom` to `resolve.dedupe` **only when needed**. Single-version apps (the common React 19 case) get **no config mutation at all**. |
+| `true` | Always dedupe. |
+| `false` | Never dedupe. For advanced setups that intentionally run multiple React copies (module federation / micro-frontends). If a mismatch is detected while disabled, a one-line warning is logged — it never fails silently. |
+
+If you set `dedupeReact: false` and need the fix manually, add this to your
+Vite config:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  resolve: { dedupe: ['react', 'react-dom'] },
 })
 ```
 

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
+import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -54,7 +55,7 @@ test.describe('React playground detection coverage', () => {
     await page.waitForTimeout(1000)
   })
 
-  test('detects the expected 7 distinct components on initial render', async ({
+  test('detects the expected component set (incl. all authoring patterns) on initial render', async ({
     page,
   }) => {
     const snapshot = await getRegistrySnapshot(page)
@@ -62,16 +63,53 @@ test.describe('React playground detection coverage', () => {
     expect(snapshot).toBeTruthy()
     expect(snapshot?.hasUnknownFilePath).toBe(false)
 
-    // Expected baseline set from App.tsx initial render.
+    // Baseline set from App.tsx initial render: the original task UI plus the
+    // PatternShowcase (every supported authoring pattern). See
+    // docs/REACT_PATTERNS.md. The "unsupported" demonstrators (FramedNote =
+    // custom HOC, AnonWidget = anonymous default, Disclosure.Summary/Panel =
+    // member assignments) are intentionally NOT in this list.
     expect(snapshot?.uniqueNames).toEqual([
       'App',
       'Badge',
       'Button',
+      'DefaultBanner',
+      'Disclosure',
+      'FancyField',
+      'GenericList',
       'Header',
+      'IconChip',
+      'LegacyCounter',
+      'MemoForwardInput',
+      'MemoStat',
       'Modal',
+      'PatternShowcase',
+      'PropZoo',
+      'ReactMemoCard',
       'TaskCard',
       'TaskList',
     ])
+
+    // Supported patterns must be present (regression guards).
+    expect(snapshot?.uniqueNames).toEqual(
+      expect.arrayContaining([
+        'LegacyCounter', // class component
+        'ReactMemoCard', // React.memo(...) member-expression wrapper
+        'MemoStat', // memo(...) bare wrapper
+        'FancyField', // forwardRef(...)
+        'MemoForwardInput', // memo(forwardRef(...))
+        'DefaultBanner', // default export (function decl)
+        'IconChip', // default export via identifier
+        'GenericList', // generic component
+        'Disclosure', // compound (dot-notation) parent
+        'PropZoo', // many prop kinds
+      ]),
+    )
+
+    // Unsupported-detection demonstrators must be ABSENT.
+    expect(snapshot?.uniqueNames).not.toContain('FramedNote')
+    expect(snapshot?.uniqueNames).not.toContain('AnonWidget')
+    expect(snapshot?.uniqueNames).not.toContain('Summary')
+    expect(snapshot?.uniqueNames).not.toContain('Panel')
 
     // Basic sanity check that key components are actually instantiated.
     expect(snapshot?.byName.TaskCard).toBeGreaterThanOrEqual(3)
@@ -121,3 +159,4 @@ test.describe('React playground detection coverage', () => {
 
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
+registerLivePropEditSuite(test as any)

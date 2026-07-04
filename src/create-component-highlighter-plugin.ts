@@ -49,6 +49,15 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:select-component': (
       data: SerializedRegistryInstance | null,
     ) => void
+    'component-highlighter:set-prop': (data: {
+      id: string
+      path: Array<string | number>
+      payload: { kind: string; text: string }
+    }) => void
+    'component-highlighter:reset-prop': (data: {
+      id: string
+      path: Array<string | number>
+    }) => void
   }
 
   interface DevToolsRpcClientFunctions {
@@ -75,6 +84,15 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:do-select-component': (
       data: SerializedRegistryInstance | null,
     ) => void
+    'component-highlighter:do-set-prop': (data: {
+      id: string
+      path: Array<string | number>
+      payload: { kind: string; text: string }
+    }) => void
+    'component-highlighter:do-reset-prop': (data: {
+      id: string
+      path: Array<string | number>
+    }) => void
   }
 
   interface DevToolsRpcSharedStates {
@@ -111,7 +129,11 @@ interface ComponentStoryData {
     sourceId: string
     isDefaultExport?: boolean
   }
-  props: Record<string, unknown>
+  /**
+   * Story generation reads `serializedProps` only. Raw `props` is never sent
+   * over RPC (it holds unclonable live values); kept optional for back-compat.
+   */
+  props?: Record<string, unknown>
   serializedProps?: SerializedProps
   /** Component registry for import resolution: componentName -> filePath */
   componentRegistry?: Record<string, string>
@@ -173,6 +195,43 @@ export interface ComponentHighlighterOptions {
    * If not set, stories are created next to the component
    */
   storiesDir?: string
+  /**
+   * Whether to add `react`/`react-dom` to Vite's `resolve.dedupe`.
+   *
+   * The plugin's bundled `react-element-to-jsx-string` resolves *its own*
+   * React (this plugin's copy), which can differ from your app's. When they
+   * differ (e.g. your app is on React 18 but the plugin's copy is 19), the
+   * library's internal `React.isValidElement` rejects your elements and prop
+   * serialization silently degrades to a "Failed to serialize" placeholder.
+   * Deduping forces a single React instance and fixes it.
+   *
+   * - `'auto'` (default): apply the dedupe **only** when a React major
+   *   mismatch is detected. Single-version apps (the common React 19 case)
+   *   get no config mutation at all.
+   * - `true`: always apply.
+   * - `false`: never apply. Use this only if you intentionally run multiple
+   *   React copies (module federation / micro-frontends). If a mismatch is
+   *   detected while disabled, a warning is logged (it never fails silently).
+   *
+   * @default 'auto'
+   */
+  dedupeReact?: boolean | 'auto'
+  /**
+   * React Server Components mode (React only).
+   *
+   * When `true`, only modules declaring a `"use client"` directive are
+   * instrumented. Server components (no directive) are left untouched — they
+   * never mount a client fiber, so tagging is useless and would pull the
+   * client runtime into the server module graph. Use this for RSC frameworks
+   * such as TanStack Start.
+   *
+   * When `false` (default), every matching module is instrumented — correct
+   * for a plain SPA, where there is no `"use client"` directive but every
+   * component runs on the client.
+   *
+   * @default false
+   */
+  rsc?: boolean
 }
 
 /**
@@ -234,10 +293,16 @@ export function createComponentHighlighterPlugin(
     debugMode = false,
     writeStoryFiles = true,
     storiesDir,
+    dedupeReact = 'auto',
+    rsc = false,
   } = options
 
   const filter = createFilter(include, exclude)
   let isServe = false
+  // Vite's standard CSP integration: when the app sets `html.cspNonce`, Vite
+  // stamps its injected tags with this nonce. We mirror it onto the inline
+  // DevTools-hook <script> so it survives a strict Content-Security-Policy.
+  let cspNonce: string | undefined
   let server: ViteDevServer | undefined
   let notifications: NotificationService = new ConsoleNotificationService()
   // Track transformed components for coverage dashboard: componentName → filePath
@@ -262,6 +327,7 @@ export function createComponentHighlighterPlugin(
     enforce: 'pre',
     configResolved(config) {
       isServe = config.command === 'serve'
+      cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
     },
     config: (viteConfig) => {
       viteConfig.optimizeDeps ??= {}
@@ -279,6 +345,19 @@ export function createComponentHighlighterPlugin(
       // them so Vite handles the CJS→ESM conversion and named imports work.
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push('@testing-library/dom', 'aria-query')
+
+      // The client modules above are excluded from optimization, so Vite never
+      // crawls them at startup and never discovers their third-party imports.
+      // Without this, those deps are found lazily when DevTools connects,
+      // triggering a mid-session re-optimization + full page reload in every
+      // consuming app. Pre-declare them so they are bundled at server startup.
+      viteConfig.optimizeDeps.include.push(
+        'xstate',
+        'nanoevents',
+        '@medv/finder',
+        'dom-accessibility-api',
+        '@vitejs/devtools-kit/client',
+      )
 
       if (framework.name === 'react') {
         // react-element-to-jsx-string and its dependency react-is are CJS-only
@@ -316,6 +395,71 @@ export function createComponentHighlighterPlugin(
           'react-element-to-jsx-string/dist/esm/index.js',
           'react-is',
         )
+
+        // react-element-to-jsx-string is resolved from THIS plugin's
+        // node_modules (it is not the consumer's dependency). Its own
+        // `import React from 'react'` therefore binds the plugin's pinned
+        // React copy. If that differs from the app's React (e.g. the app is
+        // on React 18 but the plugin's copy is 19), the library's internal
+        // `React.isValidElement` rejects the app's elements and prop
+        // serialization silently degrades to `{/* Failed to serialize */}`.
+        // Adding react/react-dom to resolve.dedupe forces a single React
+        // instance across the client graph (app + runtime + serializer).
+        //
+        // This is only *needed* when the majors mismatch. By default
+        // (`dedupeReact: 'auto'`) we detect that and apply the dedupe only
+        // then — so a single-version app (the common React 19 case today)
+        // gets no config mutation at all.
+        const majorOf = (fromDir: string): number | null => {
+          try {
+            const req = createRequire(path.join(fromDir, 'noop.js'))
+            const pkg = req('react/package.json') as { version?: string }
+            const m = /^(\d+)\./.exec(pkg.version || '')
+            return m ? Number(m[1]) : null
+          } catch {
+            return null
+          }
+        }
+        const appRoot =
+          (viteConfig.root && path.resolve(viteConfig.root)) || process.cwd()
+        const appReactMajor = majorOf(appRoot)
+        const pluginReactMajor = majorOf(
+          path.dirname(fileURLToPath(import.meta.url)),
+        )
+        // Mismatch (or an undetectable app version → assume the safe path).
+        const mismatch =
+          appReactMajor === null ||
+          pluginReactMajor === null ||
+          appReactMajor !== pluginReactMajor
+
+        const shouldDedupe =
+          dedupeReact === true ||
+          (dedupeReact === 'auto' && mismatch)
+
+        logDebug(
+          `dedupeReact=${String(dedupeReact)} appReactMajor=${appReactMajor} ` +
+            `pluginReactMajor=${pluginReactMajor} mismatch=${mismatch} ` +
+            `→ ${shouldDedupe ? 'APPLY react/react-dom dedupe' : 'NO config mutation'}`,
+        )
+        if (shouldDedupe) {
+          viteConfig.resolve.dedupe ??= []
+          for (const dep of ['react', 'react-dom']) {
+            if (!viteConfig.resolve.dedupe.includes(dep)) {
+              viteConfig.resolve.dedupe.push(dep)
+            }
+          }
+        } else if (dedupeReact === false && mismatch) {
+          // Never fail silently: the user explicitly opted out but we detect
+          // the exact condition that degrades prop serialization.
+          console.warn(
+            '[component-highlighter] Detected a React version mismatch ' +
+              `(app: ${appReactMajor ?? 'unknown'}, plugin serializer: ` +
+              `${pluginReactMajor ?? 'unknown'}) while \`dedupeReact: false\`. ` +
+              'Prop serialization may degrade to "Failed to serialize". ' +
+              'Add react/react-dom to resolve.dedupe, or set ' +
+              "`dedupeReact: 'auto'`. See the README (React version support).",
+          )
+        }
       }
     },
     configureServer(srv) {
@@ -677,6 +821,25 @@ export function createComponentHighlighterPlugin(
                         registryMap.set(name, filePath)
                       }
                     }
+                    // Augment/fallback from the server's synced registry so
+                    // referenced components (e.g. <TaskCard> inside
+                    // <TaskList>'s children) resolve to real imports even when
+                    // the caller didn't pass a componentRegistry — e.g.
+                    // coverage "Generate all" and the command palette. Without
+                    // this they'd be replaced with a "not exported" div.
+                    try {
+                      const all = (registryState?.value() ??
+                        []) as SerializedRegistryInstance[]
+                      for (const inst of all) {
+                        const n = inst?.meta?.componentName
+                        const fp = inst?.meta?.filePath
+                        if (n && fp && !registryMap.has(n)) {
+                          registryMap.set(n, fp)
+                        }
+                      }
+                    } catch {
+                      // registry not ready — fall back to caller-provided map
+                    }
 
                     // Determine the output path
                     const componentDir = path.dirname(data.meta.filePath)
@@ -904,6 +1067,45 @@ export function createComponentHighlighterPlugin(
           }),
         )
 
+        // Panel → server → client: apply a live prop override
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:set-prop',
+            type: 'action',
+            setup: () => ({
+              handler: (data: {
+                id: string
+                path: Array<string | number>
+                payload: { kind: string; text: string }
+              }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-set-prop',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: reset a prop to its original value
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:reset-prop',
+            type: 'action',
+            setup: () => ({
+              handler: (data: {
+                id: string
+                path: Array<string | number>
+              }) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-reset-prop',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
         // Panel → server → client: highlight coverage instances on the app page
         ctx.rpc.register(
           defineRpcFunction({
@@ -1111,7 +1313,6 @@ export function createComponentHighlighterPlugin(
                     'component-highlighter:create-story',
                     {
                       meta: inst.meta,
-                      props: inst.props,
                       serializedProps: inst.serializedProps,
                       skipNavigation: true,
                     },
@@ -1172,6 +1373,22 @@ export function createComponentHighlighterPlugin(
         // Store cwd for coverage computation
         coverageCwd = ctx.cwd
       },
+    },
+    transformIndexHtml() {
+      if (!isServe && !force) return
+      const snippet = framework.htmlHeadSnippet?.()
+      if (!snippet) return
+      return [
+        {
+          tag: 'script',
+          attrs: {
+            type: 'text/javascript',
+            ...(cspNonce ? { nonce: cspNonce } : {}),
+          },
+          children: snippet,
+          injectTo: 'head-prepend',
+        },
+      ]
     },
     resolveId(id) {
       if (id === runtimeHelperVirtualId) {
@@ -1281,7 +1498,9 @@ export function createComponentHighlighterPlugin(
 
       logDebug(`Transforming ${id}`)
 
-      const result = framework.transform(code, id)
+      // NB: the `options` param of this hook is Vite's transform options
+      // (it shadows the plugin's options) — use the destructured `rsc`.
+      const result = framework.transform(code, id, { rsc })
 
       // Track transformed components for coverage
       if (result) {

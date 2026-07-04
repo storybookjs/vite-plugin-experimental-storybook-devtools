@@ -7,8 +7,12 @@ import {
   getCurrentInstance,
 } from 'vue'
 import {
+  cancelScheduledSerialization,
   cleanupInstanceTracking,
   findFirstTrackableElement,
+  isTrackingActive,
+  onTrackingActivated,
+  scheduleSerialization,
   syncInstanceTracking,
 } from 'virtual:component-highlighter/runtime-helpers'
 import { serializeVNodeToTemplate } from './vnode-to-template'
@@ -226,13 +230,25 @@ function serializeValue(value: unknown): unknown {
     } else if (Array.isArray(value)) {
       // Handle arrays
       return value.map((item) => serializeValue(item))
-    } else if ((value as { constructor?: unknown }).constructor === Object) {
-      // Plain objects
-      const serialized: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        serialized[k] = serializeValue(v)
+    } else {
+      const proto = Object.getPrototypeOf(value)
+      if (proto === Object.prototype || proto === null) {
+        // Plain objects
+        const serialized: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          serialized[k] = serializeValue(v)
+        }
+        return serialized
       }
-      return serialized
+      // Non-plain object (Map, Set, class instance, …): not round-trippable to
+      // a story arg nor reliably cloneable over RPC. Mark it (read-only in the
+      // UI) rather than leaking the live object onto the wire.
+      return {
+        __isObject: true,
+        name:
+          (value as { constructor?: { name?: string } }).constructor?.name ||
+          'Object',
+      }
     }
   }
 
@@ -255,7 +271,8 @@ export function registerInstance(
   element: Element,
 ) {
   const id = generateInstanceId(meta['sourceId'] as string)
-  const serializedProps = serializeProps(props)
+  // Skip the expensive serialization until a DevTools client is connected.
+  const serializedProps = isTrackingActive() ? serializeProps(props) : {}
 
   const instance = {
     id,
@@ -286,6 +303,7 @@ export function registerInstance(
 
 export function unregisterInstance(id: string) {
   componentRegistry.delete(id)
+  cancelScheduledSerialization(id)
   logDebug('unregistered', { id, remaining: componentRegistry.size })
 
   // Dispatch event for listeners module
@@ -297,25 +315,51 @@ export function unregisterInstance(id: string) {
   }
 }
 
+// Serialize the instance's current props and notify listeners. Expensive —
+// only ever run for live instances, coalesced to one call per frame.
+function serializeAndDispatch(id: string) {
+  const instance = componentRegistry.get(id)
+  if (!instance) return
+  instance.serializedProps = serializeProps(instance.props)
+  logDebug('updateInstanceProps', { id, props: instance.props })
+
+  if (typeof window !== 'undefined') {
+    const event = new CustomEvent('component-highlighter:update-props', {
+      detail: {
+        id,
+        props: instance.props,
+        serializedProps: instance.serializedProps,
+      },
+    })
+    window.dispatchEvent(event)
+  }
+}
+
 export function updateInstanceProps(
   id: string,
   props: Record<string, unknown>,
 ) {
   const instance = componentRegistry.get(id)
-  if (instance) {
-    instance.props = props
-    instance.serializedProps = serializeProps(props)
-    logDebug('updateInstanceProps', { id, props })
-
-    // Dispatch event for listeners module
-    if (typeof window !== 'undefined') {
-      const event = new CustomEvent('component-highlighter:update-props', {
-        detail: { id, props, serializedProps: instance.serializedProps },
-      })
-      window.dispatchEvent(event)
-    }
-  }
+  if (!instance) return
+  // Keep raw props in sync immediately (cheap, read by the context menu).
+  instance.props = props
+  // Nothing consumes serialized props until DevTools connects.
+  if (!isTrackingActive()) return
+  // Defer the expensive serialization; collapse repeated updates per frame.
+  scheduleSerialization(
+    id,
+    () => serializeAndDispatch(id),
+    () => componentRegistry.has(id),
+  )
 }
+
+// When DevTools connects after components already mounted, backfill the
+// serialized props that registration skipped and push them to the panel.
+onTrackingActivated(() => {
+  for (const id of componentRegistry.keys()) {
+    serializeAndDispatch(id)
+  }
+})
 
 /**
  * Get the component registry for import resolution
