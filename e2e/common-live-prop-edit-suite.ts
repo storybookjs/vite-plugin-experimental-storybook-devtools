@@ -10,11 +10,61 @@ type TestLike = {
 }
 
 /**
- * Live prop editing (React only): the tooltip / panel pencil drives React's
- * own `renderer.overrideProps` via `window.__componentHighlighterSetProp`.
+ * One data-type edit exercised against a live playground component:
+ * `setProp(componentName, path, payload)` must flip `probe.selector`'s text
+ * to contain `probe.contains`.
  */
-export function registerLivePropEditSuite(test: TestLike) {
-  test.describe('live prop editing (React overrideProps)', () => {
+export type PropEditDataTypeTarget = {
+  componentName: string
+  path: Array<string | number>
+  payload: { kind: string; text: string }
+  probe: { selector: string; contains: string }
+}
+
+export type LivePropEditSuiteOptions = {
+  /**
+   * Per-playground data-type edit targets (defaults to the React playground
+   * set). The first target's component is also used for the invalid-payload
+   * check, so it should have a string prop at `path`.
+   */
+  dataTypeTargets?: PropEditDataTypeTarget[]
+}
+
+const DEFAULT_DATA_TYPE_TARGETS: PropEditDataTypeTarget[] = [
+  {
+    componentName: 'Header',
+    path: ['title'],
+    payload: { kind: 'string', text: 'E2E Title' },
+    probe: { selector: '.header-title', contains: 'E2E Title' },
+  },
+  {
+    componentName: 'TaskList',
+    path: ['count'],
+    payload: { kind: 'number', text: '777' },
+    probe: { selector: '.task-list-count', contains: '777' },
+  },
+  {
+    componentName: 'PropZoo',
+    path: ['note'],
+    payload: { kind: 'json', text: '"e2e note"' },
+    probe: { selector: '.task-card-meta span', contains: 'e2e note' },
+  },
+]
+
+/**
+ * Live prop editing: the tooltip / panel pencil drives the runtime's
+ * `window.__componentHighlighterSetProp` (React: `renderer.overrideProps`;
+ * Vue: the reactive `instance.props` object). The tooltip/save/reset flows
+ * use `TaskList.title`, which every playground shares; only the data-type
+ * targets vary per playground.
+ */
+export function registerLivePropEditSuite(
+  test: TestLike,
+  options: LivePropEditSuiteOptions = {},
+) {
+  const dataTypeTargets = options.dataTypeTargets ?? DEFAULT_DATA_TYPE_TARGETS
+
+  test.describe('live prop editing', () => {
     test.beforeEach(async ({ page }) => {
       await page.goto('/')
       await page.waitForSelector('button')
@@ -42,7 +92,7 @@ export function registerLivePropEditSuite(test: TestLike) {
     })
 
     test('runtime setProp applies every data type live', async ({ page }) => {
-      const result = await page.evaluate(async () => {
+      const result = await page.evaluate(async (targets) => {
         const w = window as any
         const reg = w.__componentHighlighterRegistry as Map<string, any>
         const setProp = w.__componentHighlighterSetProp
@@ -51,56 +101,35 @@ export function registerLivePropEditSuite(test: TestLike) {
         const sleep = (ms: number) =>
           new Promise((r) => setTimeout(r, ms))
 
-        const header = byName('Header')
-        const taskList = byName('TaskList')
-        const propZoo = byName('PropZoo')
-
-        // One override per fiber. (React DevTools' overrideProps re-bases
-        // off the component's current props each call, so two synchronous
-        // overrides on the SAME fiber would clobber each other — that's not
-        // a real-UX scenario: users edit one prop at a time.)
-        const r1 = setProp(header.id, ['title'], {
-          kind: 'string',
-          text: 'E2E Title',
-        }) // string
-        const r2 = setProp(taskList.id, ['count'], {
-          kind: 'number',
-          text: '777',
-        }) // number
-        const r3 = setProp(propZoo.id, ['note'], {
-          kind: 'json',
-          text: '"e2e note"',
-        }) // json (null → string)
-        const rBad = setProp(header.id, ['title'], {
-          kind: 'number',
-          text: 'NaNaN',
-        }) // error path
+        // One override per component instance. (React DevTools' overrideProps
+        // re-bases off the component's current props each call, so two
+        // synchronous overrides on the SAME instance would clobber each other
+        // — that's not a real-UX scenario: users edit one prop at a time.)
+        const ok = targets.map(
+          (t) => setProp(byName(t.componentName)?.id, t.path, t.payload).ok,
+        )
+        const rBad = setProp(
+          byName(targets[0].componentName)?.id,
+          targets[0].path,
+          { kind: 'number', text: 'NaNaN' },
+        ) // error path: non-numeric payload must be rejected
         await sleep(500)
 
-        const span = (p: string) =>
-          [...document.querySelectorAll('.task-card-meta span')].find((s) =>
-            (s.textContent || '').startsWith(p),
-          )?.textContent
-        return {
-          ok: [r1.ok, r2.ok, r3.ok],
-          badOk: rBad.ok,
-          badErr: rBad.error,
-          headerDom: document
-            .querySelector('.header-title')
-            ?.textContent?.trim(),
-          countDom: document
-            .querySelector('.task-list-count')
-            ?.textContent?.trim(),
-          noteDom: span('note:'),
-        }
-      })
+        const probes = targets.map((t) => ({
+          name: t.componentName,
+          found: [...document.querySelectorAll(t.probe.selector)].some((el) =>
+            (el.textContent || '').includes(t.probe.contains),
+          ),
+        }))
+        return { ok, badOk: rBad.ok, badErr: rBad.error, probes }
+      }, dataTypeTargets)
 
-      expect(result.ok).toEqual([true, true, true])
+      expect(result.ok).toEqual(dataTypeTargets.map(() => true))
       expect(result.badOk).toBe(false)
       expect(result.badErr).toContain('not a number')
-      expect(result.headerDom).toContain('E2E Title')
-      expect(result.countDom).toContain('777')
-      expect(result.noteDom).toContain('e2e note')
+      expect(result.probes).toEqual(
+        dataTypeTargets.map((t) => ({ name: t.componentName, found: true })),
+      )
     })
 
     test('tooltip pencil → form → Apply edits the live app', async ({

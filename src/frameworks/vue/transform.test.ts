@@ -1,11 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { transform, detectVue } from './transform'
+import { transform, detectVue, VIRTUAL_MODULE_ID } from './transform'
 
-describe('Vue transform', () => {
-  describe('basic transformations', () => {
-    it('should transform a simple SFC with script setup', () => {
-      const code = `
-<script setup lang="ts">
+// The Vue transform is non-intrusive: it does NOT reconstruct the SFC or inject
+// any per-component tracking code. Detection happens entirely at runtime via the
+// Vue DevTools global hook (devtools-hook.ts + runtime-module.ts). The transform
+// performs exactly one minimal, idempotent edit — prepending a single
+// side-effect import of the runtime virtual module to the SFC's script block so
+// the runtime is loaded into the page. Everything else is preserved verbatim.
+
+const RUNTIME_IMPORT = `import '${VIRTUAL_MODULE_ID}';`
+
+describe('Vue transform (non-intrusive)', () => {
+  describe('runtime import injection', () => {
+    it('injects a side-effect runtime import into <script setup>', () => {
+      const code = `<script setup lang="ts">
 import { ref } from 'vue'
 const count = ref(0)
 </script>
@@ -17,14 +25,15 @@ const count = ref(0)
       const result = transform(code, '/src/components/Counter.vue')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('Counter')
-      expect(result).toContain('__componentMeta')
+      expect(result).toContain(RUNTIME_IMPORT)
+      // It is a bare side-effect import — no named binding, no meta object, no
+      // wrapping composable.
+      expect(result).not.toContain('withComponentHighlighter')
+      expect(result).not.toContain('__componentMeta')
     })
 
-    it('should transform an SFC with plain script block', () => {
-      const code = `
-<script>
+    it('injects into a plain <script> block (Options API)', () => {
+      const code = `<script>
 export default {
   name: 'MyComponent',
   data() {
@@ -40,13 +49,15 @@ export default {
       const result = transform(code, '/src/components/MyComponent.vue')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      expect(result).toContain('MyComponent')
+      expect(result).toContain(RUNTIME_IMPORT)
+      // The Options-API script body is preserved (previously it was dropped by
+      // the SFC reconstruction).
+      expect(result).toContain("name: 'MyComponent'")
+      expect(result).toContain("return { msg: 'hello' }")
     })
 
-    it('should not transform a file without script or script setup', () => {
-      const code = `
-<template>
+    it('does not transform a file without a script block', () => {
+      const code = `<template>
   <div>static content</div>
 </template>
 `
@@ -54,103 +65,29 @@ export default {
 
       expect(result).toBeUndefined()
     })
-  })
 
-  describe('metadata injection', () => {
-    it('should inject correct component name from filename', () => {
-      const code = `
-<script setup lang="ts">
-const msg = 'hello'
-</script>
-
-<template>
-  <div>{{ msg }}</div>
-</template>
-`
-      const result = transform(code, '/src/components/TaskList.vue')
-
-      expect(result).toBeDefined()
-      expect(result).toContain('"componentName":"TaskList"')
-    })
-
-    it('should inject filePath in metadata', () => {
-      const code = `
-<script setup lang="ts">
+    it('is idempotent — does not inject twice on re-transform', () => {
+      const code = `<script setup lang="ts">
 const x = 1
 </script>
 
 <template>
-  <div>test</div>
+  <div>{{ x }}</div>
 </template>
 `
-      const result = transform(code, '/project/src/components/Button.vue')
+      const first = transform(code, '/src/components/Once.vue')
+      expect(first).toBeDefined()
+      expect(first!.split(VIRTUAL_MODULE_ID).length - 1).toBe(1)
 
-      expect(result).toBeDefined()
-      expect(result).toContain('"filePath":"/project/src/components/Button.vue"')
-    })
-
-    it('should set isDefaultExport to true', () => {
-      const code = `
-<script setup lang="ts">
-const x = 1
-</script>
-
-<template>
-  <div>test</div>
-</template>
-`
-      const result = transform(code, '/src/components/Widget.vue')
-
-      expect(result).toBeDefined()
-      expect(result).toContain('"isDefaultExport":true')
-    })
-
-    it('should include a sourceId hash', () => {
-      const code = `
-<script setup lang="ts">
-const x = 1
-</script>
-
-<template>
-  <div>test</div>
-</template>
-`
-      const result = transform(code, '/src/components/TestComp.vue')
-
-      expect(result).toBeDefined()
-      expect(result).toContain('"sourceId":"')
-    })
-
-    it('should generate different sourceIds for different file paths', () => {
-      const code = `
-<script setup lang="ts">
-const x = 1
-</script>
-
-<template>
-  <div>test</div>
-</template>
-`
-      const result1 = transform(code, '/src/components/CompA.vue')
-      const result2 = transform(code, '/src/components/CompB.vue')
-
-      expect(result1).toBeDefined()
-      expect(result2).toBeDefined()
-
-      // Extract sourceIds
-      const sourceId1 = result1!.match(/"sourceId":"([^"]+)"/)?.[1]
-      const sourceId2 = result2!.match(/"sourceId":"([^"]+)"/)?.[1]
-
-      expect(sourceId1).toBeDefined()
-      expect(sourceId2).toBeDefined()
-      expect(sourceId1).not.toBe(sourceId2)
+      // Feeding the already-transformed output back in is a no-op.
+      const second = transform(first!, '/src/components/Once.vue')
+      expect(second).toBeUndefined()
     })
   })
 
-  describe('script setup handling', () => {
-    it('should preserve existing script setup content', () => {
-      const code = `
-<script setup lang="ts">
+  describe('SFC preservation (no reconstruction)', () => {
+    it('preserves existing <script setup> content verbatim', () => {
+      const code = `<script setup lang="ts">
 import { ref, computed } from 'vue'
 import MyChild from './MyChild.vue'
 
@@ -169,11 +106,39 @@ const doubled = computed(() => count.value * 2)
       expect(result).toContain("import MyChild from './MyChild.vue'")
       expect(result).toContain('const count = ref(0)')
       expect(result).toContain('const doubled = computed')
+      // The opening tag (including lang) is untouched.
+      expect(result).toContain('<script setup lang="ts">')
     })
 
-    it('should handle JavaScript (non-TS) script setup', () => {
-      const code = `
-<script setup>
+    it('preserves a dual <script> + <script setup> SFC (both blocks kept)', () => {
+      const code = `<script lang="ts">
+export const SHARED = 'shared-const'
+export default { name: 'DualScript' }
+</script>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+const n = ref(1)
+</script>
+
+<template>
+  <div>{{ n }}</div>
+</template>
+`
+      const result = transform(code, '/src/components/DualScript.vue')
+
+      expect(result).toBeDefined()
+      expect(result).toContain(RUNTIME_IMPORT)
+      // The non-setup <script> block is NOT dropped (the old reconstruction
+      // silently lost it).
+      expect(result).toContain("export const SHARED = 'shared-const'")
+      expect(result).toContain("export default { name: 'DualScript' }")
+      // The setup block survives too.
+      expect(result).toContain('const n = ref(1)')
+    })
+
+    it('does not modify lang or add a TS lang attr to a JS <script setup>', () => {
+      const code = `<script setup>
 import { ref } from 'vue'
 const count = ref(0)
 </script>
@@ -185,16 +150,13 @@ const count = ref(0)
       const result = transform(code, '/src/components/JsComp.vue')
 
       expect(result).toBeDefined()
-      expect(result).toContain('withComponentHighlighter')
-      // The transform defaults to lang="ts" when no lang is specified
-      expect(result).toContain('lang="ts"')
+      expect(result).toContain('<script setup>')
+      // The old transform forced lang="ts"; we must not.
+      expect(result).not.toContain('lang="ts"')
     })
-  })
 
-  describe('template preservation', () => {
-    it('should preserve the template content', () => {
-      const code = `
-<script setup lang="ts">
+    it('preserves template content', () => {
+      const code = `<script setup lang="ts">
 const msg = 'hello'
 </script>
 
@@ -212,12 +174,9 @@ const msg = 'hello'
       expect(result).toContain('<h1>{{ msg }}</h1>')
       expect(result).toContain('<slot />')
     })
-  })
 
-  describe('style preservation', () => {
-    it('should preserve scoped styles', () => {
-      const code = `
-<script setup lang="ts">
+    it('preserves scoped styles, lang, and multiple style blocks', () => {
+      const code = `<script setup lang="ts">
 const x = 1
 </script>
 
@@ -225,109 +184,70 @@ const x = 1
   <div class="box">styled</div>
 </template>
 
-<style scoped>
-.box { color: red; }
+<style lang="scss" scoped>
+.box { color: blue; }
+</style>
+
+<style>
+.global { color: red; }
 </style>
 `
       const result = transform(code, '/src/components/Styled.vue')
 
       expect(result).toBeDefined()
-      expect(result).toContain('<style scoped>')
-      expect(result).toContain('.box { color: red; }')
-    })
-
-    it('should preserve style lang attribute', () => {
-      const code = `
-<script setup lang="ts">
-const x = 1
-</script>
-
-<template>
-  <div>styled</div>
-</template>
-
-<style lang="scss" scoped>
-.box { color: blue; }
-</style>
-`
-      const result = transform(code, '/src/components/ScssStyled.vue')
-
-      expect(result).toBeDefined()
-      expect(result).toContain('<style scoped lang="scss">')
-    })
-
-    it('should preserve multiple style blocks', () => {
-      const code = `
-<script setup lang="ts">
-const x = 1
-</script>
-
-<template>
-  <div>styled</div>
-</template>
-
-<style>
-.global { color: red; }
-</style>
-
-<style scoped>
-.local { color: blue; }
-</style>
-`
-      const result = transform(code, '/src/components/MultiStyle.vue')
-
-      expect(result).toBeDefined()
+      // Style blocks are passed through untouched (offsets/attrs preserved),
+      // unlike the old reconstruction which re-serialized them.
+      expect(result).toContain('<style lang="scss" scoped>')
+      expect(result).toContain('.box { color: blue; }')
       expect(result).toContain('.global { color: red; }')
-      expect(result).toContain('.local { color: blue; }')
     })
-  })
 
-  describe('virtual module import', () => {
-    it('should import withComponentHighlighter from the virtual module', () => {
-      const code = `
-<script setup lang="ts">
+    it('only adds the import — the rest of the file is byte-identical', () => {
+      const code = `<script setup lang="ts">
 const x = 1
 </script>
 
 <template>
-  <div>test</div>
+  <div>{{ x }}</div>
 </template>
 `
-      const result = transform(code, '/src/components/TestImport.vue')
-
+      const result = transform(code, '/src/components/Exact.vue')
       expect(result).toBeDefined()
-      expect(result).toContain(
-        "import { withComponentHighlighter } from 'virtual:component-highlighter/vue-runtime'",
-      )
+      // Removing the single injected import must restore the original source
+      // exactly (proves no other byte was touched).
+      expect(result!.replace(RUNTIME_IMPORT, '')).toBe(code)
     })
   })
 
   describe('error handling', () => {
-    it('should return undefined for malformed SFC', () => {
+    it('returns undefined for non-SFC content (no script block)', () => {
       const code = 'this is not a valid vue file'
-      // parseVue doesn't throw for non-SFC content, it just returns empty descriptors
-      // so this should return undefined because there's no script/scriptSetup
       const result = transform(code, '/src/components/Invalid.vue')
-
       expect(result).toBeUndefined()
     })
   })
 })
 
 describe('detectVue', () => {
-  it('should detect .vue files with template', () => {
-    expect(detectVue('<template><div>test</div></template>', '/src/App.vue')).toBe(true)
+  it('detects .vue files with template', () => {
+    expect(
+      detectVue('<template><div>test</div></template>', '/src/App.vue'),
+    ).toBe(true)
   })
 
-  it('should detect .vue files with script', () => {
-    expect(detectVue('<script>export default {}</script>', '/src/App.vue')).toBe(true)
+  it('detects .vue files with script', () => {
+    expect(detectVue('<script>export default {}</script>', '/src/App.vue')).toBe(
+      true,
+    )
   })
 
-  it('should not detect non-.vue files', () => {
-    expect(detectVue('<template><div>test</div></template>', '/src/App.tsx')).toBe(false)
+  it('does not detect non-.vue files', () => {
+    expect(
+      detectVue('<template><div>test</div></template>', '/src/App.tsx'),
+    ).toBe(false)
   })
 
-  it('should not detect .vue files without template or script', () => {
+  it('does not detect .vue files without template or script', () => {
     expect(detectVue('/* just a comment */', '/src/App.vue')).toBe(false)
   })
 })

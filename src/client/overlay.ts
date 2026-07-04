@@ -12,6 +12,7 @@ import {
 } from './interaction-recorder'
 import { createContextMenu, type ContextMenuHandle } from './context-menu'
 import { attachHighlightLabel, removeHighlightLabel } from './highlight-label'
+import { pickStoryId } from '../utils/story-matching'
 
 /**
  * Wraps an overlay operation in a try-catch so that errors in the
@@ -583,26 +584,12 @@ export async function showContextMenu(
         )
         const data = await res.json()
         const entries = data.entries || {}
-        const stripExt = (p: string) =>
-          p
-            .replace(/^\.\//, '')
-            .replace(/\.(stories\.)?(tsx?|jsx?|mts|mjs)$/, '')
-        const componentBase = stripExt(relativeFilePath)
-        const componentName =
-          componentBase.split('/').pop() || componentBase
-        for (const entry of Object.values(entries) as any[]) {
-          if (entry.type !== 'story') continue
-          const entryBase = stripExt(entry.importPath)
-          if (
-            entryBase === componentBase ||
-            entryBase.endsWith(componentName)
-          ) {
-            window.open(
-              `http://localhost:6006/?path=/story/${encodeURIComponent(entry.id)}&nav=0`,
-              '_blank',
-            )
-            return
-          }
+        const storyId = pickStoryId(entries, relativeFilePath)
+        if (storyId) {
+          window.open(
+            `http://localhost:6006/?path=/story/${encodeURIComponent(storyId)}&nav=0`,
+            '_blank',
+          )
         }
       } catch {
         // Storybook not available

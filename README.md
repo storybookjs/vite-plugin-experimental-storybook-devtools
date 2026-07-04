@@ -327,8 +327,8 @@ For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTU
 
 ### How It Works
 
-1. **Build-time**: Framework-specific transforms inject component metadata (React via Babel AST, Vue via SFC compiler)
-2. **Runtime**: Framework wrappers (React HOC / Vue composable) register component instances with metadata, props, and DOM elements
+1. **Build-time**: Non-intrusive transforms tag modules without wrapping or reconstructing components (React: a Babel `__chRegisterMeta` tag; Vue: a single idempotent runtime-import added to the SFC script block)
+2. **Runtime**: Detection is driven by each framework's DevTools global hook — React walks the live fiber tree on commit; Vue subscribes to `component:added/updated/removed`. Both read native source identity (React from the build-time tag, Vue from `instance.type.__file`/`__name`) and register instances with metadata, props, and DOM elements. No component is wrapped.
 3. **Interaction**: Client overlay renders highlights on hover/click, shows context menu with props and actions
 4. **Story Creation**: Serialized props are sent via DevTools RPC to the server plugin, which dynamically loads the framework-specific story generator and writes story files to disk
 5. **Interaction Recording**: User actions are captured as an ordered list of steps, then formatted into a Storybook play function
@@ -390,14 +390,16 @@ src/
     react/
       plugin.ts                           # React entry point
       index.ts                            # React framework config
-      transform.ts                        # Babel AST transformation
-      runtime-module.ts                   # React HOC + registration
+      transform.ts                        # Babel AST tag (__chRegisterMeta, non-wrapping)
+      devtools-hook.ts                    # Inline <head> React DevTools hook bootstrap
+      runtime-module.ts                   # Fiber-tree walker + registration
       story-generator.ts                  # React story generation
     vue/
       plugin.ts                           # Vue entry point
       index.ts                            # Vue framework config
-      transform.ts                        # Vue SFC transformation
-      runtime-module.ts                   # Vue composable + registration
+      transform.ts                        # Idempotent runtime-import tag (no SFC rebuild)
+      devtools-hook.ts                    # Inline <head> Vue DevTools hook bootstrap
+      runtime-module.ts                   # DevTools-hook event reconciler + registration
       story-generator.ts                  # Vue story generation
       vnode-to-template.ts               # VNode to template serialization
   client/

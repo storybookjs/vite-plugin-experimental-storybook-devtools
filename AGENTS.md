@@ -112,6 +112,7 @@ ctx.rpc.requestTrustWithToken(token);
 - Highlight toggle: `window.__componentHighlighterIsActive()` reflects state, cursor changes
 - Scroll-to-component: locate button triggers scroll via RPC
 - Create story / Create all: stories created without errors
+- Live prop editing (React AND Vue): the pencil on a prop row edits the live app; reset restores the original
 - Registry sync: `ctx.rpc.call('component-highlighter:get-registry')` returns instances
 
 ### Communication architecture

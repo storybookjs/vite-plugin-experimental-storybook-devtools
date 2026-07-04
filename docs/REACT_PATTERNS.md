@@ -58,6 +58,11 @@ Available in the **tooltip** (in-app overlay, direct call) and the **panel**
 (via `set-prop` RPC → `do-set-prop` → runtime). No remount; component state
 is preserved; the next commit re-syncs the registry/UI.
 
+The framework-agnostic machinery (payload decoding, reset-to-original
+snapshots, registry sync) is shared: `src/runtime-helpers.ts` →
+`createLivePropEditor`. Vue implements the same contract by mutating the
+shallow-reactive `instance.props` (see `docs/SUPPORTED_FRAMEWORKS.md`).
+
 | Value kind | Editor control | Notes |
 |---|---|---|
 | string | text input | |

@@ -1,26 +1,24 @@
 /**
- * Vue Transform
+ * Vue Transform — non-intrusive.
  *
- * AST transformation that instruments Vue SFC components
- * with the component highlighter wrapper.
+ * Vue components are detected at runtime via the Vue DevTools global hook
+ * (see src/frameworks/vue/devtools-hook.ts + runtime-module.ts), using Vue's
+ * native `instance.type.__file` / `__name` for source identity. This transform
+ * therefore does NOT reconstruct the SFC or inject any per-component tracking
+ * code. It performs exactly one minimal, idempotent edit: it prepends a
+ * side-effect `import 'virtual:component-highlighter/vue-runtime'` to the SFC's
+ * existing `<script setup>` (or `<script>`) block so the runtime module is
+ * pulled into the page's module graph. Nothing else in the SFC is touched —
+ * the original script body, template, styles, and custom blocks are preserved
+ * byte-for-byte. Non-`setup` `<script>` blocks are no longer dropped.
+ *
+ * Returning the (minimally) edited source (rather than `undefined`) also keeps
+ * the plugin's coverage tracking working, which keys off a truthy transform
+ * result.
  */
 
 import { parse as parseVue } from '@vue/compiler-sfc'
 import type { TransformFunction } from '../types'
-import * as path from 'path'
-
-/**
- * Simple hash function for generating source IDs
- */
-function createHash(data: string): string {
-  let hash = 0
-  for (let i = 0; i < data.length; i++) {
-    const char = data.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(36)
-}
 
 /**
  * Virtual module ID for Vue runtime
@@ -28,106 +26,54 @@ function createHash(data: string): string {
 export const VIRTUAL_MODULE_ID = 'virtual:component-highlighter/vue-runtime'
 
 /**
- * Transform Vue SFC files to wrap components with the highlighter
+ * The side-effect import that loads the Vue runtime module. Idempotent: we skip
+ * the edit if it is already present (avoids double-insertion on re-transform).
+ */
+const RUNTIME_IMPORT = `import '${VIRTUAL_MODULE_ID}';`
+
+/**
+ * Transform Vue SFC files: prepend a single side-effect import of the runtime
+ * module to the script block. No SFC reconstruction.
  */
 export const transform: TransformFunction = (
   code: string,
   id: string,
+  options = {},
 ): string | undefined => {
   try {
-    // Parse the Vue SFC
-    const { descriptor } = parseVue(code, { filename: id })
-
-    // Check if this is a component (has script or template)
-    if (!descriptor.script && !descriptor.scriptSetup) {
+    // Already instrumented (e.g. re-transform / HMR) — leave as-is.
+    if (code.includes(VIRTUAL_MODULE_ID)) {
       return undefined
     }
 
-    const componentName = getComponentName(id)
-    const relativeFilePath = path.relative(process.cwd(), id)
-    const sourceId = createHash(id)
+    const { descriptor } = parseVue(code, { filename: id })
 
-    // Generate the wrapper component
-    const transformedCode = generateWrappedComponent(
-      descriptor,
-      componentName,
-      sourceId,
-      id,
-      relativeFilePath,
-    )
+    // Only instrument components that have a script block. The block's
+    // `loc.start.offset` points at the first character of the block's *inner*
+    // content (immediately after the opening tag), so inserting there leaves
+    // the tag, its attributes, the template, styles, and any other blocks
+    // untouched. Prefer `<script setup>`; fall back to a plain `<script>`.
+    const scriptBlock = descriptor.scriptSetup ?? descriptor.script
+    if (!scriptBlock) {
+      return undefined
+    }
 
-    return transformedCode
+    const insertAt = scriptBlock.loc.start.offset
+    const transformed =
+      code.slice(0, insertAt) + RUNTIME_IMPORT + code.slice(insertAt)
+
+    return transformed
   } catch (error) {
-    console.warn(`[component-highlighter] Failed to transform ${id}:`, error)
+    const detail = (error as { message?: string })?.message || String(error)
+    // Prefer a structured diagnostic (the plugin routes it to ctx.diagnostics);
+    // fall back to console when the transform runs standalone (e.g. tests).
+    if (options.onIssue) {
+      options.onIssue({ code: 'transform-failed', file: id, detail })
+    } else {
+      console.warn(`[component-highlighter] Failed to transform ${id}:`, error)
+    }
     return undefined
   }
-}
-
-/**
- * Extract component name from file path
- */
-function getComponentName(filePath: string): string {
-  const fileNameWithExt = path.basename(filePath)
-  const fileName = fileNameWithExt.replace(/\.(vue|tsx|ts|jsx|js)$/, '')
-  return fileName
-}
-
-/**
- * Generate the wrapped Vue component code
- */
-function generateWrappedComponent(
-  descriptor: any,
-  componentName: string,
-  sourceId: string,
-  filePath: string,
-  relativeFilePath: string,
-): string {
-  // Get or create script setup block
-  const scriptSetupContent = descriptor.scriptSetup?.content || ''
-  const scriptLang =
-    descriptor.scriptSetup?.lang || descriptor.script?.lang || 'ts'
-
-  // Get template
-  const templateContent = descriptor.template?.content || ''
-
-  // Get styles
-  const styles = descriptor.styles
-    .map((style: any) => {
-      const scopedAttr = style.scoped ? ' scoped' : ''
-      const langAttr = style.lang ? ` lang="${style.lang}"` : ''
-      return `<style${scopedAttr}${langAttr}>${style.content}</style>`
-    })
-    .join('\n')
-
-  // Create metadata object
-  const metaObject = {
-    componentName,
-    sourceId,
-    filePath,
-    relativeFilePath,
-    isDefaultExport: true,
-  }
-
-  // Inject the highlighter setup into the script
-  const injectedSetup = `import { withComponentHighlighter } from '${VIRTUAL_MODULE_ID}'
-
-const __componentMeta = ${JSON.stringify(metaObject)}
-withComponentHighlighter(__componentMeta)
-
-${scriptSetupContent}`
-
-  // Generate new component with wrapper
-  const wrappedCode = `
-<script setup ${scriptLang === 'ts' ? 'lang="ts"' : ''}>${injectedSetup}</script>
-
-<template>
-  ${templateContent}
-</template>
-
-${styles}
-`
-
-  return wrappedCode
 }
 
 /**
