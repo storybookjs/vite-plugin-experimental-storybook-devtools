@@ -1462,14 +1462,17 @@ export function createComponentHighlighterPlugin(
       ]
     },
     resolveId(id) {
-      if (id === runtimeHelperVirtualId) {
+      // HMR invalidation appends ?t=<timestamp> to re-fetched imports —
+      // strip any query before matching our virtual ids.
+      const bareId = id.split('?', 1)[0]!
+      if (bareId === runtimeHelperVirtualId) {
         return resolvedRuntimeHelperVirtualId
       }
-      if (id === resolvedRuntimeHelperVirtualId) {
+      if (bareId === resolvedRuntimeHelperVirtualId) {
         return resolvedRuntimeHelperVirtualId
       }
-      if (id === framework.virtualModuleId) {
-        return '\0' + id
+      if (bareId === framework.virtualModuleId) {
+        return '\0' + bareId
       }
       return null
     },
@@ -1502,15 +1505,27 @@ export function createComponentHighlighterPlugin(
         const shouldUseSource =
           isServe && fs.existsSync(runtimeModuleSourcePath)
 
-        const injectDebugMode = (code: string) =>
-          code.replace(
-            /__COMPONENT_HIGHLIGHTER_DEBUG__/g,
-            debugMode ? 'true' : 'false',
-          )
+        // Replace the loader-injected build constants declared by the runtime
+        // modules (`declare const __COMPONENT_HIGHLIGHTER_*__`). The project
+        // root lets the Vue runtime derive exact cwd-relative paths at runtime
+        // (React gets them from its build-time transform instead).
+        const injectBuildConstants = (code: string) =>
+          code
+            .replace(
+              /__COMPONENT_HIGHLIGHTER_DEBUG__/g,
+              debugMode ? 'true' : 'false',
+            )
+            .replace(/__COMPONENT_HIGHLIGHTER_ROOT__/g, () =>
+              JSON.stringify(process.cwd().replace(/\\/g, '/')),
+            )
 
+        // Vite's import-analysis rewrites the helpers import to its /@id/
+        // form and, after an HMR invalidation, appends a `?t=<timestamp>`
+        // query. Normalize both back to the bare virtual id so resolveId
+        // matches when the browser re-imports this module.
         const normalizeRuntimeImports = (code: string) =>
           code.replace(
-            /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers/g,
+            /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
             'virtual:component-highlighter/runtime-helpers',
           )
 
@@ -1519,12 +1534,14 @@ export function createComponentHighlighterPlugin(
             runtimeModuleSourcePath,
           )
           if (transformed?.code) {
-            return injectDebugMode(normalizeRuntimeImports(transformed.code))
+            return injectBuildConstants(
+              normalizeRuntimeImports(transformed.code),
+            )
           }
         }
 
         if (shouldUseSource) {
-          return injectDebugMode(
+          return injectBuildConstants(
             normalizeRuntimeImports(
               fs.readFileSync(runtimeModuleSourcePath, 'utf-8'),
             ),
@@ -1537,7 +1554,7 @@ export function createComponentHighlighterPlugin(
           )
         }
 
-        return injectDebugMode(
+        return injectBuildConstants(
           normalizeRuntimeImports(
             fs.readFileSync(runtimeModuleFilePath, 'utf-8'),
           ),

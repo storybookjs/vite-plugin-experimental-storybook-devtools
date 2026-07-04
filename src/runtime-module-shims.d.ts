@@ -16,28 +16,39 @@ declare module 'virtual:component-highlighter/runtime-helpers' {
     id: string,
     element: Element,
   ): () => void
-  export function syncInstanceTracking(options: {
-    state: {
-      id: string | null
-      element: Element | null
-      disconnect: (() => void) | null
-    }
-    element: Element
-    props: Record<string, unknown>
-    register: (element: Element, props: Record<string, unknown>) => string
-    unregister: (id: string) => void
-    updateProps: (id: string, props: Record<string, unknown>) => void
-    getInstance: (
+
+  export type PropPath = Array<string | number>
+  export type SetPropPayload = { kind: string; text: string }
+  export type PropEditResult = { ok: boolean; error?: string }
+  export interface LivePropEditor {
+    setProp: (
       id: string,
-    ) => { element?: Element; rect?: DOMRect } | undefined
-  }): void
-  export function cleanupInstanceTracking(
-    state: {
-      id: string | null
-      element: Element | null
-      disconnect: (() => void) | null
-    },
-    unregister: (id: string) => void,
+      path: PropPath,
+      payload: SetPropPayload,
+    ) => PropEditResult
+    resetProp: (id: string, path: PropPath) => PropEditResult
+    getEditedProps: (id: string) => string[]
+    forgetInstance: (id: string) => void
+  }
+  export function setAtPath(
+    obj: Record<string, unknown>,
+    path: PropPath,
+    value: unknown,
+  ): Record<string, unknown>
+  export function getAtPath(obj: unknown, path: PropPath): unknown
+  export function createLivePropEditor(options: {
+    getInstance: (id: string) =>
+      | {
+          props: Record<string, unknown>
+          serializedProps: Record<string, unknown>
+        }
+      | undefined
+    serializeValue: (value: unknown) => unknown
+    applyOverride: (id: string, path: PropPath, value: unknown) => void
+  }): LivePropEditor
+  export function installLivePropEditGlobals(
+    editor: LivePropEditor,
+    canEdit: () => boolean,
   ): void
 }
 
@@ -52,14 +63,6 @@ declare module 'react' {
   export type ReactElement = any
   export type ComponentType<T = any> = any
   export type ReactNode = any
-}
-
-declare module 'vue' {
-  export const provide: any
-  export const onMounted: any
-  export const onUpdated: any
-  export const onUnmounted: any
-  export const getCurrentInstance: any
 }
 
 declare module 'react-element-to-jsx-string/dist/esm/index.js' {
