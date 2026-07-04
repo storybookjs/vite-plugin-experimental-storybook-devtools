@@ -14,7 +14,10 @@ jobs:
       with:
         node-version: lts/*
     - name: Install dependencies
-      run: npm install -g pnpm && pnpm install
+      # Pin pnpm to the version in package.json's packageManager field.
+      # Unpinned latest (11.x) applies stricter supply-chain policies that
+      # reject entries in the current lockfile (ERR_PNPM_TRUST_DOWNGRADE).
+      run: npm install -g pnpm@10.33.0 && pnpm install
     - name: Install Playwright Browsers
       run: pnpm exec playwright install --with-deps
     - name: Build project
