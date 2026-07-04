@@ -61,10 +61,10 @@ function createRecordingIndicator() {
     position: fixed;
     bottom: 12px;
     left: 12px;
-    background: #dc2626;
+    background: #D13800;
     color: white;
     padding: 8px 14px;
-    border-radius: 8px;
+    border-radius: 4px;
     font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
     font-size: 12px;
     line-height: 1.5;
@@ -91,7 +91,7 @@ function createRecordingIndicator() {
   const label = document.createElement('span')
   label.id = 'recording-label'
   label.textContent = 'Recording...'
-  label.style.fontWeight = '600'
+  label.style.fontWeight = '700'
 
   const stopBtn = document.createElement('button')
   stopBtn.id = 'recording-stop-btn'
@@ -103,7 +103,7 @@ function createRecordingIndicator() {
     padding: 2px 8px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 11px;
+    font-size: 12px;
     font-family: inherit;
   `
   stopBtn.textContent = 'Stop'

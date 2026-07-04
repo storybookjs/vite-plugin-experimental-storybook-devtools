@@ -3,6 +3,7 @@
  * These run in the app's browser context so they can access the DOM directly.
  */
 import type { ComponentInstance } from '../frameworks/types'
+import { attachHighlightLabel } from './highlight-label'
 
 // Reference set by listeners.ts during initialization
 let componentRegistry: Map<string, ComponentInstance> | null = null
@@ -20,6 +21,37 @@ export function clearCoverageHighlights() {
   els.forEach((el) => el.remove())
 }
 
+/**
+ * Create a highlight overlay box for a component instance with a name label.
+ */
+function createHighlightBox(
+  rect: DOMRect,
+  componentName: string,
+  color: string,
+): HTMLDivElement {
+  const box = document.createElement('div')
+  box.style.cssText = `
+    position: fixed;
+    left: ${rect.left}px;
+    top: ${rect.top}px;
+    width: ${rect.width}px;
+    height: ${rect.height}px;
+    outline: 2px solid ${color};
+    outline-offset: -1px;
+    background: ${color}22;
+    pointer-events: none;
+    z-index: 999999;
+    transition: opacity 0.2s ease;
+    border-radius: 2px;
+  `
+  box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+
+  // Attach the shared name label
+  attachHighlightLabel(box, rect, componentName, color)
+
+  return box
+}
+
 export function showCoverageHighlights(
   componentName: string,
   hasStory: boolean,
@@ -27,7 +59,9 @@ export function showCoverageHighlights(
   clearCoverageHighlights()
   if (!componentRegistry) return
 
-  const color = hasStory ? '#22c55e' : '#ef4444'
+  // Hardcoded hex — inline styles on the host page, CSS vars not available.
+  // #86CE64 = --sb-fgcolor-positive (dark), #FF6933 = --sb-fgcolor-negative (dark)
+  const color = hasStory ? '#86CE64' : '#FF6933'
 
   for (const instance of componentRegistry.values()) {
     if (
@@ -36,22 +70,36 @@ export function showCoverageHighlights(
       instance.element.nodeType === Node.ELEMENT_NODE
     ) {
       const rect = instance.element.getBoundingClientRect()
-      const box = document.createElement('div')
-      box.style.cssText = `
-        position: fixed;
-        left: ${rect.left}px;
-        top: ${rect.top}px;
-        width: ${rect.width}px;
-        height: ${rect.height}px;
-        outline: 2px solid ${color};
-        outline-offset: -1px;
-        background: ${color}22;
-        pointer-events: none;
-        z-index: 999999;
-        transition: opacity 0.2s ease;
-        border-radius: 2px;
-      `
-      box.setAttribute(COVERAGE_HIGHLIGHT_ATTR, 'true')
+      const box = createHighlightBox(rect, componentName, color)
+      document.body.appendChild(box)
+    }
+  }
+}
+
+/**
+ * Highlight multiple components at once (used by Preview button).
+ * Each entry specifies a componentName and hasStory flag.
+ */
+export function showBatchCoverageHighlights(
+  components: Array<{ componentName: string; hasStory: boolean }>,
+) {
+  clearCoverageHighlights()
+  if (!componentRegistry) return
+
+  const nameToStory = new Map(
+    components.map((c) => [c.componentName, c.hasStory]),
+  )
+
+  for (const instance of componentRegistry.values()) {
+    const hasStory = nameToStory.get(instance.meta.componentName)
+    if (
+      hasStory !== undefined &&
+      instance.element?.isConnected &&
+      instance.element.nodeType === Node.ELEMENT_NODE
+    ) {
+      const color = hasStory ? '#86CE64' : '#FF6933'
+      const rect = instance.element.getBoundingClientRect()
+      const box = createHighlightBox(rect, instance.meta.componentName, color)
       document.body.appendChild(box)
     }
   }

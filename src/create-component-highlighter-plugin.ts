@@ -6,6 +6,7 @@ import { defineRpcFunction, defineCommand } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import type { NotificationService } from './notifications'
 import {
   ConsoleNotificationService,
@@ -25,28 +26,67 @@ declare module '@vitejs/devtools-kit' {
     'component-highlighter:toggle-overlay': (data: { enabled: boolean }) => void
     'component-highlighter:create-story': (data: ComponentStoryData) => void
     'component-highlighter:push-registry-diff': (diff: RegistryDiff) => void
-    'component-highlighter:scroll-to-component': (data: { componentName: string }) => void
-    'component-highlighter:highlight-coverage-instances': (data: { componentName: string; hasStory: boolean } | null) => void
-    'component-highlighter:set-highlight-mode': (data: { enabled: boolean }) => void
-    'component-highlighter:visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
-    'component-highlighter:notify': (data: { message: string; level?: string }) => void
+    'component-highlighter:scroll-to-component': (data: {
+      componentName: string
+    }) => void
+    'component-highlighter:highlight-coverage-instances': (
+      data: { componentName: string; hasStory: boolean } | null,
+    ) => void
+    'component-highlighter:highlight-coverage-batch': (
+      data: Array<{ componentName: string; hasStory: boolean }>,
+    ) => void
+    'component-highlighter:set-highlight-mode': (data: {
+      enabled: boolean
+    }) => void
+    'component-highlighter:visit-story': (data: {
+      relativeFilePath: string
+      preferredStoryName?: string
+    }) => void
+    'component-highlighter:notify': (data: {
+      message: string
+      level?: string
+    }) => void
+    'component-highlighter:select-component': (
+      data: SerializedRegistryInstance | null,
+    ) => void
   }
 
   interface DevToolsRpcClientFunctions {
-    'component-highlighter:do-scroll-to-component': (data: { componentName: string }) => void
-    'component-highlighter:do-highlight-coverage': (data: { componentName: string; hasStory: boolean } | null) => void
-    'component-highlighter:do-set-highlight-mode': (data: { enabled: boolean; toggle?: boolean }) => void
-    'component-highlighter:do-visit-story': (data: { relativeFilePath: string; preferredStoryName?: string }) => void
+    'component-highlighter:do-scroll-to-component': (data: {
+      componentName: string
+    }) => void
+    'component-highlighter:do-highlight-coverage': (
+      data: { componentName: string; hasStory: boolean } | null,
+    ) => void
+    'component-highlighter:do-highlight-coverage-batch': (
+      data: Array<{ componentName: string; hasStory: boolean }>,
+    ) => void
+    'component-highlighter:do-set-highlight-mode': (data: {
+      enabled: boolean
+      toggle?: boolean
+    }) => void
+    'component-highlighter:do-visit-story': (data: {
+      relativeFilePath: string
+      preferredStoryName?: string
+    }) => void
     'component-highlighter:do-open-url': (data: { url: string }) => void
     'component-highlighter:do-open-panel-tab': (data: { tab: string }) => void
     'component-highlighter:do-switch-tab': (data: { tab: string }) => void
+    'component-highlighter:do-select-component': (
+      data: SerializedRegistryInstance | null,
+    ) => void
   }
 
   interface DevToolsRpcSharedStates {
     'component-highlighter:registry': SerializedRegistryInstance[]
-    'component-highlighter:pending-visit': { relativeFilePath: string; preferredStoryName?: string } | null
+    'component-highlighter:pending-visit': {
+      relativeFilePath: string
+      preferredStoryName?: string
+    } | null
     'component-highlighter:pending-tab': string | null
     'component-highlighter:highlight-active': boolean
+    'component-highlighter:selected-component': SerializedRegistryInstance | null
+    'component-highlighter:highlighter-tab-active': boolean
   }
 }
 
@@ -211,7 +251,6 @@ export function createComponentHighlighterPlugin(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let pendingTabState: any = null
 
-
   // Terminal-based Storybook launcher state
   let devtoolsTerminals: any = null // ctx.terminals reference from devtools.setup
   let storybookSession: any = null
@@ -235,13 +274,47 @@ export function createComponentHighlighterPlugin(
         'vite-plugin-experimental-storybook-devtools/client/listeners',
         'vite-plugin-experimental-storybook-devtools/client/overlay',
       )
-      // @testing-library/dom depends on aria-query (CJS) which breaks when
-      // loaded as raw ESM. Pre-bundle it so Vite handles the CJS→ESM conversion.
+
+      // @testing-library/dom and aria-query are CJS-only packages. Pre-bundle
+      // them so Vite handles the CJS→ESM conversion and named imports work.
       viteConfig.optimizeDeps.include ??= []
-      viteConfig.optimizeDeps.include.push('@testing-library/dom')
+      viteConfig.optimizeDeps.include.push('@testing-library/dom', 'aria-query')
+
       if (framework.name === 'react') {
+        // react-element-to-jsx-string and its dependency react-is are CJS-only
+        // packages that live in this plugin's node_modules, not the consumer's.
+        // We use resolve.alias to redirect the imports to our copies so Vite's
+        // dep optimizer can find them. optimizeDeps.include triggers pre-bundling
+        // (CJS→ESM conversion) so named imports work in the browser.
+        // IMPORTANT: alias must be used instead of a resolveId hook here — aliases
+        // are applied before the dep optimization lookup, so Vite pre-bundles the
+        // result. A resolveId hook returning an absolute path bypasses the cache
+        // and serves the raw CJS file, which breaks named ESM imports.
+        const _require = createRequire(import.meta.url)
+        viteConfig.resolve ??= {}
+        // alias can be an array or a plain object; normalise to a mutable array
+        type AliasEntry = { find: string | RegExp; replacement: string }
+        const existingAliases: AliasEntry[] = Array.isArray(viteConfig.resolve.alias)
+          ? [...viteConfig.resolve.alias]
+          : Object.entries(viteConfig.resolve.alias ?? {}).map(
+              ([find, replacement]) => ({ find, replacement }),
+            )
+        viteConfig.resolve.alias = [
+          ...existingAliases,
+          {
+            find: 'react-element-to-jsx-string/dist/esm/index.js',
+            replacement: _require.resolve(
+              'react-element-to-jsx-string/dist/esm/index.js',
+            ),
+          },
+          {
+            find: 'react-is',
+            replacement: _require.resolve('react-is'),
+          },
+        ]
         viteConfig.optimizeDeps.include.push(
           'react-element-to-jsx-string/dist/esm/index.js',
+          'react-is',
         )
       }
     },
@@ -471,7 +544,6 @@ export function createComponentHighlighterPlugin(
           )
         },
       )
-
     },
     devtools: {
       setup(ctx) {
@@ -487,7 +559,7 @@ export function createComponentHighlighterPlugin(
         ctx.docks.register({
           id: devtoolsDockId,
           title: 'Component Highlighter',
-          icon: 'ph:crosshair',
+          icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>",
           type: 'action',
           action: {
             importFrom:
@@ -504,7 +576,7 @@ export function createComponentHighlighterPlugin(
           ctx.docks.register({
             id: 'storybook-devtools-panel',
             title: 'Storybook',
-            icon: 'https://avatars.githubusercontent.com/u/22632046',
+            icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><g transform='translate(1.49,0)'><path d='M0.424547 12.6139L0.000492865 1.31474C-0.013512 0.941579 0.272618 0.625325 0.645319 0.602032L10.256 0.00136365C10.6354 -0.0223467 10.9621 0.265968 10.9858 0.645333C10.9867 0.659626 10.9872 0.673944 10.9872 0.688265V13.0006C10.9872 13.3808 10.679 13.6889 10.2989 13.6889C10.2886 13.6889 10.2783 13.6887 10.2681 13.6882L1.08142 13.2756C0.723641 13.2595 0.437978 12.9717 0.424547 12.6139Z' fill='%23FF4785'/></g><g transform='translate(4.32,0.05)'><path d='M2.8709 2.41309C4.66253 2.41309 5.64141 3.37189 5.64141 5.19531C5.39918 5.38328 3.59731 5.51136 3.59551 5.24414C3.63363 4.2224 3.17581 4.17676 2.92168 4.17676C2.6802 4.17684 2.27422 4.25082 2.27422 4.79785C2.27474 6.1477 5.75567 6.07536 5.75567 8.7998C5.75543 10.3321 4.50986 11.1787 2.92168 11.1787C1.28271 11.1786 -0.149264 10.5148 0.0125021 8.21582C0.0781737 7.94653 2.15713 8.01044 2.15996 8.21582C2.13456 9.16434 2.35021 9.4442 2.89629 9.44434C3.31561 9.44434 3.50664 9.21248 3.50664 8.82324C3.50588 7.43713 0.0764084 7.38812 0.0759787 4.84668C0.0759787 3.38715 1.07952 2.41323 2.8709 2.41309ZM6.72637 1.58008C6.72811 1.63655 6.68328 1.68357 6.62676 1.68555C6.60253 1.68637 6.57842 1.67907 6.55938 1.66406L6.05059 1.2627L5.44805 1.71973C5.40288 1.75399 5.33876 1.74536 5.30449 1.7002C5.29007 1.68118 5.28299 1.65764 5.28399 1.63379L5.34844 0.0830078L6.67071 0L6.72637 1.58008Z' fill='white'/></g></svg>",
             type: 'iframe',
             url:
               '/.storybook-devtools/?sbUrl=' + encodeURIComponent(storybookUrl),
@@ -513,21 +585,47 @@ export function createComponentHighlighterPlugin(
 
         // ─── Shared state initialization ─────────────────────────────────
 
-        ctx.rpc.sharedState.get('component-highlighter:registry', {
-          initialValue: [] as SerializedRegistryInstance[],
-        }).then((s) => { registryState = s })
+        ctx.rpc.sharedState
+          .get('component-highlighter:registry', {
+            initialValue: [] as SerializedRegistryInstance[],
+          })
+          .then((s) => {
+            registryState = s
+          })
 
-        ctx.rpc.sharedState.get('component-highlighter:pending-visit', {
-          initialValue: null as { relativeFilePath: string; preferredStoryName?: string } | null,
-        }).then((s) => { pendingVisitState = s })
+        ctx.rpc.sharedState
+          .get('component-highlighter:pending-visit', {
+            initialValue: null as {
+              relativeFilePath: string
+              preferredStoryName?: string
+            } | null,
+          })
+          .then((s) => {
+            pendingVisitState = s
+          })
 
-        ctx.rpc.sharedState.get('component-highlighter:pending-tab', {
-          initialValue: null as string | null,
-        }).then((s) => { pendingTabState = s })
+        ctx.rpc.sharedState
+          .get('component-highlighter:pending-tab', {
+            initialValue: null as string | null,
+          })
+          .then((s) => {
+            pendingTabState = s
+          })
 
         ctx.rpc.sharedState.get('component-highlighter:highlight-active', {
           initialValue: false,
         })
+
+        ctx.rpc.sharedState.get('component-highlighter:selected-component', {
+          initialValue: null as SerializedRegistryInstance | null,
+        })
+
+        ctx.rpc.sharedState.get(
+          'component-highlighter:highlighter-tab-active',
+          {
+            initialValue: false,
+          },
+        )
 
         // Register RPC functions for communication with the client
         ctx.rpc.register(
@@ -812,9 +910,29 @@ export function createComponentHighlighterPlugin(
             name: 'component-highlighter:highlight-coverage-instances',
             type: 'action',
             setup: () => ({
-              handler: (data: { componentName: string; hasStory: boolean } | null) => {
+              handler: (
+                data: { componentName: string; hasStory: boolean } | null,
+              ) => {
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-highlight-coverage',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Panel → server → client: batch highlight coverage instances (Preview button)
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:highlight-coverage-batch',
+            type: 'action',
+            setup: () => ({
+              handler: (
+                data: Array<{ componentName: string; hasStory: boolean }>,
+              ) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-highlight-coverage-batch',
                   args: [data],
                 })
               },
@@ -846,12 +964,31 @@ export function createComponentHighlighterPlugin(
             name: 'component-highlighter:visit-story',
             type: 'action',
             setup: () => ({
-              handler: (data: { relativeFilePath: string; preferredStoryName?: string }) => {
+              handler: (data: {
+                relativeFilePath: string
+                preferredStoryName?: string
+              }) => {
                 if (pendingVisitState) {
                   pendingVisitState.mutate(() => data)
                 }
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-visit-story',
+                  args: [data],
+                })
+              },
+            }),
+          }),
+        )
+
+        // Client/overlay → server → panel: select a component in the highlighter panel
+        ctx.rpc.register(
+          defineRpcFunction({
+            name: 'component-highlighter:select-component',
+            type: 'action',
+            setup: () => ({
+              handler: (data: SerializedRegistryInstance | null) => {
+                ctx.rpc.broadcast({
+                  method: 'component-highlighter:do-select-component',
                   args: [data],
                 })
               },
@@ -866,7 +1003,9 @@ export function createComponentHighlighterPlugin(
             type: 'action',
             setup: () => ({
               handler: (data: { message: string; level?: string }) => {
-                const level = (data.level as 'info' | 'warn' | 'error' | 'success') || 'info'
+                const level =
+                  (data.level as 'info' | 'warn' | 'error' | 'success') ||
+                  'info'
                 notifications.notify({
                   message: data.message,
                   level,
@@ -922,7 +1061,8 @@ export function createComponentHighlighterPlugin(
           defineCommand({
             id: 'storybook:create-missing-stories',
             title: 'Write Stories for Missing Components',
-            description: 'Generate story files for all visible components without stories',
+            description:
+              'Generate story files for all visible components without stories',
             icon: 'ph:file-plus-duotone',
             category: 'Storybook',
             handler: async () => {
@@ -949,32 +1089,42 @@ export function createComponentHighlighterPlugin(
               for (const entry of uncovered) {
                 // Find a matching instance in the registry
                 const allInstances = registryState?.value() ?? []
-                const instances = (allInstances as SerializedRegistryInstance[])
-                  .filter((inst) => inst.meta.filePath === entry.filePath && inst.isConnected)
+                const instances = (
+                  allInstances as SerializedRegistryInstance[]
+                ).filter(
+                  (inst) =>
+                    inst.meta.filePath === entry.filePath && inst.isConnected,
+                )
                 if (instances.length === 0) continue
 
                 // Deduplicate by props fingerprint
                 const seen = new Set<string>()
                 for (const inst of instances) {
-                  const fp = inst.serializedProps ? JSON.stringify(inst.serializedProps) : '{}'
+                  const fp = inst.serializedProps
+                    ? JSON.stringify(inst.serializedProps)
+                    : '{}'
                   if (seen.has(fp)) continue
                   seen.add(fp)
 
                   // Invoke the create-story handler directly
-                  await (ctx.rpc.invokeLocal as any)('component-highlighter:create-story', {
-                    meta: inst.meta,
-                    props: inst.props,
-                    serializedProps: inst.serializedProps,
-                    skipNavigation: true,
-                  })
+                  await (ctx.rpc.invokeLocal as any)(
+                    'component-highlighter:create-story',
+                    {
+                      meta: inst.meta,
+                      props: inst.props,
+                      serializedProps: inst.serializedProps,
+                      skipNavigation: true,
+                    },
+                  )
                   storiesCreated++
                 }
               }
 
               notifications.notify({
-                message: storiesCreated > 0
-                  ? `Created stories for ${storiesCreated} component${storiesCreated === 1 ? '' : 's'}`
-                  : 'No visible uncovered components found — navigate to a page with components first',
+                message:
+                  storiesCreated > 0
+                    ? `Created stories for ${storiesCreated} component${storiesCreated === 1 ? '' : 's'}`
+                    : 'No visible uncovered components found — navigate to a page with components first',
                 level: storiesCreated > 0 ? 'success' : 'info',
                 toast: true,
                 autoDismissMs: 4000,
@@ -991,7 +1141,8 @@ export function createComponentHighlighterPlugin(
           defineCommand({
             id: 'storybook:see-coverage',
             title: 'See Component Coverage',
-            description: 'Open the coverage dashboard showing story status for all components',
+            description:
+              'Open the coverage dashboard showing story status for all components',
             icon: 'ph:chart-bar-duotone',
             category: 'Storybook',
             handler: () => {
@@ -1106,9 +1257,15 @@ export function createComponentHighlighterPlugin(
       }
       return null
     },
-    transform(code, id) {
+    transform(code, id, options) {
       // Only transform in dev/serve mode unless force is enabled
       if (!isServe && !force) {
+        return
+      }
+
+      // Never instrument components for SSR builds — the runtime module uses
+      // browser-only APIs (CustomEvent, window) and would crash in Node.js.
+      if (options?.ssr) {
         return
       }
 
