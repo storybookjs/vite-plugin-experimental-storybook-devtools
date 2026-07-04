@@ -137,18 +137,31 @@ export const transform: TransformFunction = (
     const exportedNames = new Set<string>()
     let defaultExportName: string | null = null
 
+    // Non-fatal detection gaps to surface as diagnostics.
+    let anonDefaultLoc: string | null = null
+    const unsupportedHoc = new Map<string, string>() // name -> file:line:col
+    const nodeLoc = (node: t.Node | null | undefined): string =>
+      node?.loc
+        ? `${id}:${node.loc.start.line}:${node.loc.start.column + 1}`
+        : id
+
     const considerFunction = (decl: t.FunctionDeclaration) => {
       const name = decl.id?.name
       if (name && isComponentName(name)) topLevelComponents.add(name)
     }
     const considerVariable = (varDecl: t.VariableDeclaration) => {
       for (const d of varDecl.declarations) {
-        if (
-          d.id.type === 'Identifier' &&
-          isComponentName(d.id.name) &&
-          isComponentInit(d.init)
-        ) {
+        if (d.id.type !== 'Identifier' || !isComponentName(d.id.name)) continue
+        if (isComponentInit(d.init)) {
           topLevelComponents.add(d.id.name)
+        } else if (
+          d.init &&
+          d.init.type === 'CallExpression' &&
+          !isMemoOrForwardRef(d.init)
+        ) {
+          // PascalCase `X = someCall(...)` that isn't memo/forwardRef — likely
+          // an unrecognized HOC wrapper we can't statically tag.
+          unsupportedHoc.set(d.id.name, nodeLoc(d.init))
         }
       }
     }
@@ -192,6 +205,13 @@ export const transform: TransformFunction = (
           defaultExportName = decl.id.name
         } else if (decl.type === 'Identifier') {
           defaultExportName = decl.name
+        } else if (
+          decl.type === 'ArrowFunctionExpression' ||
+          decl.type === 'FunctionExpression'
+        ) {
+          // `export default () => …` / `export default function () {}` —
+          // anonymous, no stable binding to tag.
+          anonDefaultLoc = nodeLoc(decl)
         }
         // Anonymous default expressions are skipped: no stable binding to tag.
       }
@@ -204,6 +224,33 @@ export const transform: TransformFunction = (
     for (const name of topLevelComponents) {
       if (exportedNames.has(name)) {
         componentBindings.set(name, name === defaultExportName)
+      }
+    }
+
+    // Surface non-fatal detection gaps as diagnostics — only for files that
+    // actually render JSX (component modules), so unrelated PascalCase factory
+    // exports in non-component files aren't flagged.
+    if (hasJsx && options.onIssue) {
+      if (anonDefaultLoc) {
+        options.onIssue({
+          code: 'unsupported-pattern',
+          file: id,
+          name: 'default',
+          loc: anonDefaultLoc,
+          detail:
+            'Anonymous default export can’t be detected for story generation. Give it a name, e.g. `function Foo() {}; export default Foo`.',
+        })
+      }
+      for (const [name, loc] of unsupportedHoc) {
+        if (exportedNames.has(name) && !componentBindings.has(name)) {
+          options.onIssue({
+            code: 'unsupported-pattern',
+            file: id,
+            name,
+            loc,
+            detail: `“${name}” is assigned from a call this plugin can’t statically resolve (e.g. a custom HOC), so it can’t be tagged for story generation. Export the inner component and use it directly, or wrap it with memo()/forwardRef().`,
+          })
+        }
       }
     }
 
@@ -260,7 +307,14 @@ export const transform: TransformFunction = (
 
     return output.code
   } catch (error) {
-    console.warn(`[component-highlighter] Failed to transform ${id}:`, error)
+    const detail = (error as { message?: string })?.message || String(error)
+    // Prefer a structured diagnostic (the plugin routes it to ctx.diagnostics);
+    // fall back to console when the transform runs standalone (e.g. tests).
+    if (options.onIssue) {
+      options.onIssue({ code: 'transform-failed', file: id, detail })
+    } else {
+      console.warn(`[component-highlighter] Failed to transform ${id}:`, error)
+    }
     return undefined
   }
 }

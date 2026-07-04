@@ -1,24 +1,37 @@
 /// <reference path="../../runtime-module-shims.d.ts" />
+/**
+ * Vue runtime — non-intrusive devtools-hook detection.
+ *
+ * No component is wrapped and the SFC is not reconstructed. An inline <head>
+ * script (src/frameworks/vue/devtools-hook.ts) installs a minimal
+ * `__VUE_DEVTOOLS_GLOBAL_HOOK__` before the app boots; Vue's runtime-core then
+ * reports every component mount/update/unmount through it. Here we subscribe to
+ * those events (via the `window.__chInstallVueHandler` bridge), reconcile a
+ * registry keyed by the live component instance, and emit the same
+ * `component-highlighter:*` events + window globals the rest of the system
+ * already consumes. Source identity comes from Vue's native `instance.type.__file`
+ * / `__name` (stamped by @vitejs/plugin-vue in dev) — no injected metadata.
+ *
+ * This mirrors the React runtime (`src/frameworks/react/runtime-module.ts`):
+ * hook event → resolve element + props → register/update/teardown → events,
+ * with prop serialization lazily gated through the shared runtime-helpers.
+ */
 import {
-  provide,
-  onMounted,
-  onUpdated,
-  onUnmounted,
-  getCurrentInstance,
-} from 'vue'
-import {
+  attachRectObservers,
   cancelScheduledSerialization,
-  cleanupInstanceTracking,
+  createLivePropEditor,
   findFirstTrackableElement,
+  installLivePropEditGlobals,
   isTrackingActive,
   onTrackingActivated,
   scheduleSerialization,
-  syncInstanceTracking,
+  setAtPath,
 } from 'virtual:component-highlighter/runtime-helpers'
 import { serializeVNodeToTemplate } from './vnode-to-template'
 
 // Injected by the virtual module loader.
 declare const __COMPONENT_HIGHLIGHTER_DEBUG__: boolean
+declare const __COMPONENT_HIGHLIGHTER_ROOT__: string
 
 const DEBUG_MODE = __COMPONENT_HIGHLIGHTER_DEBUG__
 
@@ -37,47 +50,124 @@ const logDebug = (...args: unknown[]) => {
   globalThis as typeof globalThis & { logDebug?: (...args: unknown[]) => void }
 ).logDebug = logDebug
 
-logDebug('Vue runtime loaded', { debug: DEBUG_MODE })
-
-// Component registry for tracking live instances
-const componentRegistry = new Map<
-  string,
-  {
-    id: string
-    meta: Record<string, unknown>
-    props: Record<string, unknown>
-    serializedProps: Record<string, unknown>
-    element: Element
-    rect?: DOMRect
-  }
->()
-
-// Generate unique instance ID
-function generateInstanceId(sourceId: string) {
-  return `${sourceId}:${Math.random().toString(36).substr(2, 9)}`
+const logError = (...args: unknown[]) => {
+  console.error('[component-highlighter-vue]', ...args)
 }
 
-/**
- * Serialize props, handling Vue reactive objects
- */
-function serializeProps(props: Record<string, unknown>) {
-  const serialized: Record<string, unknown> = {}
+logDebug('Vue runtime loaded (devtools-hook mode)', { debug: DEBUG_MODE })
 
-  for (const [key, value] of Object.entries(props)) {
-    serialized[key] = serializeValue(value)
-  }
+// ─── Types ───────────────────────────────────────────────────────────
 
-  return serialized
+type Meta = {
+  componentName: string
+  filePath: string
+  relativeFilePath: string
+  sourceId: string
+  isDefaultExport: boolean
 }
+
+// Minimal shape of the Vue component internal instance we read from.
+type VueInstance = {
+  uid?: number
+  type?: {
+    __file?: string
+    __name?: string
+    name?: string
+    emits?: unknown
+    props?: unknown
+  }
+  vnode?: { el?: unknown; props?: Record<string, unknown> | null }
+  subTree?: { el?: unknown }
+  // The instance's internal props object. In dev it is shallow-reactive, so
+  // assigning a top-level key re-renders the component — the same mechanism
+  // the official Vue DevTools uses for its prop editor.
+  props?: Record<string, unknown>
+  proxy?: {
+    $el?: unknown
+    $props?: Record<string, unknown>
+    $slots?: Record<string, ((props?: unknown) => unknown) | undefined>
+  }
+  slots?: Record<string, ((props?: unknown) => unknown) | undefined>
+}
+
+type RegistryInstance = {
+  id: string
+  meta: Meta
+  props: Record<string, unknown>
+  serializedProps: Record<string, unknown>
+  element: Element
+  rect?: DOMRect
+}
+
+// Component registry for tracking live instances.
+const componentRegistry = new Map<string, RegistryInstance>()
+
+// ─── Source identity (native __file / __name, no injected meta) ──────
+
+/** Stable per-file hash used as the sourceId (path-based). */
+function createHash(data: string): string {
+  let hash = 0
+  for (let i = 0; i < data.length; i++) {
+    const char = data.charCodeAt(i)
+    hash = (hash << 5) - hash + char
+    hash = hash & hash
+  }
+  return Math.abs(hash).toString(36)
+}
+
+function basenameWithoutExt(filePath: string): string {
+  const base = filePath.split(/[\\/]/).pop() || filePath
+  return base.replace(/\.(vue|tsx|ts|jsx|js)$/, '')
+}
+
+// Per-path meta cache (sourceId is stable per file).
+const metaByFile = new Map<string, Meta>()
+
+function getMeta(instance: VueInstance): Meta | null {
+  const type = instance.type
+  const filePath = type?.__file
+  // SFC components stamped by @vitejs/plugin-vue carry an absolute __file. Skip
+  // anything without one (built-in/functional/devtools-internal components).
+  if (!filePath || typeof filePath !== 'string') return null
+
+  const cached = metaByFile.get(filePath)
+  if (cached) return cached
+
+  const componentName =
+    type?.__name || type?.name || basenameWithoutExt(filePath)
+  const meta: Meta = {
+    componentName,
+    filePath,
+    relativeFilePath: deriveRelativePath(filePath),
+    sourceId: createHash(filePath),
+    isDefaultExport: true,
+  }
+  metaByFile.set(filePath, meta)
+  return meta
+}
+
+function deriveRelativePath(filePath: string): string {
+  // Exact path: strip the project root injected by the virtual-module loader
+  // (same result as the React transform's path.relative(process.cwd(), id)).
+  const root = __COMPONENT_HIGHLIGHTER_ROOT__.replace(/\/+$/, '')
+  if (root && filePath.startsWith(root + '/')) {
+    return filePath.slice(root.length + 1)
+  }
+  // Fallbacks for files outside the root (e.g. linked packages): a stable
+  // project-relative-ish path from /src/ onward, then the basename.
+  const srcIdx = filePath.lastIndexOf('/src/')
+  if (srcIdx !== -1) return filePath.slice(srcIdx + 1)
+  return filePath.split(/[\\/]/).pop() || filePath
+}
+
+// ─── Prop / slot / emit extraction (unchanged behavior) ──────────────
 
 function toListenerPropName(eventName: string): string {
   if (!eventName) return 'onUnknown'
   return `on${eventName.charAt(0).toUpperCase()}${eventName.slice(1)}`
 }
 
-function extractDeclaredEmitNames(instance: {
-  type?: { emits?: unknown }
-}): Set<string> {
+function extractDeclaredEmitNames(instance: VueInstance): Set<string> {
   const names = new Set<string>()
   const emits = instance.type?.emits
 
@@ -99,9 +189,7 @@ function extractDeclaredEmitNames(instance: {
   return names
 }
 
-function extractListenerProps(instance: {
-  vnode?: { props?: Record<string, unknown> | null }
-}): Record<string, unknown> {
+function extractListenerProps(instance: VueInstance): Record<string, unknown> {
   const listenerProps: Record<string, unknown> = {}
   const vnodeProps = instance.vnode?.props ?? {}
 
@@ -124,12 +212,7 @@ function extractListenerProps(instance: {
   return listenerProps
 }
 
-function extractSlotArgs(instance: {
-  slots?: Record<string, ((props?: unknown) => unknown) | undefined>
-  proxy?: {
-    $slots?: Record<string, ((props?: unknown) => unknown) | undefined>
-  }
-}): Record<string, unknown> {
+function extractSlotArgs(instance: VueInstance): Record<string, unknown> {
   const slotArgs: Record<string, unknown> = {}
   const slots = instance.slots ?? instance.proxy?.$slots ?? {}
 
@@ -166,14 +249,7 @@ function extractSlotArgs(instance: {
 }
 
 function getStoryProps(
-  instance: {
-    type?: { emits?: unknown }
-    vnode?: { props?: Record<string, unknown> | null }
-    slots?: Record<string, ((props?: unknown) => unknown) | undefined>
-    proxy?: {
-      $slots?: Record<string, ((props?: unknown) => unknown) | undefined>
-    }
-  },
+  instance: VueInstance,
   rawProps: Record<string, unknown>,
 ): Record<string, unknown> {
   const storyProps: Record<string, unknown> = { ...rawProps }
@@ -211,7 +287,7 @@ function getStoryProps(
 }
 
 /**
- * Serialize a single value
+ * Serialize a single value (handles Vue reactive objects).
  */
 function serializeValue(value: unknown): unknown {
   // Handle Vue reactive objects
@@ -264,17 +340,31 @@ function serializeValue(value: unknown): unknown {
   return value
 }
 
-// Registry management functions
-export function registerInstance(
-  meta: Record<string, unknown>,
+function serializeProps(props: Record<string, unknown>) {
+  const serialized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(props)) {
+    serialized[key] = serializeValue(value)
+  }
+  return serialized
+}
+
+// ─── Registry mutation + events (contract unchanged) ─────────────────
+
+function dispatch(name: string, detail: unknown) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(name, { detail }))
+}
+
+function registerInstance(
+  id: string,
+  meta: Meta,
   props: Record<string, unknown>,
   element: Element,
 ) {
-  const id = generateInstanceId(meta['sourceId'] as string)
   // Skip the expensive serialization until a DevTools client is connected.
   const serializedProps = isTrackingActive() ? serializeProps(props) : {}
 
-  const instance = {
+  const instance: RegistryInstance = {
     id,
     meta,
     props,
@@ -285,34 +375,19 @@ export function registerInstance(
 
   logDebug('registerInstance', {
     id,
-    componentName: meta['componentName'],
+    componentName: meta.componentName,
     totalComponents: componentRegistry.size,
   })
 
-  // Dispatch event for listeners module
-  if (typeof window !== 'undefined') {
-    const event = new CustomEvent('component-highlighter:register', {
-      detail: instance,
-    })
-    window.dispatchEvent(event)
-    logDebug('dispatched register event for', id)
-  }
-
-  return id
+  dispatch('component-highlighter:register', instance)
 }
 
-export function unregisterInstance(id: string) {
+function unregisterInstance(id: string) {
+  if (!componentRegistry.has(id)) return
   componentRegistry.delete(id)
   cancelScheduledSerialization(id)
   logDebug('unregistered', { id, remaining: componentRegistry.size })
-
-  // Dispatch event for listeners module
-  if (typeof window !== 'undefined') {
-    const event = new CustomEvent('component-highlighter:unregister', {
-      detail: id,
-    })
-    window.dispatchEvent(event)
-  }
+  dispatch('component-highlighter:unregister', id)
 }
 
 // Serialize the instance's current props and notify listeners. Expensive —
@@ -322,23 +397,14 @@ function serializeAndDispatch(id: string) {
   if (!instance) return
   instance.serializedProps = serializeProps(instance.props)
   logDebug('updateInstanceProps', { id, props: instance.props })
-
-  if (typeof window !== 'undefined') {
-    const event = new CustomEvent('component-highlighter:update-props', {
-      detail: {
-        id,
-        props: instance.props,
-        serializedProps: instance.serializedProps,
-      },
-    })
-    window.dispatchEvent(event)
-  }
+  dispatch('component-highlighter:update-props', {
+    id,
+    props: instance.props,
+    serializedProps: instance.serializedProps,
+  })
 }
 
-export function updateInstanceProps(
-  id: string,
-  props: Record<string, unknown>,
-) {
+function updateInstanceProps(id: string, props: Record<string, unknown>) {
   const instance = componentRegistry.get(id)
   if (!instance) return
   // Keep raw props in sync immediately (cheap, read by the context menu).
@@ -362,21 +428,18 @@ onTrackingActivated(() => {
 })
 
 /**
- * Get the component registry for import resolution
- * Returns a map of component name -> file path
+ * Get the component registry for import resolution.
+ * Returns a map of component name -> file path.
  */
 export function getComponentRegistry() {
   const registry = new Map<string, string>()
   for (const instance of componentRegistry.values()) {
-    registry.set(
-      (instance.meta['componentName'] as string) || '',
-      instance.meta['filePath'] as string,
-    )
+    registry.set(instance.meta.componentName || '', instance.meta.filePath)
   }
   return registry
 }
 
-// Expose registry getter globally for story generation
+// Expose the registry getter globally for story generation.
 if (typeof window !== 'undefined') {
   ;(
     window as unknown as {
@@ -385,96 +448,208 @@ if (typeof window !== 'undefined') {
   ).__componentHighlighterGetRegistry = getComponentRegistry
 }
 
-/**
- * Track a Vue component instance with the highlighter
- */
-export function withComponentHighlighter(meta: Record<string, unknown>) {
-  if (typeof window === 'undefined') return
+// ─── Element resolution ──────────────────────────────────────────────
 
-  const instance = getCurrentInstance()
-  if (!instance) {
-    logDebug('Could not get current Vue instance for', meta['componentName'])
+function resolveElement(instance: VueInstance): Element | null {
+  let element: unknown =
+    instance.proxy?.$el || instance.vnode?.el || instance.subTree?.el
+  if (!element) return null
+
+  let node = element as Node
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    logDebug('Component root is not an Element node', {
+      nodeType: (node as Node).nodeType,
+      nodeName: (node as Node).nodeName,
+    })
+
+    // Multi-root / text-root fallback: scan siblings for the first element.
+    const children = node.parentNode?.childNodes
+    if (children) {
+      for (const child of Array.from(children)) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          node = child
+          break
+        }
+      }
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return null
+    }
+  }
+
+  return findFirstTrackableElement(node)
+}
+
+// ─── Hook-event driven reconciliation ────────────────────────────────
+//
+// One registry instance per live Vue component instance. We key by the live
+// instance object (WeakMap), so the same instance keeps a stable id across
+// updates and is torn down on removal.
+
+const instanceIds = new WeakMap<VueInstance, string>()
+// id → live internal instance, for live prop overrides. Entries are removed
+// in teardownId, so this map's lifetime matches the registry's.
+const instancesById = new Map<string, VueInstance>()
+const rectDisconnects = new Map<string, () => void>()
+let idCounter = 0
+
+function getStableId(instance: VueInstance, meta: Meta): string {
+  const existing = instanceIds.get(instance)
+  if (existing) return existing
+  const id = `${meta.sourceId}:${(idCounter++).toString(36)}`
+  instanceIds.set(instance, id)
+  return id
+}
+
+// ─── Live prop editing (reactive instance.props) ─────────────────────
+//
+// Vue has no renderer-level `overrideProps` API, but the internal
+// `instance.props` object is shallow-reactive in dev: assigning a top-level
+// key re-renders the component. This is the same mechanism the official Vue
+// DevTools uses for its own prop editor. Because reactivity is shallow, a
+// nested-path edit clones the top-level value (setAtPath) and reassigns it.
+// All framework-agnostic machinery (payload decoding, original-value
+// snapshots for reset, registry sync) is shared via createLivePropEditor.
+
+const propEditor = createLivePropEditor({
+  getInstance: (id) => componentRegistry.get(id),
+  serializeValue,
+  applyOverride: (id, path, value) => {
+    const instance = instancesById.get(id)
+    if (!instance) throw new Error('Component instance not found')
+    const target = instance.props
+    if (!target || typeof target !== 'object') {
+      throw new Error('Live editing unavailable for this component')
+    }
+    const [head, ...rest] = path
+    if (typeof head !== 'string') throw new Error('Invalid prop path')
+    // Only declared props live on instance.props — writing anything else
+    // (slot pseudo-props, listener props, fallthrough attrs) would be a
+    // silent no-op for rendering, so reject it explicitly.
+    const declaredProps = instance.type?.props
+    const isDeclared =
+      head in target ||
+      (!!declaredProps &&
+        typeof declaredProps === 'object' &&
+        head in (declaredProps as Record<string, unknown>))
+    if (!isDeclared) throw new Error(`"${head}" is not a declared prop`)
+
+    if (rest.length === 0) {
+      target[head] = value
+    } else {
+      const current = target[head]
+      target[head] = setAtPath(
+        current && typeof current === 'object'
+          ? (current as Record<string, unknown>)
+          : {},
+        rest,
+        value,
+      )
+    }
+    logDebug('overrideProp', { id, path, value })
+  },
+})
+
+installLivePropEditGlobals(propEditor, () => true)
+
+function attachRect(id: string, element: Element) {
+  rectDisconnects.get(id)?.()
+  const disconnect = attachRectObservers(
+    (lookupId) => componentRegistry.get(lookupId),
+    id,
+    element,
+  )
+  rectDisconnects.set(id, disconnect)
+  const inst = componentRegistry.get(id)
+  if (inst) inst.rect = element.getBoundingClientRect()
+}
+
+function teardownId(id: string) {
+  rectDisconnects.get(id)?.()
+  rectDisconnects.delete(id)
+  instancesById.delete(id)
+  propEditor.forgetInstance(id)
+  unregisterInstance(id)
+}
+
+function handleAddedOrUpdated(instance: VueInstance) {
+  const meta = getMeta(instance)
+  if (!meta) return // not an SFC component with a source path — skip
+
+  const element = resolveElement(instance)
+  if (!element) {
+    logDebug('Could not resolve element for', meta.componentName)
     return
   }
 
-  const registration = {
-    id: null as string | null,
-    element: null as Element | null,
-    disconnect: null as (() => void) | null,
-  }
+  const rawProps = instance.proxy?.$props || {}
+  const storyProps = getStoryProps(instance, rawProps)
 
-  const resolveElementToTrack = () => {
-    let element =
-      instance.proxy?.$el || instance.vnode?.el || instance.subTree?.el
-    if (!element) return null
-
-    if (element.nodeType !== Node.ELEMENT_NODE) {
-      logDebug('Component root is not an Element node', {
-        componentName: meta['componentName'],
-        nodeType: element.nodeType,
-        nodeName: element.nodeName,
-      })
-
-      const children = element.parentNode?.childNodes
-      if (children) {
-        for (const child of children) {
-          if (child.nodeType === Node.ELEMENT_NODE) {
-            element = child
-            break
-          }
-        }
-      }
-
-      if (element.nodeType !== Node.ELEMENT_NODE) {
-        return null
-      }
+  const id = getStableId(instance, meta)
+  instancesById.set(id, instance)
+  const existing = componentRegistry.get(id)
+  if (!existing) {
+    registerInstance(id, meta, storyProps, element)
+    attachRect(id, element)
+  } else {
+    if (existing.element !== element) {
+      existing.element = element
+      attachRect(id, element)
     }
-
-    return findFirstTrackableElement(element)
+    updateInstanceProps(id, storyProps)
   }
+}
 
-  const registerOrUpdate = () => {
-    const element = resolveElementToTrack()
-    if (!element) {
-      logDebug('Could not find valid Element node for', meta['componentName'])
-      return
+function handleRemoved(instance: VueInstance) {
+  const id = instanceIds.get(instance)
+  if (!id) return
+  instanceIds.delete(instance)
+  teardownId(id)
+}
+
+// The Vue devtools emit signature for component events is
+// `emit(event, app, uid, parentUid, instance)` — the live instance is args[3].
+// (Validated in the Phase 0 spike.)
+function handleVueEvent(event: string, args: unknown[]) {
+  const instance = args[3] as VueInstance | undefined
+  if (!instance || typeof instance !== 'object') return
+  try {
+    switch (event) {
+      case 'component:added':
+      case 'component:updated':
+        handleAddedOrUpdated(instance)
+        break
+      case 'component:removed':
+        handleRemoved(instance)
+        break
+      default:
+        break
     }
-
-    const props = instance.proxy?.$props || {}
-    const storyProps = getStoryProps(instance, props)
-
-    syncInstanceTracking({
-      state: registration,
-      element,
-      props: storyProps,
-      register: (nextElement: Element, nextProps: Record<string, unknown>) =>
-        registerInstance(meta, nextProps, nextElement),
-      unregister: unregisterInstance,
-      updateProps: updateInstanceProps,
-      getInstance: (lookupId: string) => componentRegistry.get(lookupId),
-    })
+  } catch (err) {
+    logError('vue event handling failed:', err)
   }
+}
 
-  // Store meta in a way that child components can access it
-  provide('__componentHighlighterMeta', meta)
+// ─── Install the bridge ──────────────────────────────────────────────
 
-  onMounted(() => {
-    registerOrUpdate()
-  })
-
-  onUpdated(() => {
-    registerOrUpdate()
-  })
-
-  onUnmounted(() => {
-    cleanupInstanceTracking(registration, unregisterInstance)
-  })
+if (typeof window !== 'undefined') {
+  const install = (
+    window as unknown as {
+      __chInstallVueHandler?: (
+        fn: (event: string, args: unknown[]) => void,
+      ) => void
+    }
+  ).__chInstallVueHandler
+  if (typeof install === 'function') {
+    install(handleVueEvent)
+  } else {
+    logError(
+      'Vue DevTools hook bridge missing — was the inline <head> script injected?',
+    )
+  }
 }
 
 export default {
-  registerInstance,
-  unregisterInstance,
-  updateInstanceProps,
   getComponentRegistry,
-  withComponentHighlighter,
 }

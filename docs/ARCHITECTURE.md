@@ -26,9 +26,13 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      { componentName, filePath, relativeFilePath, sourceId, isDefaultExport })`.
      The rendered fiber/DOM tree is untouched, so RSC works (only tagged client
      components ever appear) and there is no tree pollution.
-   - Vue: SFC compiler injects `withComponentHighlighter` composable into
-     `<script setup>` (Vue lacks a DevTools-hook equivalent we rely on).
-   - Both inject metadata (componentName, filePath, relativeFilePath, sourceId)
+   - Vue: **non-intrusive** — the SFC is NOT reconstructed and no per-component
+     code is injected. The transform performs a single idempotent edit:
+     prepend a side-effect `import 'virtual:component-highlighter/vue-runtime'`
+     to the existing `<script setup>`/`<script>` block (loads the runtime,
+     keeps coverage tracking working). Everything else is byte-for-byte
+     preserved. Source identity is read at runtime from Vue's native
+     `instance.type.__file` / `__name`.
 
 3. **Browser runtime** (`src/frameworks/*/runtime-module.ts` + `src/runtime-helpers.ts`)
    - React: an inline `<head>` script (`src/frameworks/react/devtools-hook.ts`,
@@ -38,7 +42,23 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      fiber tree on every commit, reading the `__chRegisterMeta` symbol off
      `fiber.type`/`elementType`, resolving the nearest host DOM node, and
      reconciling the registry. No component is wrapped.
-   - Vue: lifecycle-hook based registration via the injected composable.
+   - Vue: an inline `<head>` script (`src/frameworks/vue/devtools-hook.ts`,
+     injected via `transformIndexHtml`) installs a minimal
+     `__VUE_DEVTOOLS_GLOBAL_HOOK__` *before* `createApp` runs. The runtime
+     module subscribes via `window.__chInstallVueHandler` to Vue's
+     `component:added`/`updated`/`removed` events (the live instance is at emit
+     arg index 3), resolves the root DOM node (`subTree.el`/`vnode.el`/
+     `proxy.$el`), and reconciles the registry — keyed per live instance in a
+     `WeakMap`. No component is wrapped. NB: the hook MUST expose
+     `cleanupBuffer()` (returning `false`) or `@vue/runtime-core` never emits
+     `component:removed`. Live prop editing mutates the instance's
+     shallow-reactive internal `props` object (the mechanism Vue DevTools'
+     own prop editor uses); nested paths clone-and-reassign the top-level
+     key, and only declared props are editable.
+     Meta comes from Vue's native `instance.type.__file`/`__name`; the exact
+     cwd-relative path is computed against `__COMPONENT_HIGHLIGHTER_ROOT__`, a
+     build constant the virtual-module loader injects (like
+     `__COMPONENT_HIGHLIGHTER_DEBUG__`).
    - Registers component instances in a global `Map` registry on `window`
    - Tracks props, serialized props, and DOM anchor elements
    - Emits `component-highlighter:register/unregister/update-props` custom events
@@ -78,16 +98,18 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving |
-| `src/frameworks/<fw>/transform.ts` | Build-time metadata tagging (React: non-wrapping `__chRegisterMeta`) |
+| `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving. Registers docks via `defineDockEntry`; registers a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
-| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook) |
-| `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer) |
+| `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |
+| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook; Vue: `component:added/updated/removed` hook-event reconciler) |
+| `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer, `createLivePropEditor` — the framework-agnostic live prop-edit machinery; runtimes supply only `applyOverride`) |
 | `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
 | `src/client/overlay.ts` | Highlight rendering, story file cache, save actions, debug overlay |
 | `src/client/context-menu.ts` | Context menu UI (Shadow DOM), props display, action buttons |
 | `src/client/interaction-recorder.ts` | User interaction recording and play function generation |
 | `src/client/coverage-actions.ts` | Client-side coverage actions (scroll, highlight) triggered by panel via RPC |
+| `src/utils/story-matching.ts` | Single source of truth for story↔component matching against Storybook's index.json (`componentPath` when present — index v5+ — else importPath/title heuristics) and visit-target selection (`pickStoryId`, incl. the `requirePreferred` polling contract for just-created stories) |
 | `src/client/vite-devtools.ts` | DevTools dock lifecycle, client RPC handlers for panel→client broadcast |
 | `src/client/logger.ts` | Debug logging utility (`window.__componentHighlighterDebug`) |
 | `src/client/utils/format-utils.ts` | Value formatting helpers for context menu display |
@@ -119,10 +141,10 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `__componentHighlighterGetRegistry()` | Return the live component name→filePath registry Map |
 | `__componentHighlighterDebug` | Set to `true` to enable verbose debug logging in the console |
 | `__componentHighlighterActivateTracking()` | Turn on prop serialization + backfill (called automatically when a DevTools client connects) |
-| `__componentHighlighterCanEditProps()` | React only: true when the renderer exposes `overrideProps` (dev builds) |
-| `__componentHighlighterSetProp(id, path, {kind,text})` | React only: live-edit a prop via React's `renderer.overrideProps`; returns `{ok, error?}`. Snapshots the pre-edit value (once) so the edit is resettable |
-| `__componentHighlighterResetProp(id, path)` | React only: revert a previously-edited prop to its original (pre-edit) value; returns `{ok, error?}` |
-| `__componentHighlighterGetEditedProps(id)` | React only: top-level prop keys whose current value differs from their original (drives the per-prop reset affordance) |
+| `__componentHighlighterCanEditProps()` | True when live prop editing is available (React: renderer exposes `overrideProps` in dev builds; Vue: always in dev) |
+| `__componentHighlighterSetProp(id, path, {kind,text})` | Live-edit a prop (React: `renderer.overrideProps`; Vue: reactive `instance.props`); returns `{ok, error?}`. Snapshots the pre-edit value (once) so the edit is resettable |
+| `__componentHighlighterResetProp(id, path)` | Revert a previously-edited prop to its original (pre-edit) value; returns `{ok, error?}` |
+| `__componentHighlighterGetEditedProps(id)` | Top-level prop keys whose current value differs from their original (drives the per-prop reset affordance) |
 
 ## Panel↔Client communication (RPC-based)
 
@@ -139,7 +161,7 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 | `component-highlighter:scroll-to-component` | `do-scroll-to-component` | Scroll app page to a component |
 | `component-highlighter:highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights on app page |
 | `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
-| `component-highlighter:set-prop` | `do-set-prop` | Panel live-edits a prop → client calls `__componentHighlighterSetProp` (React `overrideProps`) |
+| `component-highlighter:set-prop` | `do-set-prop` | Panel live-edits a prop → client calls `__componentHighlighterSetProp` |
 | `component-highlighter:reset-prop` | `do-reset-prop` | Panel resets a prop to its original → client calls `__componentHighlighterResetProp` |
 | `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
 | `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |

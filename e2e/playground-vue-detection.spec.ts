@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
+import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -82,3 +83,28 @@ test.describe('Vue playground detection coverage', () => {
 
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
+registerLivePropEditSuite(test as any, {
+  // The Vue playground has no PropZoo; TaskCard's `task` object covers the
+  // json kind and additionally exercises a NESTED path (['task','title']),
+  // which on Vue must clone-and-reassign the top-level reactive prop.
+  dataTypeTargets: [
+    {
+      componentName: 'Header',
+      path: ['title'],
+      payload: { kind: 'string', text: 'E2E Title' },
+      probe: { selector: '.header-title', contains: 'E2E Title' },
+    },
+    {
+      componentName: 'TaskList',
+      path: ['count'],
+      payload: { kind: 'number', text: '777' },
+      probe: { selector: '.task-list-count', contains: '777' },
+    },
+    {
+      componentName: 'TaskCard',
+      path: ['task', 'title'],
+      payload: { kind: 'json', text: '"E2E Task Title"' },
+      probe: { selector: '.task-card-title', contains: 'E2E Task Title' },
+    },
+  ],
+})

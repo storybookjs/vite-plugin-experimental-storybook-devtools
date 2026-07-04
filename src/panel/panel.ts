@@ -13,6 +13,11 @@ import {
 } from '@vitejs/devtools-kit/client'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
+import {
+  findStoryCandidates,
+  pickStoryId,
+  stripExtForMatch,
+} from '../utils/story-matching'
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
@@ -197,11 +202,6 @@ function openInEditor(filePath: string) {
   )
 }
 
-/** Normalise a file path for story matching: strip leading ./ and file extension (including .stories.) */
-function stripExtForMatch(p: string): string {
-  return p.replace(/^\.\//, '').replace(/\.(stories\.)?(tsx?|jsx?|mts|mjs)$/, '')
-}
-
 /** Get the storybookUrl from the query string (set by the server plugin) */
 function getStorybookUrl(): string {
   const params = new URLSearchParams(window.location.search)
@@ -240,57 +240,22 @@ async function getStorybookIndex(): Promise<
 }
 
 /**
- * Normalise a story name for loose comparison: lower-case and strip spaces.
- * Storybook derives display names from export names by inserting spaces
- * (e.g. export `TaskForm` → name `"Task Form"`).  When we want to match the
- * name we used during creation we normalise both sides so that
- * "Secondary" === "secondary", "Task Form" === "taskform", etc.
- */
-function normaliseStoryName(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '')
-}
-
-/**
  * Find a story ID by matching the component's relative file path against
- * Storybook index entries' importPath.
+ * Storybook index entries (shared matcher: `src/utils/story-matching.ts`).
  *
- * When `preferredStoryName` is supplied the function first looks for a story
- * whose `name` matches (normalised); only if that fails does it fall back to
- * the first story found for the component file.
+ * `requirePreferred` makes the lookup fail (null) unless the preferred story
+ * name is actually present — used while polling a possibly-stale index for a
+ * story that was just created, where falling back to an OLDER story of the
+ * same component would navigate to the wrong story.
  */
 async function findStoryId(
   relativeFilePath: string,
   preferredStoryName?: string,
+  opts: { requirePreferred?: boolean } = {},
 ): Promise<string | null> {
   const entries = await getStorybookIndex()
   if (!entries || Object.keys(entries).length === 0) return null
-
-  const componentBase = stripExtForMatch(relativeFilePath)
-  // Also extract just the filename without extension for fallback matching
-  const componentName = componentBase.split('/').pop() || componentBase
-
-  // Collect all candidate entries for this component file (preserving order)
-  const candidates: StorybookIndexEntry[] = []
-
-  for (const entry of Object.values(entries)) {
-    if (entry.type !== 'story') continue
-    const entryBase = stripExtForMatch(entry.importPath)
-    if (entryBase === componentBase || entryBase.endsWith(componentName)) {
-      candidates.push(entry)
-    }
-  }
-
-  if (candidates.length === 0) return null
-
-  // If the caller knows which story name was just created, prefer it
-  if (preferredStoryName) {
-    const needle = normaliseStoryName(preferredStoryName)
-    const match = candidates.find((e) => normaliseStoryName(e.name) === needle)
-    if (match) return match.id
-  }
-
-  // Fall back to the first candidate
-  return candidates[0]!.id
+  return pickStoryId(entries, relativeFilePath, preferredStoryName, opts)
 }
 
 /**
@@ -333,7 +298,13 @@ async function visitStory(
         storybookIndexCache = null
         await new Promise((r) => setTimeout(r, 500))
       }
-      const storyId = await findStoryId(relativeFilePath, preferredStoryName)
+      // While waiting for the (possibly stale) index to pick up a
+      // just-created story, do NOT accept a fallback to an older story of
+      // the same component — that would navigate to the wrong story and
+      // short-circuit the retry loop. Only the final attempt may fall back.
+      const storyId = await findStoryId(relativeFilePath, preferredStoryName, {
+        requirePreferred: !!preferredStoryName && attempt < maxAttempts - 1,
+      })
       if (storyId) {
         switchTab('storybook')
         // Try channel API first (no reload), fall back to iframe src navigation
@@ -373,7 +344,9 @@ async function visitStory(
       // Storybook just started — index may take a moment to become available
       for (let retry = 0; retry < 10; retry++) {
         storybookIndexCache = null
-        const storyId = await findStoryId(relativeFilePath, preferredStoryName)
+        const storyId = await findStoryId(relativeFilePath, preferredStoryName, {
+          requirePreferred: !!preferredStoryName && retry < 9,
+        })
         if (storyId) {
           if (!navigateStorybookViaChannel(storyId)) {
             const targetUrl = await buildStoryUrl(
@@ -1205,31 +1178,13 @@ let selectedComponent: RegistryInstance | null = null
 async function findMatchingStories(relativeFilePath: string, componentName?: string): Promise<StorybookIndexEntry[]> {
   const entries = await getStorybookIndex()
   if (!entries || Object.keys(entries).length === 0) return []
-
-  const componentBase = stripExtForMatch(relativeFilePath)
-  const baseName = componentBase.split('/').pop() || componentBase
-  // Normalise the component name for title-based matching (e.g. "Badge" matches "Components/Badge")
-  const nameToMatch = (componentName || baseName).toLowerCase()
-
-  const results: StorybookIndexEntry[] = []
-  for (const entry of Object.values(entries)) {
-    if (entry.type !== 'story') continue
-    // Match by importPath (file path based)
-    const entryBase = stripExtForMatch(entry.importPath || '')
-    if (entryBase === componentBase || (entryBase && entryBase.endsWith(baseName))) {
-      results.push(entry)
-      continue
-    }
-    // Fallback: match by title — the last segment of the title is the component name
-    if (entry.title) {
-      const titleParts = entry.title.split('/')
-      const titleComponent = titleParts[titleParts.length - 1]!.toLowerCase()
-      if (titleComponent === nameToMatch) {
-        results.push(entry)
-      }
-    }
-  }
-  return results
+  const baseName =
+    stripExtForMatch(relativeFilePath).split('/').pop() || relativeFilePath
+  return findStoryCandidates(
+    entries,
+    relativeFilePath,
+    componentName || baseName,
+  ) as StorybookIndexEntry[]
 }
 
 /** Build the highlighter panel — empty state or component detail */
@@ -1463,8 +1418,8 @@ async function buildHighlighterPanel() {
             input: 'hl-prop-input',
             textarea: 'hl-prop-input hl-prop-textarea',
             actions: 'hl-prop-edit-actions',
-            save: 'act-btn create',
-            cancel: 'act-btn',
+            save: 'hl-prop-edit-save',
+            cancel: 'hl-prop-edit-cancel',
             error: 'hl-prop-edit-error',
           },
           // Panel: route the edit through RPC (relayed to the client's

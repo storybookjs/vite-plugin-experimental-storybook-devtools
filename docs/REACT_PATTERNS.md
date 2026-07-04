@@ -58,6 +58,11 @@ Available in the **tooltip** (in-app overlay, direct call) and the **panel**
 (via `set-prop` RPC → `do-set-prop` → runtime). No remount; component state
 is preserved; the next commit re-syncs the registry/UI.
 
+The framework-agnostic machinery (payload decoding, reset-to-original
+snapshots, registry sync) is shared: `src/runtime-helpers.ts` →
+`createLivePropEditor`. Vue implements the same contract by mutating the
+shallow-reactive `instance.props` (see `docs/SUPPORTED_FRAMEWORKS.md`).
+
 | Value kind | Editor control | Notes |
 |---|---|---|
 | string | text input | |
@@ -84,6 +89,14 @@ changes nothing.
 | `memo(forwardRef(...))` | React creates two tagged fibers (Memo wrapper + ForwardRef inner). The walker collapses a same-`sourceId` wrapper chain into **one** selectable instance anchored to the real DOM, so it registers once and story creation works (`MemoForwardInput`). Genuine recursion (`<Tree>` inside `<Tree>`) is unaffected — a host element between instances resets the chain. |
 
 ## ❌ Unsupported (documented limitations)
+
+The two most common cases below — **anonymous default exports** and
+**custom-HOC bindings** — are also surfaced at dev time as structured DevTools
+diagnostics (`CH_UNSUPPORTED_PATTERN`, via `ctx.diagnostics`) with the source
+`file:line:column`, so contributors see them in context instead of only here.
+Parse failures surface as `CH_TRANSFORM_FAILED`. Detection lives in
+`src/frameworks/react/transform.ts` (reported through `TransformOptions.onIssue`)
+and is wired to the diagnostics host in `create-component-highlighter-plugin.ts`.
 
 | Pattern | Why | Workaround |
 |---|---|---|

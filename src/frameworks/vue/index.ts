@@ -6,6 +6,7 @@
 
 import type { FrameworkConfig } from '../types'
 import { transform, detectVue, VIRTUAL_MODULE_ID } from './transform'
+import { getDevToolsHookScript } from './devtools-hook'
 
 /**
  * Vue framework configuration
@@ -19,6 +20,7 @@ export const vueFramework: FrameworkConfig = {
   runtimeModuleFile: 'frameworks/vue/runtime-module',
   virtualModuleId: VIRTUAL_MODULE_ID,
   storybookFramework: '@storybook/vue3-vite',
+  htmlHeadSnippet: getDevToolsHookScript,
 }
 
 // Re-export for convenience
