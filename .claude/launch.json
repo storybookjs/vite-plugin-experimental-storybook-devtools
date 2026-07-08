@@ -21,6 +21,13 @@
       "runtimeArgs": ["--filter", "playground-vue", "dev", "--port", "5174"],
       "port": 5174,
       "env": {}
+    },
+    {
+      "name": "nuxt-playground",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "playground-nuxt", "dev", "--port", "5176"],
+      "port": 5176,
+      "env": {}
     }
   ]
 }

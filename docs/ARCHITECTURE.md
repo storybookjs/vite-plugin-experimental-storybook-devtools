@@ -299,6 +299,7 @@ Focused e2e entrypoints:
 pnpm exec playwright test e2e/playground-react-detection.spec.ts     # React 19
 pnpm exec playwright test e2e/playground-react18-detection.spec.ts    # React 18 + serialization fidelity
 pnpm exec playwright test e2e/playground-vue-detection.spec.ts
+pnpm exec playwright test e2e/playground-nuxt-detection.spec.ts      # Nuxt (Vue integration)
 
 # Highlighter interaction tests (context menu, story creation)
 pnpm exec playwright test e2e/component-highlighter.spec.ts

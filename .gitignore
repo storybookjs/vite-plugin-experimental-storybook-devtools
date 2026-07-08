@@ -13,3 +13,5 @@ dist
 
 *storybook.log
 storybook-static
+.nuxt
+.output

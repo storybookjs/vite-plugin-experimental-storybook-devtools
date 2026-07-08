@@ -36,6 +36,14 @@ export default defineConfig({
         baseURL: 'http://127.0.0.1:5174',
       },
     },
+    {
+      name: 'nuxt-chromium',
+      testMatch: /playground-nuxt-detection\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:5176',
+      },
+    },
   ],
 
   webServer: [
@@ -57,6 +65,13 @@ export default defineConfig({
       url: 'http://127.0.0.1:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
+    },
+    {
+      // Nuxt cold-starts slower than plain Vite (nitro + two vite builds).
+      command: 'pnpm --dir playground/nuxt dev --host 127.0.0.1 --port 5176',
+      url: 'http://127.0.0.1:5176',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
     },
   ],
 })
