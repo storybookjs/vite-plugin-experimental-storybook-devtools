@@ -6,3 +6,11 @@ ignoreWorkspaceRootCheck: true
 shellEmulator: true
 
 trustPolicy: no-downgrade
+
+overrides:
+  chokidar@4.0.3: 5.0.0
+  semver@6.3.1: 7.7.3
+
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
