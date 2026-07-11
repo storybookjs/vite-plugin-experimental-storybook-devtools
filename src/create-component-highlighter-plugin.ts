@@ -371,8 +371,15 @@ export function createComponentHighlighterPlugin(
 
       // @testing-library/dom and aria-query are CJS-only packages. Pre-bundle
       // them so Vite handles the CJS→ESM conversion and named imports work.
+      // Use the `vite-plugin-experimental-storybook-devtools > @testing-library/dom`
+      // form so Vite resolves these deps from THIS plugin's node_modules. With
+      // pnpm's isolated store the packages are not hoisted into the consumer's
+      // node_modules, so a bare `@testing-library/dom` specifier fails to resolve.
       viteConfig.optimizeDeps.include ??= []
-      viteConfig.optimizeDeps.include.push('@testing-library/dom', 'aria-query')
+      viteConfig.optimizeDeps.include.push(
+        'vite-plugin-experimental-storybook-devtools > @testing-library/dom',
+        'aria-query',
+      )
 
       // The client modules above are excluded from optimization, so Vite never
       // crawls them at startup and never discovers their third-party imports.
