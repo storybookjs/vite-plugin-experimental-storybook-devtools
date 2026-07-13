@@ -6,3 +6,8 @@ ignoreWorkspaceRootCheck: true
 shellEmulator: true
 
 trustPolicy: no-downgrade
+
+# semver@6.3.1 (Babel transitive dep via nuxt) predates npm provenance and
+# trips the no-downgrade check; it is published by the npm CLI team itself.
+trustPolicyExclude:
+  - semver@6.3.1

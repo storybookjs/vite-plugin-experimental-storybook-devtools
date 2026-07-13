@@ -21,6 +21,7 @@ import {
   DevToolsNotificationService,
 } from './notifications'
 import { computeCoverage } from './coverage-dashboard'
+import { normalizeRuntimeImports } from './utils/normalize-runtime-imports'
 
 import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
 export type { SerializedRegistryInstance, RegistryDiff }
@@ -307,6 +308,7 @@ export function createComponentHighlighterPlugin(
 
   const filter = createFilter(include, exclude)
   let isServe = false
+  let resolvedBase = '/'
   // Vite's standard CSP integration: when the app sets `html.cspNonce`, Vite
   // stamps its injected tags with this nonce. We mirror it onto the inline
   // DevTools-hook <script> so it survives a strict Content-Security-Policy.
@@ -355,6 +357,7 @@ export function createComponentHighlighterPlugin(
     enforce: 'pre',
     configResolved(config) {
       isServe = config.command === 'serve'
+      resolvedBase = config.base || '/'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
     },
     config: (viteConfig) => {
@@ -1526,15 +1529,13 @@ export function createComponentHighlighterPlugin(
               JSON.stringify(process.cwd().replace(/\\/g, '/')),
             )
 
-        // Vite's import-analysis rewrites the helpers import to its /@id/
-        // form and, after an HMR invalidation, appends a `?t=<timestamp>`
-        // query. Normalize both back to the bare virtual id so resolveId
-        // matches when the browser re-imports this module.
-        const normalizeRuntimeImports = (code: string) =>
-          code.replace(
-            /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-            'virtual:component-highlighter/runtime-helpers',
-          )
+        // Vite's import-analysis rewrites the helpers import to its
+        // <base>/@id/ form (base is '/_nuxt/' under Nuxt) and, after an HMR
+        // invalidation, appends a `?t=<timestamp>` query. Normalize both back
+        // to the bare virtual id so resolveId matches when the browser
+        // re-imports this module.
+        const normalizeImports = (code: string) =>
+          normalizeRuntimeImports(code, resolvedBase)
 
         if (shouldUseSource && server) {
           const transformed = await server.transformRequest(
@@ -1542,14 +1543,14 @@ export function createComponentHighlighterPlugin(
           )
           if (transformed?.code) {
             return injectBuildConstants(
-              normalizeRuntimeImports(transformed.code),
+              normalizeImports(transformed.code),
             )
           }
         }
 
         if (shouldUseSource) {
           return injectBuildConstants(
-            normalizeRuntimeImports(
+            normalizeImports(
               fs.readFileSync(runtimeModuleSourcePath, 'utf-8'),
             ),
           )
@@ -1562,7 +1563,7 @@ export function createComponentHighlighterPlugin(
         }
 
         return injectBuildConstants(
-          normalizeRuntimeImports(
+          normalizeImports(
             fs.readFileSync(runtimeModuleFilePath, 'utf-8'),
           ),
         )

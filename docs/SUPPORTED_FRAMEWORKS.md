@@ -76,3 +76,47 @@ Current integrations:
     `createLivePropEditor`. Covered by `e2e/common-live-prop-edit-suite.ts`
     with Vue-specific data-type targets (including a nested
     `['task','title']` json edit).
+- Nuxt (uses the Vue integration, `src/frameworks/vue`) — verified via a
+  dedicated E2E playground (`playground/nuxt`; Playwright project
+  `nuxt-chromium`, port 5176). The playground shares ONE component source tree
+  with the Vue playground: `playground/nuxt/app/components` and
+  `playground/nuxt/app/assets/style.css` are symlinks into
+  `playground/vue/src` (same pattern as react18 ↔ react). Do not replace the
+  symlinks with copies.
+  - **Plugin registration is client-Vite-only.** Nuxt spins up TWO Vite
+    instances (client + SSR) and `vite.plugins` lands in both; the DevTools
+    websocket server must exist exactly once. The playground registers
+    `DevTools()` + `componentHighlighter()` via the `vite:extendConfig` Nuxt
+    hook guarded by `isClient`. (Nuxt 4 bundles Vite 7, vs. Vite 8 in the
+    standalone playgrounds — the plugin works on both.)
+  - **Head-script injection differs.** Nuxt has no `index.html`, so the
+    plugin's `transformIndexHtml` hook never runs. The playground injects
+    `getDevToolsHookScript()` (the `__VUE_DEVTOOLS_GLOBAL_HOOK__` bootstrap)
+    via `app.head.script` with `tagPriority: -20` so it executes before the
+    app entry.
+  - **Client modules load via a Nuxt plugin.** `client/listeners`,
+    `client/overlay`, AND `@vitejs/devtools/client/inject` (the dock client,
+    normally injected by DevTools()'s own `transformIndexHtml`) are imported
+    from `app/plugins/storybook-devtools.client.ts` (the `.client` suffix
+    keeps them out of any server bundle) instead of a manual `main.ts` entry.
+    Without the inject import there is no DevTools client context, so every
+    RPC/shared-state feature (panel state sync, tab-active echo) is dead.
+  - **DevTools websocket needs explicit host + auth shape.** The websocket
+    server binds `config.server.host`, which Nuxt's middleware-mode Vite
+    leaves unset → it would bind `localhost` (::1 on macOS) while pages opened
+    via 127.0.0.1 connect to 127.0.0.1 and get refused; the playground sets
+    `vite.server.host: '127.0.0.1'`. Client auth is read from
+    `viteConfig.devtools.config.clientAuth` — Vite 8 normalizes the top-level
+    `devtools` user option into that `{ config }` shape but Vite 7 passes it
+    through raw, so the playground provides the resolved shape directly
+    (`vite.devtools: { config: { clientAuth: false } }`).
+  - **The virtual-module import rewrite is base-aware.** Nuxt serves modules
+    under base `/_nuxt/`; the plugin's runtime-module loader normalizes
+    import-analysis URLs back to bare virtual ids via
+    `src/utils/normalize-runtime-imports.ts` (unit-tested), which handles any
+    base, not just `/`.
+  - **SPA only for now.** The playground sets `ssr: false`; the highlighter
+    runtime and client modules are browser-only and SSR evaluation of the
+    injected `virtual:component-highlighter/vue-runtime` import is unverified.
+    Nuxt DevTools is disabled (`devtools: { enabled: false }`) so it does not
+    install a competing Vue devtools hook.

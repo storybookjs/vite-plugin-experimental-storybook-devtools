@@ -363,6 +363,9 @@ pnpm --filter playground-react dev
 # Run Vue playground
 pnpm --filter playground-vue dev
 
+# Run Nuxt playground
+pnpm --filter playground-nuxt dev
+
 # Run unit tests
 pnpm test
 
@@ -433,14 +436,16 @@ e2e/
   component-highlighter.spec.ts           # Highlighter interaction tests
   playground-react-detection.spec.ts      # React-specific detection tests
   playground-vue-detection.spec.ts        # Vue-specific detection tests
+  playground-nuxt-detection.spec.ts       # Nuxt-specific detection tests
 playground/
   react/                                  # React development app
   vue/                                    # Vue development app
+  nuxt/                                   # Nuxt development app (shares Vue components via symlink)
 ```
 
 ## Limitations
 
-- **React & Vue only** - Currently supports React and Vue (other frameworks planned)
+- **React & Vue only** - Currently supports React and Vue, including Nuxt via the Vue integration (SPA mode, see `docs/SUPPORTED_FRAMEWORKS.md`); other frameworks planned
 - **Development only** - Disabled in production builds by default
 - **Vite DevTools required** - Needs `@vitejs/devtools` for the dock panel and RPC
 - **Function components** - Class components are not supported
