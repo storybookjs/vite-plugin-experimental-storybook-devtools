@@ -1,10 +1,10 @@
 # Vite Component Highlighter Plugin
 
-A Vite plugin that instruments React and Vue components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
+A Vite plugin that instruments React, Vue, and Nuxt SSR components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
 
 ## Features
 
-- **Component Highlighting** - Visual overlay on React and Vue components with configurable colors
+- **Component Highlighting** - Visual overlay on React, Vue, and Nuxt SSR components with configurable colors
 - **One-Click Story Generation** - Create Storybook stories directly from your running app
 - **Interaction Recording** - Record user interactions and generate stories with play functions
 - **Props Serialization** - Properly serializes JSX children, Vue slots, nested components, and reactive objects
@@ -70,6 +70,56 @@ export default defineConfig({
   ],
 })
 ```
+
+### Nuxt SSR
+
+```typescript
+// nuxt.config.ts
+import { DevTools } from '@vitejs/devtools'
+import { defineNuxtConfig } from 'nuxt/config'
+import componentHighlighter, {
+  getNuxtDevToolsHookScript,
+  getNuxtViteDevToolsInjectionScript,
+} from 'vite-plugin-experimental-storybook-devtools/nuxt'
+
+export default defineNuxtConfig({
+  ssr: true,
+  app: {
+    head: {
+      script: [
+        {
+          innerHTML: getNuxtDevToolsHookScript(),
+          tagPosition: 'head',
+        },
+        {
+          type: 'module',
+          innerHTML: getNuxtViteDevToolsInjectionScript(),
+          tagPosition: 'bodyClose',
+        },
+      ],
+    },
+  },
+  vite: {
+    server: {
+      host: '127.0.0.1',
+    },
+    devtools: {
+      enabled: true,
+      clientAuth: false,
+    },
+    plugins: [DevTools(), componentHighlighter()],
+  },
+})
+```
+
+Nuxt SSR uses the Vue component runtime, but Nuxt does not rely on Vite's
+`transformIndexHtml` hook for its rendered HTML. Add the first script so the
+Vue devtools hook exists before hydration mounts the client app, and add the
+module script so the embedded Vite DevTools dock is mounted. The playground
+also pins `vite.server.host` to `127.0.0.1` so the page and DevTools websocket
+use the same host. When running Storybook for Nuxt components, omit the
+DevTools plugin, component highlighter plugin, and head scripts from the
+Storybook process.
 
 ### Start developing
 
@@ -155,7 +205,7 @@ The DevTools panel includes a **Coverage** tab that shows:
 componentHighlighter({
   // Glob patterns for files to instrument
   include: ['**/*.{tsx,jsx}'],     // React
-  include: ['**/*.vue'],           // Vue
+  include: ['**/*.vue'],           // Vue / Nuxt
 
   // Glob patterns to exclude
   exclude: ['**/node_modules/**', '**/dist/**'],
@@ -429,7 +479,7 @@ src/
     story-generator.ts                    # Shared story generation utilities
 e2e/
   highlighter-helpers.ts                  # Shared E2E helper functions
-  common-highlighter-suite.ts             # Shared test suite (both frameworks)
+  common-highlighter-suite.ts             # Shared test suite (framework playgrounds)
   component-highlighter.spec.ts           # Highlighter interaction tests
   playground-react-detection.spec.ts      # React-specific detection tests
   playground-vue-detection.spec.ts        # Vue-specific detection tests
@@ -440,7 +490,7 @@ playground/
 
 ## Limitations
 
-- **React & Vue only** - Currently supports React and Vue (other frameworks planned)
+- **Framework scope** - Currently supports React, Vue, and Nuxt SSR through the Vue integration
 - **Development only** - Disabled in production builds by default
 - **Vite DevTools required** - Needs `@vitejs/devtools` for the dock panel and RPC
 - **Function components** - Class components are not supported

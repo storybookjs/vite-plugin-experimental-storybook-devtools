@@ -608,6 +608,7 @@ function initialize() {
     window as unknown as { __componentHighlighterDisable?: () => void }
   ).__componentHighlighterDisable = () => {
     actor.send({ type: 'DOCK_DEACTIVATE' })
+    actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
   }
   ;(
     window as unknown as { __componentHighlighterIsActive?: () => boolean }

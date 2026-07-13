@@ -5,6 +5,7 @@ export default defineConfig({
     'src/index.ts',
     'src/frameworks/react/plugin.ts',
     'src/frameworks/vue/plugin.ts',
+    'src/frameworks/nuxt/plugin.ts',
     'src/frameworks/react/runtime-module.ts',
     'src/frameworks/vue/runtime-module.ts',
     'src/runtime-helpers.ts',
