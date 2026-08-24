@@ -1,5 +1,4 @@
 import type { Plugin } from 'vite'
-import { createFilter } from 'vite'
 import type { FrameworkConfig } from './frameworks'
 import { defineCommand, defineDockEntry } from '@vitejs/devtools-kit'
 import { createPluginFromDevframe } from '@vitejs/devtools-kit/node'
@@ -17,6 +16,12 @@ import {
   createStorybookDevframe,
   type StorybookDevframeState,
 } from './devframe'
+import {
+  createComponentHighlighterUnplugin,
+  getComponentHighlighterRuntimePaths,
+  type ChDiagnostics,
+  type ComponentHighlighterUnpluginHost,
+} from './unplugin'
 
 import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
 export type { SerializedRegistryInstance, RegistryDiff }
@@ -109,6 +114,23 @@ export interface ComponentHighlighterOptions {
    * @default false
    */
   rsc?: boolean
+  /**
+   * How the runtime devtools-hook script is delivered to the browser.
+   *
+   * - `'html'` (default): prepend an inline `<script>` to the served HTML
+   *   via Vite's `transformIndexHtml`.
+   * - `'entry'`: inject a side-effect import of the hook into the app's
+   *   entry module(s) (matched by the `entry` option) instead, so it runs
+   *   before the app bundle without an HTML transform.
+   *
+   * @default 'html'
+   */
+  hookInjection?: 'html' | 'entry'
+  /**
+   * Picomatch pattern(s) identifying the app's entry module id(s). Required
+   * when `hookInjection` is `'entry'`.
+   */
+  entry?: string | string[]
 }
 
 /**
@@ -126,57 +148,18 @@ export function createComponentHighlighterPlugin(
     }
   }
 
-  const runtimeHelperVirtualId = 'virtual:component-highlighter/runtime-helpers'
-  const resolvedRuntimeHelperVirtualId = `\0${runtimeHelperVirtualId}`
-  const packageRoot = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '..',
-  )
-  const runtimeHelperFilePath = path.join(
-    packageRoot,
-    'dist',
-    'runtime-helpers.mjs',
-  )
-  const runtimeHelperSourcePath = path.join(
-    packageRoot,
-    'src',
-    'runtime-helpers.ts',
-  )
-  const runtimeModuleSourcePath = path.join(
-    packageRoot,
-    'src',
-    `${framework.runtimeModuleFile}.ts`,
-  )
-  const runtimeModuleFilePath = path.join(
-    packageRoot,
-    'dist',
-    `${framework.runtimeModuleFile}.mjs`,
-  )
+  const runtimePaths = getComponentHighlighterRuntimePaths(framework)
 
   const {
-    include = framework.extensions.map((ext) => `**/*${ext}`),
-    exclude = [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/*.d.ts',
-      '**/*.stories.*',
-      '**/stories.*',
-      '**/*.story.*',
-      '**/story.*',
-    ],
-    eventName: _eventName = 'component-highlighter:create-story',
-    enableOverlay: _enableOverlay = true,
     devtoolsDockId = 'component-highlighter',
     storybookUrl = 'http://localhost:6006',
     force = false,
-    debugMode = false,
     writeStoryFiles = true,
     storiesDir,
     dedupeReact = 'auto',
-    rsc = false,
+    hookInjection = 'html',
   } = options
 
-  const filter = createFilter(include, exclude)
   let isServe = false
   // Vite's standard CSP integration: when the app sets `html.cspNonce`, Vite
   // stamps its injected tags with this nonce. We mirror it onto the inline
@@ -185,23 +168,7 @@ export function createComponentHighlighterPlugin(
   // Structured diagnostics (DevTools `ctx.diagnostics`), wired in `kitSetup`.
   // Handles surface non-fatal instrumentation issues — parse failures and
   // unsupported authoring patterns — to the DevTools UI.
-  type ChDiagnostics = {
-    CH_TRANSFORM_FAILED: (p: {
-      file: string
-      detail: string
-      sources?: string[]
-    }) => unknown
-    CH_UNSUPPORTED_PATTERN: (p: {
-      name: string
-      file: string
-      detail: string
-      sources?: string[]
-    }) => unknown
-  }
   let chDiagnostics: ChDiagnostics | null = null
-  // Diagnostics dedupe — a file re-transforms on every HMR edit; emit each
-  // distinct issue once so the UI isn't spammed.
-  const reportedDiagnostics = new Set<string>()
 
   // State shared between this plugin's transform hooks and the devframe's
   // RPC handlers (registered in `./devframe.ts`) and `kitSetup` below. Values
@@ -221,7 +188,29 @@ export function createComponentHighlighterPlugin(
     pendingTabState: null,
   }
 
+  const host: ComponentHighlighterUnpluginHost = {
+    isServe: () => isServe,
+    loadDevSource: async (absPath) => {
+      if (!state.server) return null
+      const transformed = await state.server.transformRequest(absPath)
+      return transformed?.code ?? null
+    },
+    transformedComponents: state.transformedComponents,
+    getDiagnostics: () => chDiagnostics,
+  }
+
+  // The unplugin-produced Vite plugin carries the portable hooks: transform
+  // (with the Vite-specific `{ ssr }` gate composed in via unplugin's `vite`
+  // extension field), resolveId, and load. Extended below with the
+  // Vite-only hooks unplugin has no equivalent for.
+  const unpluginVitePlugin = createComponentHighlighterUnplugin(
+    framework,
+    options,
+    host,
+  ).vite() as Plugin
+
   const transformPlugin: Plugin = {
+    ...unpluginVitePlugin,
     name: 'vite-plugin-experimental-storybook-devtools',
     enforce: 'pre',
     configResolved(config) {
@@ -370,14 +359,17 @@ export function createComponentHighlighterPlugin(
     configureServer(srv) {
       state.server = srv
 
-      if (fs.existsSync(runtimeHelperSourcePath)) {
-        srv.watcher.add(runtimeHelperSourcePath)
+      if (fs.existsSync(runtimePaths.runtimeHelperSourcePath)) {
+        srv.watcher.add(runtimePaths.runtimeHelperSourcePath)
       }
-      if (fs.existsSync(runtimeModuleSourcePath)) {
-        srv.watcher.add(runtimeModuleSourcePath)
+      if (fs.existsSync(runtimePaths.runtimeModuleSourcePath)) {
+        srv.watcher.add(runtimePaths.runtimeModuleSourcePath)
       }
     },
     transformIndexHtml() {
+      // The 'entry' hook-injection strategy delivers the devtools hook via
+      // a module import instead — injecting it here too would run it twice.
+      if (hookInjection === 'entry') return
       if (!isServe && !force) return
       const snippet = framework.htmlHeadSnippet?.()
       if (!snippet) return
@@ -393,184 +385,16 @@ export function createComponentHighlighterPlugin(
         },
       ]
     },
-    resolveId(id) {
-      // HMR invalidation appends ?t=<timestamp> to re-fetched imports —
-      // strip any query before matching our virtual ids.
-      const bareId = id.split('?', 1)[0]!
-      if (bareId === runtimeHelperVirtualId) {
-        return resolvedRuntimeHelperVirtualId
-      }
-      if (bareId === resolvedRuntimeHelperVirtualId) {
-        return resolvedRuntimeHelperVirtualId
-      }
-      if (bareId === framework.virtualModuleId) {
-        return '\0' + bareId
-      }
-      return null
-    },
-    async load(id) {
-      if (id === resolvedRuntimeHelperVirtualId) {
-        const shouldUseSource =
-          isServe && fs.existsSync(runtimeHelperSourcePath)
-
-        if (shouldUseSource && state.server) {
-          const transformed = await state.server.transformRequest(
-            runtimeHelperSourcePath,
-          )
-          if (transformed?.code) {
-            return transformed.code
-          }
-        }
-
-        if (shouldUseSource) {
-          return fs.readFileSync(runtimeHelperSourcePath, 'utf-8')
-        }
-
-        if (!fs.existsSync(runtimeHelperFilePath)) {
-          throw new Error(
-            '[component-highlighter] runtime helpers not built. Run `pnpm build` first.',
-          )
-        }
-        return fs.readFileSync(runtimeHelperFilePath, 'utf-8')
-      }
-      if (id === '\0' + framework.virtualModuleId) {
-        const shouldUseSource =
-          isServe && fs.existsSync(runtimeModuleSourcePath)
-
-        // Replace the loader-injected build constants declared by the runtime
-        // modules (`declare const __COMPONENT_HIGHLIGHTER_*__`). The project
-        // root lets the Vue runtime derive exact cwd-relative paths at runtime
-        // (React gets them from its build-time transform instead).
-        const injectBuildConstants = (code: string) =>
-          code
-            .replace(
-              /__COMPONENT_HIGHLIGHTER_DEBUG__/g,
-              debugMode ? 'true' : 'false',
-            )
-            .replace(/__COMPONENT_HIGHLIGHTER_ROOT__/g, () =>
-              JSON.stringify(process.cwd().replace(/\\/g, '/')),
-            )
-
-        // Vite's import-analysis rewrites the helpers import to its /@id/
-        // form and, after an HMR invalidation, appends a `?t=<timestamp>`
-        // query. Normalize both back to the bare virtual id so resolveId
-        // matches when the browser re-imports this module.
-        const normalizeRuntimeImports = (code: string) =>
-          code
-            .replace(
-              /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-              'virtual:component-highlighter/runtime-helpers',
-            )
-            .replace(
-              /\/_nuxtvirtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-              'virtual:component-highlighter/runtime-helpers',
-            )
-
-        if (shouldUseSource && state.server) {
-          const transformed = await state.server.transformRequest(
-            runtimeModuleSourcePath,
-          )
-          if (transformed?.code) {
-            return injectBuildConstants(
-              normalizeRuntimeImports(transformed.code),
-            )
-          }
-        }
-
-        if (shouldUseSource) {
-          return injectBuildConstants(
-            normalizeRuntimeImports(
-              fs.readFileSync(runtimeModuleSourcePath, 'utf-8'),
-            ),
-          )
-        }
-
-        if (!fs.existsSync(runtimeModuleFilePath)) {
-          throw new Error(
-            '[component-highlighter] runtime module not built. Run `pnpm build` first.',
-          )
-        }
-
-        return injectBuildConstants(
-          normalizeRuntimeImports(
-            fs.readFileSync(runtimeModuleFilePath, 'utf-8'),
-          ),
-        )
-      }
-      return null
-    },
-    transform(code, id, options) {
-      // Only transform in dev/serve mode unless force is enabled
-      if (!isServe && !force) {
-        return
-      }
-
-      // Never instrument components for SSR builds — the runtime module uses
-      // browser-only APIs (CustomEvent, window) and would crash in Node.js.
-      if (options?.ssr) {
-        return
-      }
-
-      // Skip non-matching files
-      if (!filter(id)) {
-        return
-      }
-
-      // Check if this framework handles this file
-      if (!framework.detect(code, id)) {
-        return
-      }
-
-      logDebug(`Transforming ${id}`)
-
-      // NB: the `options` param of this hook is Vite's transform options
-      // (it shadows the plugin's options) — use the destructured `rsc`.
-      const result = framework.transform(code, id, {
-        rsc,
-        onIssue: (issue) => {
-          if (!chDiagnostics) return
-          // Dedupe per (file, code, name) — files re-transform on every edit.
-          const key = `${issue.code}:${issue.file}:${issue.name ?? ''}`
-          if (reportedDiagnostics.has(key)) return
-          reportedDiagnostics.add(key)
-          const sources = issue.loc ? [issue.loc] : undefined
-          if (issue.code === 'transform-failed') {
-            chDiagnostics.CH_TRANSFORM_FAILED({
-              file: issue.file,
-              detail: issue.detail,
-              ...(sources ? { sources } : {}),
-            })
-          } else {
-            chDiagnostics.CH_UNSUPPORTED_PATTERN({
-              name: issue.name ?? 'component',
-              file: issue.file,
-              detail: issue.detail,
-              ...(sources ? { sources } : {}),
-            })
-          }
-        },
-      })
-
-      // Track transformed components for coverage
-      if (result) {
-        const componentName = path.basename(id, path.extname(id))
-        state.transformedComponents.set(componentName, id)
-
-        // Coverage dashboard auto-refreshes via client-side RPC polling
-      }
-
-      return result
-    },
     handleHotUpdate(ctx) {
-      if (ctx.file === runtimeHelperSourcePath) {
+      if (ctx.file === runtimePaths.runtimeHelperSourcePath) {
         const mod = ctx.server.moduleGraph.getModuleById(
-          resolvedRuntimeHelperVirtualId,
+          runtimePaths.resolvedRuntimeHelperVirtualId,
         )
         return mod ? [mod] : []
       }
-      if (ctx.file === runtimeModuleSourcePath) {
+      if (ctx.file === runtimePaths.runtimeModuleSourcePath) {
         const mod = ctx.server.moduleGraph.getModuleById(
-          '\0' + framework.virtualModuleId,
+          runtimePaths.resolvedFrameworkVirtualModuleId,
         )
         return mod ? [mod] : []
       }

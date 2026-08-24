@@ -14,11 +14,27 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 ## Runtime flow (end-to-end)
 
-1. **Vite plugin setup** (`src/create-component-highlighter-plugin.ts` + `src/devframe.ts`)
-   - `create-component-highlighter-plugin.ts` registers the transform hooks for
-     the active framework and returns `[transformPlugin,
-     createPluginFromDevframe(definition, { setup: kitSetup })]` — Vite
-     flattens plugin arrays
+1. **Plugin setup** (`src/unplugin.ts` + `src/create-component-highlighter-plugin.ts` + `src/devframe.ts`)
+   - `unplugin.ts` is the portable instrumentation core, built on `unplugin`:
+     the transform pipeline (filter → `framework.detect` →
+     `framework.transform`, coverage tracking, diagnostics dedupe), the
+     `resolveId`/`load` handling for the runtime-helpers and framework
+     virtual modules (including the dev-source vs. built-dist read path,
+     the built-dist path always available, the dev-source path supplied by
+     a bundler-specific `host.loadDevSource`), and the `entry`
+     hook-injection strategy (see below). `createComponentHighlighterUnplugin(framework, options, host)`
+     returns the `unplugin` instance; `.vite()` produces the Vite plugin —
+     the same call unit tests use to exercise the real, Vite-composed hooks
+     without a running Vite instance.
+   - `create-component-highlighter-plugin.ts` is the Vite adapter: it calls
+     `.vite()` and extends the result with the Vite-only hooks unplugin has
+     no equivalent for — `config` (optimizeDeps/alias/dedupe mutations),
+     `configResolved` (isServe, cspNonce), `configureServer` (watcher.add +
+     server ref, and supplies `host.loadDevSource` backed by
+     `server.transformRequest`), `transformIndexHtml` (`'html'`
+     hook-injection mode only), and `handleHotUpdate` — then returns
+     `[transformPlugin, createPluginFromDevframe(definition, { setup:
+     kitSetup })]` — Vite flattens plugin arrays
    - `devframe.ts` builds the `storybook-devtools` devframe (`defineDevframe`):
      registers the plugin's full RPC surface and shared state on the
      framework-neutral `DevframeNodeContext`, and serves the panel as
@@ -43,15 +59,28 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      `instance.type.__file` / `__name`.
 
 3. **Browser runtime** (`src/frameworks/*/runtime-module.ts` + `src/runtime-helpers.ts`)
+   - **Hook delivery, dual strategy** (`hookInjection` option, `src/unplugin.ts` +
+     `src/create-component-highlighter-plugin.ts`): the framework's inline
+     hook script (see React/Vue below) reaches the browser one of two ways.
+     `'html'` (default): Vite's `transformIndexHtml` head-prepends it as an
+     inline `<script>`, CSP-nonce included when `html.cspNonce` is set — Vite
+     only, stays in the adapter. `'entry'`: the portable core's `transform`
+     hook prepends `import 'virtual:component-highlighter/devtools-hook'` to
+     the app's entry module(s) (matched by the `entry` option) before the
+     component-filter gate runs, once per call whose input doesn't already
+     carry it; ES import hoisting runs it before the rest of the module body.
+     The virtual module's `load` returns `framework.htmlHeadSnippet?.() ?? ''`
+     — the same script body either way. `'entry'` mode disables the
+     `transformIndexHtml` injection so the hook is never delivered twice.
    - React: an inline `<head>` script (`src/frameworks/react/devtools-hook.ts`,
-     injected via `transformIndexHtml`) installs a minimal
+     injected via `transformIndexHtml` in `'html'` mode) installs a minimal
      `__REACT_DEVTOOLS_GLOBAL_HOOK__` *before* react-dom registers. The runtime
      module subscribes via `window.__chInstallCommitHandler` and walks the live
      fiber tree on every commit, reading the `__chRegisterMeta` symbol off
      `fiber.type`/`elementType`, resolving the nearest host DOM node, and
      reconciling the registry. No component is wrapped.
    - Vue: an inline `<head>` script (`src/frameworks/vue/devtools-hook.ts`,
-     injected via `transformIndexHtml`) installs a minimal
+     injected via `transformIndexHtml` in `'html'` mode) installs a minimal
      `__VUE_DEVTOOLS_GLOBAL_HOOK__` *before* `createApp` runs. The runtime
      module subscribes via `window.__chInstallVueHandler` to Vue's
      `component:added`/`updated`/`removed` events (the live instance is at emit
@@ -158,8 +187,11 @@ below.
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/create-component-highlighter-plugin.ts` | Server entrypoint: transform hooks, virtual module serving, mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) registers docks via `defineDockEntry`, commands, and a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/unplugin.ts` | Portable instrumentation core, built on `unplugin`: `createComponentHighlighterUnplugin(framework, options, host)`. Owns the transform pipeline (filter → `framework.detect` → `framework.transform`, coverage tracking, diagnostics dedupe), `resolveId`/`load` for the runtime-helpers and framework virtual modules plus the `virtual:component-highlighter/devtools-hook` module, and the `'entry'` hook-injection strategy. Bundler-specific needs (reading dev-source through a running server) come from the `ComponentHighlighterUnpluginHost` the caller supplies |
+| `src/create-component-highlighter-plugin.ts` | Vite adapter: entrypoint `createComponentHighlighterPlugin(framework, options)`. Calls `createComponentHighlighterUnplugin(...).vite()` and extends the result with the Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`), mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) registers docks via `defineDockEntry`, commands, and a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): registers the full RPC surface (registry sync, panel↔client relay, Storybook process control, panel bootstrap) and shared state on the framework-neutral `DevframeNodeContext`; serves the panel as `clientAssets` |
+| `src/devframe-export.ts` | `./devframe` entry: re-exports `createStorybookDevframe` for mounting the definition in a custom DevTools host |
 | `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
 | `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |

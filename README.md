@@ -126,6 +126,28 @@ middlewares that serve them. The playground also pins `vite.server.host` to
 Storybook for Nuxt components, omit the module, DevTools plugin, component
 highlighter plugin, and head scripts from the Storybook process.
 
+### Vite (unified entry)
+
+`./react` and `./vue` are thin wrappers over one factory that also has its
+own entry point, `./vite`, for picking the framework with an option instead
+of the import path:
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { DevTools } from '@vitejs/devtools'
+import { storybookDevtools } from 'vite-plugin-experimental-storybook-devtools/vite'
+
+export default defineConfig({
+  plugins: [
+    react(),
+    DevTools(),
+    storybookDevtools({ framework: 'react' }),
+  ],
+})
+```
+
 ### Start developing
 
 ```bash
@@ -233,6 +255,16 @@ componentHighlighter({
   // (for Vite-based RSC frameworks like TanStack Start). Leave false for SPAs.
   // See "React Server Components" in docs/REACT_PATTERNS.md.
   rsc: false,
+
+  // How the devtools-hook script is delivered to the browser.
+  // 'html' (default): prepend an inline <script> to the served HTML.
+  // 'entry': inject a side-effect import into the app's entry module(s)
+  // instead — no HTML transform involved.
+  hookInjection: 'html',
+
+  // Picomatch pattern(s) identifying the app's entry module id(s).
+  // Required when hookInjection is 'entry'.
+  entry: undefined,
 })
 ```
 
@@ -276,6 +308,13 @@ export default defineConfig({
   resolve: { dedupe: ['react', 'react-dom'] },
 })
 ```
+
+### Other bundlers
+
+`./rsbuild` and `./next` exist as placeholder entry points — importing
+either throws immediately, pointing at the phased migration in
+`docs/plans/DEVFRAME_OPPORTUNITIES.md`. Vite is the only supported bundler
+today.
 
 ### Default Exclusions
 
@@ -435,7 +474,12 @@ pnpm typecheck
 
 ```
 src/
-  create-component-highlighter-plugin.ts  # Main Vite plugin: transform hooks, virtual modules, mounts the devframe
+  unplugin.ts                             # Portable instrumentation core (unplugin): transform pipeline, virtual modules, entry-injection
+  create-component-highlighter-plugin.ts  # Vite adapter: composes the unplugin output with Vite-only hooks, mounts the devframe
+  vite.ts                                 # Unified `./vite` entry — storybookDevtools({ framework })
+  devframe-export.ts                      # `./devframe` entry — createStorybookDevframe for custom hosts
+  rsbuild.ts                              # `./rsbuild` placeholder (throws — not supported yet)
+  next.ts                                 # `./next` placeholder (throws — not supported yet)
   devframe.ts                             # Devframe definition: RPC surface, shared state, panel clientAssets
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
   coverage-dashboard.ts                   # Server-side coverage computation
