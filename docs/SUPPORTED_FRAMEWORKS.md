@@ -76,3 +76,15 @@ Current integrations:
     `createLivePropEditor`. Covered by `e2e/common-live-prop-edit-suite.ts`
     with Vue-specific data-type targets (including a nested
     `['task','title']` json edit).
+- Nuxt SSR (`playground/nuxt`; Playwright project `nuxt-chromium`) — verified
+  as an SSR consumer of the Vue integration. Nuxt uses
+  `src/frameworks/nuxt/plugin.ts`, which returns the Vue Vite plugin and
+  exports `getNuxtDevToolsHookScript()` and
+  `getNuxtViteDevToolsInjectionScript()` for `nuxt.config.ts` head injection.
+  The explicit scripts are required because Nuxt does not depend on Vite's
+  `transformIndexHtml` path for its SSR HTML; the Vue devtools hook must exist
+  before hydration mounts the client app, and the Vite DevTools dock script
+  must be imported explicitly. The playground pins `vite.server.host` to
+  `127.0.0.1` so the page and DevTools websocket use the same host in live and
+  E2E runs. The Vite transform still skips SSR module transforms, so the
+  browser-only runtime is imported only by the hydrated client graph.

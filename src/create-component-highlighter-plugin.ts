@@ -1531,10 +1531,15 @@ export function createComponentHighlighterPlugin(
         // query. Normalize both back to the bare virtual id so resolveId
         // matches when the browser re-imports this module.
         const normalizeRuntimeImports = (code: string) =>
-          code.replace(
-            /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-            'virtual:component-highlighter/runtime-helpers',
-          )
+          code
+            .replace(
+              /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
+              'virtual:component-highlighter/runtime-helpers',
+            )
+            .replace(
+              /\/_nuxtvirtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
+              'virtual:component-highlighter/runtime-helpers',
+            )
 
         if (shouldUseSource && server) {
           const transformed = await server.transformRequest(

@@ -23,6 +23,7 @@ import {
   findFirstTrackableElement,
   installLivePropEditGlobals,
   isTrackingActive,
+  onListenersReady,
   onTrackingActivated,
   scheduleSerialization,
   setAtPath,
@@ -630,6 +631,15 @@ function handleVueEvent(event: string, args: unknown[]) {
     logError('vue event handling failed:', err)
   }
 }
+
+// Instances registered before the client listeners module loaded dispatched
+// register events into the void — replay the registry when it announces
+// readiness so the initial page highlights without needing a navigation.
+onListenersReady(() => {
+  for (const instance of componentRegistry.values()) {
+    dispatch('component-highlighter:register', instance)
+  }
+})
 
 // ─── Install the bridge ──────────────────────────────────────────────
 

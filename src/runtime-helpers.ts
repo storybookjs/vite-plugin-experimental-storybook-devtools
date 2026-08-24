@@ -44,6 +44,38 @@ if (typeof window !== 'undefined') {
   ).__componentHighlighterActivateTracking = activateTracking
 }
 
+// ─── Registry replay handshake ───────────────────────────────────────
+//
+// The client listeners module (overlay + registry sync) can load AFTER the
+// framework runtime has already committed and dispatched
+// `component-highlighter:register` events — in a consuming app it is pulled
+// in by the asynchronously-loading DevTools client, while the runtime
+// registers components on the framework's very first commit. Events fired
+// before the listeners attach are lost, and later commits only emit
+// `update-props` for already-known ids, so the overlay would stay empty for
+// everything mounted on the initial page (only components mounted later,
+// e.g. after a route change, would highlight). The handshake closes the
+// race: listeners.ts dispatches `component-highlighter:listeners-ready` once
+// its event listeners are attached, and each runtime replays its full
+// registry in response. This must ride on window events — the runtime loads
+// this module as a virtual module while other copies may load it as a file,
+// so module-level state is not shared across the two instances.
+
+/**
+ * Register a replay callback invoked when the client listeners module
+ * announces it is ready to receive registry events.
+ */
+export function onListenersReady(replay: () => void): void {
+  if (typeof window === 'undefined') return
+  window.addEventListener('component-highlighter:listeners-ready', () => {
+    try {
+      replay()
+    } catch {
+      // one runtime's replay failing must not block the others
+    }
+  })
+}
+
 // ─── Per-instance serialization coalescer ────────────────────────────
 //
 // A re-rendering component can fire updateProps dozens of times per frame,

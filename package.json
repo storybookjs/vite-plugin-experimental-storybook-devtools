@@ -27,6 +27,10 @@
       "types": "./dist/frameworks/vue/plugin.d.mts",
       "default": "./dist/frameworks/vue/plugin.mjs"
     },
+    "./nuxt": {
+      "types": "./dist/frameworks/nuxt/plugin.d.mts",
+      "default": "./dist/frameworks/nuxt/plugin.mjs"
+    },
     "./package.json": "./package.json",
     "./client/overlay": "./dist/client/overlay.mjs",
     "./client/listeners": "./dist/client/listeners.mjs",
@@ -66,7 +70,7 @@
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/compiler-sfc": "^3.5.28",
     "bumpp": "^10.3.2",
-    "pkg-pr-new": "^0.0.66",
+    "pkg-pr-new": "^0.0.75",
     "playwright": "^1.57.0",
     "tsdown": "^0.18.1",
     "typescript": "^5.9.3",

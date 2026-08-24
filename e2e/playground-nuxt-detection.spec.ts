@@ -38,23 +38,70 @@ async function getRegistrySnapshot(page: Parameters<typeof test>[0]['page']) {
   })
 }
 
-test.describe('Vue playground detection coverage', () => {
+test.describe('Nuxt SSR playground detection coverage', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForSelector('button')
     await page.waitForTimeout(1000)
   })
 
-  test('detects expected baseline components on initial render', async ({
+  test('renders server HTML before hydration', async ({ request }) => {
+    const response = await request.get('/')
+    expect(response.ok()).toBe(true)
+
+    const html = await response.text()
+    expect(html).toContain('TaskFlow Nuxt SSR')
+    expect(html).toContain('Review component highlighter PR')
+    expect(html).toContain(
+      'import "/_nuxt/@id/__x00__virtual:vite-devtools-injection"',
+    )
+  })
+
+  test('injects the Vite DevTools dock with Storybook tools', async ({
+    page,
+  }) => {
+    await expect
+      .poll(async () => {
+        return page.evaluate(async () => {
+          const dock = document.querySelector('vite-devtools-dock-embedded') as
+            | (HTMLElement & { shadowRoot?: ShadowRoot })
+            | null
+          const shadow = dock?.shadowRoot
+          const html = shadow?.innerHTML || ''
+          const importsResponse = await fetch('/__devtools-client-imports.js')
+          const imports = importsResponse.ok
+            ? await importsResponse.text()
+            : ''
+
+          return {
+            hasDock: Boolean(dock),
+            hasUnauthorized: html.includes('Unauthorized'),
+            hasStorybookIcon:
+              html.includes('FF4785') || html.includes('%23FF4785'),
+            hasComponentHighlighterImport: imports.includes(
+              'action:component-highlighter',
+            ),
+            hasMultipleDockButtons:
+              (shadow?.querySelectorAll('button').length || 0) >= 3,
+          }
+        })
+      })
+      .toEqual({
+        hasDock: true,
+        hasUnauthorized: false,
+        hasStorybookIcon: true,
+        hasComponentHighlighterImport: true,
+        hasMultipleDockButtons: true,
+      })
+  })
+
+  test('detects expected baseline components after hydration', async ({
     page,
   }) => {
     const snapshot = await getRegistrySnapshot(page)
 
     expect(snapshot).toBeTruthy()
     expect(snapshot?.hasUnknownFilePath).toBe(false)
-
-    // Vue names can include "Anonymous" for script setup root in some toolchains,
-    // so validate the key concrete components are present.
     expect(snapshot?.uniqueNames).toEqual(
       expect.arrayContaining([
         'Header',
@@ -79,15 +126,11 @@ test.describe('Vue playground detection coverage', () => {
       expect.arrayContaining(['TaskForm', 'Input', 'Select']),
     )
   })
-
 })
 
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
 registerLivePropEditSuite(test as any, {
-  // The Vue playground has no PropZoo; TaskCard's `task` object covers the
-  // json kind and additionally exercises a NESTED path (['task','title']),
-  // which on Vue must clone-and-reassign the top-level reactive prop.
   dataTypeTargets: [
     {
       componentName: 'Header',
