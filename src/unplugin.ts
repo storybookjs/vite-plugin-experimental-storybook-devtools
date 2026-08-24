@@ -17,6 +17,7 @@ import type { UnpluginOptions } from 'unplugin'
 import type { FrameworkConfig } from './frameworks'
 import type { TransformIssue } from './frameworks/types'
 import type { ComponentHighlighterOptions } from './create-component-highlighter-plugin'
+import { normalizeRuntimeImports } from './utils/normalize-runtime-imports'
 
 /** Structured diagnostics dispatch, registered by the DevTools kit (see `kitSetup` in the Vite adapter). Not part of unplugin's or devframe's portable context. */
 export type ChDiagnostics = {
@@ -53,6 +54,13 @@ export interface ComponentHighlighterUnpluginHost {
   transformedComponents: Map<string, string>
   /** Current diagnostics dispatch, or `null` before the kit registers it. */
   getDiagnostics: () => ChDiagnostics | null
+  /**
+   * Resolved public base the dev server rewrites module URLs under (Vite:
+   * `config.base`, `/_nuxt/` on Nuxt). Used to normalize the runtime-helpers
+   * import back to its bare virtual id. Hosts without Vite-style import
+   * rewriting omit it; `/` is assumed.
+   */
+  getBase?: () => string
 }
 
 /** Virtual module whose body is the framework's inline devtools-hook script, for the `entry` hook-injection strategy. */
@@ -305,28 +313,21 @@ function buildComponentHighlighterUnpluginOptions(
               JSON.stringify(process.cwd().replace(/\\/g, '/')),
             )
 
-        // Vite's import-analysis rewrites the helpers import to its /@id/
-        // form and, after an HMR invalidation, appends a `?t=<timestamp>`
-        // query. Normalize both back to the bare virtual id so resolveId
-        // matches when the browser re-imports this module.
-        const normalizeRuntimeImports = (code: string) =>
-          code
-            .replace(
-              /\/\@id\/__x00__virtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-              'virtual:component-highlighter/runtime-helpers',
-            )
-            .replace(
-              /\/_nuxtvirtual:component-highlighter\/runtime-helpers(\?t=\d+)?/g,
-              'virtual:component-highlighter/runtime-helpers',
-            )
+        // Vite's import-analysis rewrites the helpers import to its
+        // <base>/@id/ form (base is '/_nuxt/' under Nuxt) and, after an HMR
+        // invalidation, appends a `?t=<timestamp>` query. Normalize both back
+        // to the bare virtual id so resolveId matches when the browser
+        // re-imports this module.
+        const normalizeImports = (code: string) =>
+          normalizeRuntimeImports(code, host.getBase?.() ?? '/')
 
         if (shouldUseSource) {
           const devSource = await loadDevSource(paths.runtimeModuleSourcePath)
           if (devSource != null) {
-            return injectBuildConstants(normalizeRuntimeImports(devSource))
+            return injectBuildConstants(normalizeImports(devSource))
           }
           return injectBuildConstants(
-            normalizeRuntimeImports(
+            normalizeImports(
               fs.readFileSync(paths.runtimeModuleSourcePath, 'utf-8'),
             ),
           )
@@ -339,7 +340,7 @@ function buildComponentHighlighterUnpluginOptions(
         }
 
         return injectBuildConstants(
-          normalizeRuntimeImports(
+          normalizeImports(
             fs.readFileSync(paths.runtimeModuleFilePath, 'utf-8'),
           ),
         )
