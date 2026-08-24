@@ -19,6 +19,7 @@ import {
   findFirstTrackableElement,
   installLivePropEditGlobals,
   isTrackingActive,
+  onListenersReady,
   onTrackingActivated,
   scheduleSerialization,
 } from 'virtual:component-highlighter/runtime-helpers'
@@ -654,6 +655,15 @@ installLivePropEditGlobals(
   propEditor,
   () => !!reactRenderer && typeof reactRenderer.overrideProps === 'function',
 )
+
+// Instances committed before the client listeners module loaded dispatched
+// register events into the void — replay the registry when it announces
+// readiness so the initial page highlights without needing a navigation.
+onListenersReady(() => {
+  for (const instance of componentRegistry.values()) {
+    dispatch('component-highlighter:register', instance)
+  }
+})
 
 if (typeof window !== 'undefined') {
   const install = (

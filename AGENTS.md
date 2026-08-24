@@ -35,6 +35,7 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
    - Reuse:
      - `e2e/highlighter-helpers.ts`
      - `e2e/common-highlighter-suite.ts`
+     - `e2e/common-listeners-replay-suite.ts` (late-loading listeners recovery)
    - Keep framework-specific specs focused on true framework differences only.
 
 4. **Verify both save flows**

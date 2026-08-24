@@ -6,7 +6,7 @@ Short, high-signal reference for contributors and coding agents.
 
 ## What this plugin does
 
-`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports both React and Vue.
+`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration.
 
 ## Supported frameworks
 
@@ -59,11 +59,26 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      cwd-relative path is computed against `__COMPONENT_HIGHLIGHTER_ROOT__`, a
      build constant the virtual-module loader injects (like
      `__COMPONENT_HIGHLIGHTER_DEBUG__`).
+   - Nuxt SSR: `src/frameworks/nuxt/plugin.ts` reuses the Vue Vite plugin and
+     exposes `getNuxtDevToolsHookScript()` so `nuxt.config.ts` can inject the
+     same hook into SSR HTML before hydration. It also exposes
+     `getNuxtViteDevToolsInjectionScript()` because Nuxt SSR does not run the
+     Vite DevTools `transformIndexHtml` injection for the embedded dock. The
+     core transform hook skips `options.ssr`, so the browser runtime never
+     enters Nuxt's server module graph.
    - Registers component instances in a global `Map` registry on `window`
    - Tracks props, serialized props, and DOM anchor elements
    - Emits `component-highlighter:register/unregister/update-props` custom events
+   - Replays its full registry when `component-highlighter:listeners-ready`
+     fires (via `onListenersReady` in `src/runtime-helpers.ts`). The listeners
+     module is loaded by the async DevTools client — usually *after* the
+     framework's first commit — so register events for the initial page would
+     otherwise be lost and highlighting would only work for components mounted
+     later (e.g. after a route change).
 
 4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
+   - `listeners.ts` dispatches `component-highlighter:listeners-ready` once its
+     registry event listeners are attached (triggers the runtime replay above)
    - Renders highlight rectangles in `#component-highlighter-container`
    - Handles hover, click, keyboard shortcuts (Alt toggle, Escape, double-Escape)
    - Context menu (Shadow DOM) shows props, action buttons, story creation form
@@ -102,6 +117,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 | `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
 | `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |
+| `src/frameworks/nuxt/plugin.ts` | Nuxt entry point: reuses Vue instrumentation and exports SSR head-script helpers for the Vue hook and embedded Vite DevTools dock |
 | `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook; Vue: `component:added/updated/removed` hook-event reconciler) |
 | `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer, `createLivePropEditor` — the framework-agnostic live prop-edit machinery; runtimes supply only `applyOverride`) |
 | `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
@@ -299,13 +315,25 @@ Focused e2e entrypoints:
 pnpm exec playwright test e2e/playground-react-detection.spec.ts     # React 19
 pnpm exec playwright test e2e/playground-react18-detection.spec.ts    # React 18 + serialization fidelity
 pnpm exec playwright test e2e/playground-vue-detection.spec.ts
+pnpm exec playwright test e2e/playground-nuxt-detection.spec.ts       # Nuxt SSR
 
 # Highlighter interaction tests (context menu, story creation)
 pnpm exec playwright test e2e/component-highlighter.spec.ts
 
 # Common highlighter features (runs for both frameworks)
 pnpm exec playwright test e2e/common-highlighter-suite.ts
+
+# Listeners-ready registry replay (late-loading listeners recovery, all playgrounds)
+pnpm exec playwright test -g "listeners-ready registry replay"
 ```
+
+The playgrounds import `client/listeners` eagerly for deterministic E2E
+activation — real consuming apps don't, so their listeners module loads late
+(via the async DevTools client) and misses the initial register events. The
+`common-listeners-replay-suite.ts` covers the recovery path for that: it
+simulates the missed events by clearing the client registry, re-dispatches
+`component-highlighter:listeners-ready`, and asserts the runtime replays the
+full registry and that highlighting works on the replayed instances.
 
 ## Known caveats
 

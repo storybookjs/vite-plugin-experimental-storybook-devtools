@@ -575,6 +575,13 @@ function initialize() {
     }
   }) as EventListener)
 
+  // The framework runtime may have registered components before this module
+  // loaded (its register events fired with nobody listening — this module is
+  // pulled in by the async DevTools client, after the app's first commit).
+  // Announce readiness so every runtime replays its registry; see
+  // `onListenersReady` in runtime-helpers.ts.
+  window.dispatchEvent(new CustomEvent('component-highlighter:listeners-ready'))
+
   // DOM event listeners
   document.addEventListener('mousemove', handleMouseMove)
   document.addEventListener('keydown', handleKeyDown)
@@ -608,6 +615,7 @@ function initialize() {
     window as unknown as { __componentHighlighterDisable?: () => void }
   ).__componentHighlighterDisable = () => {
     actor.send({ type: 'DOCK_DEACTIVATE' })
+    actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
   }
   ;(
     window as unknown as { __componentHighlighterIsActive?: () => boolean }

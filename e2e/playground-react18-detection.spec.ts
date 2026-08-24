@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
 import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
+import { registerListenersReplaySuite } from './common-listeners-replay-suite'
 
 /**
  * React 18 parity suite.
@@ -237,3 +238,4 @@ test.describe('React 18 playground detection coverage', () => {
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
 registerLivePropEditSuite(test as any)
+registerListenersReplaySuite(test as any)
