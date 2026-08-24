@@ -69,8 +69,16 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
    - Registers component instances in a global `Map` registry on `window`
    - Tracks props, serialized props, and DOM anchor elements
    - Emits `component-highlighter:register/unregister/update-props` custom events
+   - Replays its full registry when `component-highlighter:listeners-ready`
+     fires (via `onListenersReady` in `src/runtime-helpers.ts`). The listeners
+     module is loaded by the async DevTools client — usually *after* the
+     framework's first commit — so register events for the initial page would
+     otherwise be lost and highlighting would only work for components mounted
+     later (e.g. after a route change).
 
 4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
+   - `listeners.ts` dispatches `component-highlighter:listeners-ready` once its
+     registry event listeners are attached (triggers the runtime replay above)
    - Renders highlight rectangles in `#component-highlighter-container`
    - Handles hover, click, keyboard shortcuts (Alt toggle, Escape, double-Escape)
    - Context menu (Shadow DOM) shows props, action buttons, story creation form
@@ -314,7 +322,18 @@ pnpm exec playwright test e2e/component-highlighter.spec.ts
 
 # Common highlighter features (runs for both frameworks)
 pnpm exec playwright test e2e/common-highlighter-suite.ts
+
+# Listeners-ready registry replay (late-loading listeners recovery, all playgrounds)
+pnpm exec playwright test -g "listeners-ready registry replay"
 ```
+
+The playgrounds import `client/listeners` eagerly for deterministic E2E
+activation — real consuming apps don't, so their listeners module loads late
+(via the async DevTools client) and misses the initial register events. The
+`common-listeners-replay-suite.ts` covers the recovery path for that: it
+simulates the missed events by clearing the client registry, re-dispatches
+`component-highlighter:listeners-ready`, and asserts the runtime replays the
+full registry and that highlighting works on the replayed instances.
 
 ## Known caveats
 

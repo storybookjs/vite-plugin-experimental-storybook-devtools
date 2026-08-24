@@ -1,6 +1,7 @@
 declare module 'virtual:component-highlighter/runtime-helpers' {
   export function isTrackingActive(): boolean
   export function onTrackingActivated(cb: () => void): void
+  export function onListenersReady(replay: () => void): void
   export function activateTracking(): void
   export function scheduleSerialization(
     id: string,

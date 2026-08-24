@@ -1,10 +1,58 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   createLivePropEditor,
   getAtPath,
+  onListenersReady,
   setAtPath,
   type PropPath,
 } from './runtime-helpers'
+
+describe('onListenersReady', () => {
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window
+  })
+
+  it('replays when the listeners-ready event fires after registration', () => {
+    const w = new EventTarget()
+    ;(globalThis as { window?: unknown }).window = w
+    const replay = vi.fn()
+    onListenersReady(replay)
+    expect(replay).not.toHaveBeenCalled()
+    w.dispatchEvent(new Event('component-highlighter:listeners-ready'))
+    expect(replay).toHaveBeenCalledTimes(1)
+  })
+
+  it('replays for every runtime that registered (multi-framework page)', () => {
+    const w = new EventTarget()
+    ;(globalThis as { window?: unknown }).window = w
+    const replayA = vi.fn()
+    const replayB = vi.fn()
+    onListenersReady(replayA)
+    onListenersReady(replayB)
+    w.dispatchEvent(new Event('component-highlighter:listeners-ready'))
+    expect(replayA).toHaveBeenCalledTimes(1)
+    expect(replayB).toHaveBeenCalledTimes(1)
+  })
+
+  it('swallows replay errors so one runtime cannot break the others', () => {
+    const w = new EventTarget()
+    ;(globalThis as { window?: unknown }).window = w
+    const broken = vi.fn(() => {
+      throw new Error('boom')
+    })
+    const healthy = vi.fn()
+    onListenersReady(broken)
+    onListenersReady(healthy)
+    expect(() =>
+      w.dispatchEvent(new Event('component-highlighter:listeners-ready')),
+    ).not.toThrow()
+    expect(healthy).toHaveBeenCalledTimes(1)
+  })
+
+  it('is a no-op outside the browser', () => {
+    expect(() => onListenersReady(vi.fn())).not.toThrow()
+  })
+})
 
 describe('setAtPath / getAtPath', () => {
   it('sets a top-level key immutably', () => {

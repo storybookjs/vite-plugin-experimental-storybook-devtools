@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
 import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
+import { registerListenersReplaySuite } from './common-listeners-replay-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -151,3 +152,4 @@ registerLivePropEditSuite(test as any, {
     },
   ],
 })
+registerListenersReplaySuite(test as any)
