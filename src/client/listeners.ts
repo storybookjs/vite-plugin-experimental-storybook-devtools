@@ -1,6 +1,6 @@
 import type { ComponentInstance } from '../frameworks/types'
 import type { SerializedRegistryInstance, RegistryDiff } from '../shared-types'
-import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
+import { getHostClientContext } from './utils/host-context'
 import {
   setComponentRegistry,
   showContextMenu,
@@ -69,7 +69,7 @@ export function setRegistryRpcCall(
 }
 
 async function setRegistryRpcCallWhenTrusted(
-  ctx: NonNullable<ReturnType<typeof getDevToolsClientContext>>,
+  ctx: NonNullable<ReturnType<typeof getHostClientContext>>,
 ) {
   if (rpcCallFn) return
   try {
@@ -116,7 +116,7 @@ function autoInitRpc() {
   let attempts = 0
   const tryInit = () => {
     attempts++
-    const ctx = getDevToolsClientContext()
+    const ctx = getHostClientContext()
     if (ctx?.rpc?.call) {
       if (!rpcCallFn) {
         setRegistryRpcCallWhenTrusted(ctx)
@@ -229,8 +229,8 @@ function autoInitRpc() {
             name: 'component-highlighter:do-open-panel-tab',
             type: 'action',
             handler: (_data: { tab: string }) => {
-              const clientCtx = getDevToolsClientContext() as any
-              clientCtx?.docks?.switchEntry?.('storybook-devtools-panel')
+              const clientCtx = getHostClientContext() as any
+              clientCtx?.docks?.switchEntry?.('storybook-devtools')
             },
           } as any)
         } catch {
@@ -406,7 +406,7 @@ function handleKeyDown(event: KeyboardEvent) {
 
 function syncHighlightState(active: boolean) {
   if (!rpcCallFn) return
-  const ctx = getDevToolsClientContext()
+  const ctx = getHostClientContext()
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlight-active')
@@ -416,7 +416,7 @@ function syncHighlightState(active: boolean) {
 
 function syncHighlighterTabActive(active: boolean) {
   if (!rpcCallFn) return
-  const ctx = getDevToolsClientContext()
+  const ctx = getHostClientContext()
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlighter-tab-active')

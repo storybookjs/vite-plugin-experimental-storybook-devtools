@@ -52,9 +52,7 @@ test.describe('Nuxt SSR playground detection coverage', () => {
     const html = await response.text()
     expect(html).toContain('TaskFlow Nuxt SSR')
     expect(html).toContain('Review component highlighter PR')
-    expect(html).toContain(
-      'import "/_nuxt/@id/__x00__virtual:vite-devtools-injection"',
-    )
+    expect(html).toContain('/__devtools/embedded.js')
   })
 
   test('injects the Vite DevTools dock with Storybook tools', async ({
@@ -63,7 +61,7 @@ test.describe('Nuxt SSR playground detection coverage', () => {
     await expect
       .poll(async () => {
         return page.evaluate(async () => {
-          const dock = document.querySelector('vite-devtools-dock-embedded') as
+          const dock = document.querySelector('devframes-dock-embedded') as
             | (HTMLElement & { shadowRoot?: ShadowRoot })
             | null
           const shadow = dock?.shadowRoot

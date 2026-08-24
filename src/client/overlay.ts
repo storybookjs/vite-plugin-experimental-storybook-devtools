@@ -1,7 +1,7 @@
 import type { ComponentInstance, SerializedProps } from '../frameworks/types'
 import type { Emitter } from 'nanoevents'
 import { createNanoEvents } from 'nanoevents'
-import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
+import { getHostClientContext } from './utils/host-context'
 import { debug, warn, error as logError } from './logger'
 import {
   UI_MARKER,
@@ -106,11 +106,12 @@ async function checkStoryFile(
   }
 
   try {
-    const response = await fetch(
-      `/__component-highlighter/check-story?componentPath=${encodeURIComponent(componentPath)}`,
-    )
-    if (response.ok) {
-      const result = await response.json()
+    const ctx = getHostClientContext()
+    if (ctx?.rpc?.call) {
+      const result = (await (ctx.rpc.call as any)(
+        'component-highlighter:check-story',
+        { componentPath },
+      )) as { hasStory: boolean; storyPath: string | null }
       storyFileCache.set(componentPath, result)
       return result
     }
@@ -560,13 +561,13 @@ export async function showContextMenu(
       onMenuClosed()
     },
     async visitStory(relativeFilePath: string) {
-      const ctx = getDevToolsClientContext() as any
+      const ctx = getHostClientContext() as any
       if (ctx?.docks?.switchEntry) {
-        await ctx.docks.switchEntry('storybook-devtools-panel')
+        await ctx.docks.switchEntry('storybook-devtools')
       }
 
       try {
-        const rpcCtx = getDevToolsClientContext()
+        const rpcCtx = getHostClientContext()
         if (rpcCtx?.rpc?.call) {
           await (rpcCtx.rpc.call as any)(
             'component-highlighter:visit-story',
@@ -579,10 +580,11 @@ export async function showContextMenu(
       }
 
       try {
-        const res = await fetch(
-          '/__component-highlighter/storybook-index',
-        )
-        const data = await res.json()
+        const rpcCtx = getHostClientContext()
+        if (!rpcCtx?.rpc?.call) return
+        const data = (await (rpcCtx.rpc.call as any)(
+          'component-highlighter:storybook-index',
+        )) as { entries?: Record<string, any> }
         const entries = data.entries || {}
         const storyId = pickStoryId(entries, relativeFilePath)
         if (storyId) {
@@ -653,7 +655,7 @@ export function pushSelectedComponentRPC(
   instance: ComponentInstance | null,
 ) {
   try {
-    const ctx = getDevToolsClientContext()
+    const ctx = getHostClientContext()
     if (!ctx?.rpc) return
 
     const data = instance

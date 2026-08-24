@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   root: 'src/panel',
-  base: '/.storybook-devtools/',
+  base: './',
   build: {
     outDir: '../../dist/panel',
     emptyOutDir: true,

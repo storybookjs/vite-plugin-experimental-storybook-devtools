@@ -57,6 +57,9 @@
     "release": "bumpp && pnpm publish",
     "prepublishOnly": "pnpm run build"
   },
+  "peerDependencies": {
+    "@vitejs/devtools": ">=0.6.0"
+  },
   "devDependencies": {
     "@babel/parser": "^7.28.6",
     "@babel/traverse": "^7.28.6",
@@ -64,8 +67,8 @@
     "@playwright/test": "^1.57.0",
     "@tsconfig/strictest": "^2.0.8",
     "@types/node": "^25.0.3",
-    "@vitejs/devtools": "^0.3.3",
-    "@vitejs/devtools-kit": "^0.3.3",
+    "@vitejs/devtools": "^0.6.0",
+    "@vitejs/devtools-kit": "^0.6.0",
     "@vitest/browser-playwright": "^4.1.9",
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/compiler-sfc": "^3.5.28",
@@ -81,6 +84,7 @@
     "@babel/generator": "^7.28.6",
     "@medv/finder": "^3.1.0",
     "@testing-library/dom": "^10.4.0",
+    "devframe": "^0.9.5",
     "dom-accessibility-api": "^0.6.3",
     "nanoevents": "^9.0.0",
     "react-element-to-jsx-string": "^15.0.0",

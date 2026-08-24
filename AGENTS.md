@@ -67,13 +67,13 @@ verify interactively using preview tools against a playground dev server.
 
 Use `.claude/launch.json` to start a playground (E2E env var is removed so DevTools
 authorization works). The DevTools dock lives inside
-`<vite-devtools-dock-embedded>` — a custom element with a **shadow DOM**.
+`<devframes-dock-embedded>` — a custom element with a **shadow DOM**.
 
 ### Navigating the DevTools UI via preview tools
 
 ```js
 // Access the shadow root
-const dock = document.querySelector('vite-devtools-dock-embedded');
+const dock = document.querySelector('devframes-dock-embedded');
 const shadow = dock?.shadowRoot;
 
 // Find dock buttons (Storybook, Component Highlighter, etc.)
@@ -97,9 +97,15 @@ iframeDoc?.querySelector('.act-btn.locate');      // scroll-to-component buttons
 
 If the DevTools shows "Unauthorized", auto-authorize with:
 ```js
-// devtools-kit 0.3 (devframe core): the auth token global was renamed to
-// __DEVFRAME_CONNECTION_AUTH_TOKEN__ (read from localStorage or window).
-const ctx = window.__VITE_DEVTOOLS_CLIENT_CONTEXT__;
+// The embedded dock host publishes the app-page client context on
+// window.__DEVFRAME_HUB_CLIENT_CONTEXT__ (the standalone viewer uses
+// __VITE_DEVTOOLS_CLIENT_CONTEXT__ instead — src/client/utils/host-context.ts
+// checks both). The auth token is devframe-core state:
+// __DEVFRAME_CONNECTION_AUTH_TOKEN__ (read from localStorage or window);
+// requestTrustWithToken lives on ctx.rpc.
+const ctx =
+  window.__VITE_DEVTOOLS_CLIENT_CONTEXT__ ||
+  window.__DEVFRAME_HUB_CLIENT_CONTEXT__;
 const token =
   localStorage.getItem('__DEVFRAME_CONNECTION_AUTH_TOKEN__') ||
   window.__DEVFRAME_CONNECTION_AUTH_TOKEN__;
@@ -114,7 +120,7 @@ ctx.rpc.requestTrustWithToken(token);
 - Scroll-to-component: locate button triggers scroll via RPC
 - Create story / Create all: stories created without errors
 - Live prop editing (React AND Vue): the pencil on a prop row edits the live app; reset restores the original
-- Registry sync: `ctx.rpc.call('component-highlighter:get-registry')` returns instances
+- Registry sync: `(await ctx.rpc.sharedState.get('component-highlighter:registry')).value()` returns the synced instances
 
 ### Communication architecture
 
@@ -167,5 +173,5 @@ shadowRoot.prepend(style);
 - Use `--sb-*` CSS custom properties for all colors, typography, and spacing
 - Always include both light (`:host {}`) and dark (`@media (prefers-color-scheme: dark)`) blocks
 - Never hardcode hex colors — use the `--sb-*` variables
-- The Shadow DOM root is `<vite-devtools-dock-embedded>`'s `shadowRoot`
+- The Shadow DOM root is `<devframes-dock-embedded>`'s `shadowRoot`
 - **Unavailable actions**: omit them from the DOM entirely — do not render them as `disabled`. This applies to popover menus, context menu action buttons, and any other affordance that depends on optional state (e.g. story existence, editor availability).

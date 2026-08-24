@@ -9,6 +9,7 @@
 
 import componentHighlighterVue from '../vue/plugin'
 import { getDevToolsHookScript } from '../vue/devtools-hook'
+import { DEVTOOLS_MOUNT_PATH } from '@vitejs/devtools-kit/constants'
 import type { ComponentHighlighterOptions } from '../../create-component-highlighter-plugin'
 
 /**
@@ -32,17 +33,89 @@ export function getNuxtDevToolsHookScript(): string {
  * Nuxt SSR does not pass the rendered document through Vite's
  * transformIndexHtml hook, so @vitejs/devtools cannot inject its embedded dock
  * script by itself. Add this module script to Nuxt's head in dev.
+ *
+ * Mirrors the inline bootstrap `@vitejs/devtools` injects into plain-Vite
+ * HTML: a runtime-created `<script type="module">` pointing at the hub-served
+ * `embedded.js`. The dock bootstrap is served by the devtools middleware at a
+ * fixed mount path, not from Nuxt's build-assets directory.
  */
-export function getNuxtViteDevToolsInjectionScript(
-  buildAssetsDir = '/_nuxt/',
-): string {
-  const assetsDir = buildAssetsDir.endsWith('/')
-    ? buildAssetsDir
-    : `${buildAssetsDir}/`
+export function getNuxtViteDevToolsInjectionScript(): string {
+  const src = `${DEVTOOLS_MOUNT_PATH}embedded.js`
+  return `const s = document.createElement('script'); s.type = 'module'; s.src = ${JSON.stringify(src)}; document.body.appendChild(s);`
+}
 
-  return `import ${JSON.stringify(
-    `${assetsDir}@id/__x00__virtual:vite-devtools-injection`,
-  )}`
+/**
+ * Nuxt module that makes Vite DevTools reachable in dev.
+ *
+ * Vite DevTools serves everything — the hub UI and RPC endpoints under
+ * `/__devtools/`, per-plugin panels such as `/__storybook-devtools/`, and the
+ * `/@id/*` client-script resolution — as connect middleware and module URLs on
+ * the client Vite server. Nuxt does pipe every dev request through that
+ * middleware stack, but marks non-build-asset requests with `_skip_transform`
+ * and rewrites their URL onto `/__skip_vite/*` partway down the stack, so the
+ * devtools middlewares (and Vite's transform pipeline) never match them and
+ * the request falls through to Nitro's SSR catch-all.
+ *
+ * This module prepends one middleware to the client Vite stack that undoes
+ * that for devtools traffic: it clears the skip flag on devtools-owned paths,
+ * and additionally rewrites module-graph URLs (`/@id/*` and the dock imports
+ * virtual id, which the devtools host advertises without a base) onto Vite's
+ * `buildAssetsDir` base so the transform pipeline serves them.
+ *
+ * The RPC WebSocket needs no bridging: with Vite in middleware mode the
+ * devtools hub starts a sidecar WebSocket server on its own port and
+ * advertises it through `__connection.json`.
+ *
+ * Usage in `nuxt.config.ts`: `modules: [viteDevToolsBridgeModule]`.
+ */
+export function viteDevToolsBridgeModule(
+  _inlineOptions: unknown,
+  // Minimal structural slice of the Nuxt instance; avoids a @nuxt/kit dependency.
+  nuxt: {
+    options: { dev?: boolean }
+    hook: (name: string, fn: (...args: never[]) => void) => void
+  },
+): void {
+  if (!nuxt.options.dev) return
+
+  // Paths served by devtools connect middlewares at their full path (the hub
+  // base and every hostStatic mount, this plugin's panel included).
+  const devtoolsPrefixes = ['/__devtools', '/__devframes', '/__storybook-devtools']
+  // Module-graph URLs the devtools host advertises without Vite's base.
+  const moduleUrlPrefixes = ['/@id/', '/__devtools-client-imports.js']
+
+  type ConnectLayer = {
+    route: string
+    handle: (req: unknown, res: unknown, next: (err?: unknown) => void) => void
+  }
+  type NodeMiddlewareServer = {
+    config: { base: string }
+    middlewares: { stack: ConnectLayer[] }
+  }
+
+  ;(
+    nuxt.hook as (
+      name: 'vite:serverCreated',
+      fn: (server: NodeMiddlewareServer, ctx: { isClient: boolean }) => void,
+    ) => void
+  )('vite:serverCreated', (server, ctx) => {
+    if (!ctx.isClient) return
+    const base = server.config.base.replace(/\/$/, '')
+    server.middlewares.stack.unshift({
+      route: '',
+      handle: (req: unknown, _res: unknown, next: (err?: unknown) => void) => {
+        const r = req as { url?: string; _skip_transform?: boolean }
+        const url = r.url ?? ''
+        if (devtoolsPrefixes.some((p) => url.startsWith(p))) {
+          r._skip_transform = false
+        } else if (moduleUrlPrefixes.some((p) => url.startsWith(p))) {
+          r._skip_transform = false
+          r.url = `${base}${url}`
+        }
+        next()
+      },
+    })
+  })
 }
 
 export type { ComponentHighlighterOptions } from '../../create-component-highlighter-plugin'
