@@ -1,6 +1,6 @@
-# Vite Component Highlighter Plugin
+# Vite Devtools Storybook plugin
 
-A Vite plugin that instruments React and Vue components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
+A Vite devtools plugin that instruments React and Vue components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
 
 ## Features
 
