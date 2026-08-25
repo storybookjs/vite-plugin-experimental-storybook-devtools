@@ -1,6 +1,6 @@
 # Vite Devtools Storybook plugin
 
-A Vite plugin that instruments React, Vue, and Nuxt SSR components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
+A dev-server plugin — for Vite or Rsbuild — that instruments React, Vue, and Nuxt SSR components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
 
 ## Features
 
@@ -29,8 +29,7 @@ yarn add vite-plugin-experimental-storybook-devtools
 ### Peer Dependencies
 
 This plugin requires:
-- `vite` >= 5.0.0
-- `@vitejs/devtools` >= 0.6.0
+- One bundler host: `vite` >= 5.0.0 with `@vitejs/devtools` >= 0.6.0, or `@rsbuild/core` >= 1.1.7
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
 ## Quick Start
@@ -147,6 +146,31 @@ export default defineConfig({
   ],
 })
 ```
+
+### Rsbuild (rspack)
+
+`./rsbuild` mounts the same instrumentation and dock on an Rsbuild project instead of Vite — no `@vitejs/devtools` plugin needed, since Rsbuild has no Vite DevTools to hook into:
+
+```typescript
+// rsbuild.config.ts
+import { defineConfig } from '@rsbuild/core'
+import { pluginReact } from '@rsbuild/plugin-react'
+import { storybookDevtoolsRsbuild } from 'vite-plugin-experimental-storybook-devtools/rsbuild'
+
+export default defineConfig({
+  plugins: [
+    pluginReact(),
+    storybookDevtoolsRsbuild({ framework: 'react' }),
+  ],
+})
+```
+
+On Rsbuild, instrumentation mounts through rspack via the shared `unplugin` core, and the DevTools dock is mounted as a devframe hub (`@devframes/hub` + `@devframes/hub-ui`) on the dev server's middlewares, riding a sidecar WebSocket. Notable differences from the Vite host:
+
+- **`clientAuth`** *(default `true`)* — set `clientAuth: false` to disable devframe's interactive OTP auth gate for single-user localhost or E2E setups (mirrors Nuxt's `devtools.clientAuth: false`).
+- **`framework: 'vue'`** is accepted, but only `framework: 'react'` is playground/E2E-verified on Rsbuild today.
+- **Dev-time runtime is always the built `dist/` output** — Rsbuild has no equivalent of Vite's `server.transformRequest`, so there's no dev-source read path. Run `pnpm build` before `rsbuild dev` for the plugin's own runtime modules to be present.
+- The `dedupeReact` option and its React-major-mismatch detection (see "React version support" below) work the same way on Rsbuild, via `resolve.dedupe`.
 
 ### Start developing
 
@@ -311,10 +335,10 @@ export default defineConfig({
 
 ### Other bundlers
 
-`./rsbuild` and `./next` exist as placeholder entry points — importing
-either throws immediately, pointing at the phased migration in
-`docs/plans/DEVFRAME_OPPORTUNITIES.md`. Vite is the only supported bundler
-today.
+Vite and Rsbuild are the two supported bundler hosts (see "Rsbuild (rspack)"
+above). `./next` remains a placeholder entry point — importing it throws
+immediately, pointing at the phased migration in
+`docs/plans/DEVFRAME_OPPORTUNITIES.md`.
 
 ### Default Exclusions
 
@@ -457,6 +481,10 @@ pnpm --filter playground-react dev
 # Run Vue playground
 pnpm --filter playground-vue dev
 
+# Run Rsbuild playground (build first — its dev-time runtime is served from dist/)
+pnpm build
+pnpm --filter playground-rsbuild dev
+
 # Run unit tests
 pnpm test
 
@@ -478,13 +506,15 @@ src/
   create-component-highlighter-plugin.ts  # Vite adapter: composes the unplugin output with Vite-only hooks, mounts the devframe
   vite.ts                                 # Unified `./vite` entry — storybookDevtools({ framework })
   devframe-export.ts                      # `./devframe` entry — createStorybookDevframe for custom hosts
-  rsbuild.ts                              # `./rsbuild` placeholder (throws — not supported yet)
+  rsbuild.ts                              # `./rsbuild` entry — Rsbuild/rspack adapter, mounts a devframe hub
   next.ts                                 # `./next` placeholder (throws — not supported yet)
   devframe.ts                             # Devframe definition: scoped shared state + serverFunctions registration, panel clientAssets
   context.ts                              # WeakMap<DevframeNodeContext, deps> so RPC functions' setup(ctx) can read createStorybookDevframe's deps
   rpc/
     index.ts                              # serverFunctions barrel + declare module 'devframe' augmentation
     functions/                            # One file per RPC function (bare name, namespaced to component-highlighter:<name>)
+  hub-setup.ts                            # Host-neutral hub surfaces (docks, commands, terminals, diagnostics) shared by the Vite kitSetup and the Rsbuild adapter
+  react-dedupe.ts                         # React-major-mismatch detection shared by the Vite and Rsbuild adapters
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
   coverage-dashboard.ts                   # Server-side coverage computation
   notifications.ts                        # Notification abstraction (DevTools logs + console)
@@ -537,16 +567,19 @@ e2e/
   component-highlighter.spec.ts           # Highlighter interaction tests
   playground-react-detection.spec.ts      # React-specific detection tests
   playground-vue-detection.spec.ts        # Vue-specific detection tests
+  playground-rsbuild-detection.spec.ts    # Rsbuild host detection + shared suites
 playground/
-  react/                                  # React development app
-  vue/                                    # Vue development app
+  react/                                  # React development app (Vite host)
+  vue/                                    # Vue development app (Vite host)
+  rsbuild/                                # React development app (Rsbuild host); src is a symlink to playground/react/src
 ```
 
 ## Limitations
 
 - **Framework scope** - Currently supports React, Vue, and Nuxt SSR through the Vue integration
+- **Bundler hosts** - Vite and Rsbuild are supported; on Rsbuild, only `framework: 'react'` is playground/E2E-verified (Vue is accepted but unverified)
 - **Development only** - Disabled in production builds by default
-- **Vite DevTools required** - Needs `@vitejs/devtools` for the dock panel and RPC
+- **DevTools required** - Vite hosts need `@vitejs/devtools` for the dock panel and RPC; Rsbuild hosts get the dock via a bundled devframe hub instead
 - **Function components** - Class components are not supported
 - **Provider dependencies** - Components requiring context providers may need Storybook decorators
 

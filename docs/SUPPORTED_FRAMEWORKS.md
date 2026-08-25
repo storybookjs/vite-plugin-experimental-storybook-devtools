@@ -7,12 +7,31 @@
 
 Keep this file up to date whenever framework integrations are added, removed, or significantly changed.
 
+## Bundler hosts
+
+Support is a (framework × host) matrix, not just a framework list:
+
+| | Vite | Rsbuild (rspack) |
+|---|---|---|
+| React | verified (18 + 19, `playground/react` + `playground/react18`) | verified (19, `playground/rsbuild`) |
+| Vue | verified (`playground/vue`) | accepted, not playground/E2E-verified |
+| Nuxt SSR | verified (`playground/nuxt`) — rides the Vue integration on Vite | n/a — Nuxt is a Vite framework |
+
+Vite is mounted via `./react`, `./vue`, or the unified `./vite` entry, with the
+dock delivered through `@vitejs/devtools`. Rsbuild is mounted via the
+`./rsbuild` entry (`storybookDevtoolsRsbuild({ framework })`), with the dock
+delivered through a bundled `@devframes/hub` instance instead — see the
+"Rsbuild (rspack)" section in the README for setup and host-specific options
+(`clientAuth`, dev-time runtime sourcing).
+
 Current integrations:
 
 - React (`src/frameworks/react`) — **React 18 and 19 are both required and
   verified via dedicated E2E playgrounds** (`playground/react` on 19,
   `playground/react18` on 18; Playwright projects `react-chromium` /
-  `react18-chromium`). Both playgrounds share ONE source tree —
+  `react18-chromium`). Also verified on the Rsbuild host (`playground/rsbuild`,
+  React 19, Playwright project `rsbuild-chromium`), which shares the same
+  source tree as `playground/react`. Both Vite playgrounds share ONE source tree —
   `playground/react18/src` is a symlink to `playground/react/src` — so
   components are authored once and exercised on both React versions.
   Detection is non-intrusive: it reads the live fiber
@@ -39,8 +58,10 @@ Current integrations:
     (`src/frameworks/react/transform.test.ts` → "RSC mode"). Next.js is not
     Vite, so this plugin does not apply there. See
     [docs/REACT_PATTERNS.md](./REACT_PATTERNS.md) → "React Server Components".
-- Vue (`src/frameworks/vue`) — Vue 3 SFCs, verified via a dedicated E2E
-  playground (`playground/vue`; Playwright project `vue-chromium`).
+- Vue (`src/frameworks/vue`) — Vue 3 SFCs, verified on the Vite host via a
+  dedicated E2E playground (`playground/vue`; Playwright project
+  `vue-chromium`). The Rsbuild adapter accepts `framework: 'vue'`, but it has
+  no playground or E2E coverage — treat Vue-on-Rsbuild as unverified.
   Detection is **non-intrusive**, mirroring React: an inline `<head>` script
   (`src/frameworks/vue/devtools-hook.ts`) installs a minimal
   `__VUE_DEVTOOLS_GLOBAL_HOOK__` *before* the app's `createApp` runs, and the

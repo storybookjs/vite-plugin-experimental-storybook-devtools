@@ -6,7 +6,7 @@ Short, high-signal reference for contributors and coding agents.
 
 ## What this plugin does
 
-`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration.
+`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration, mounted on either of two bundler hosts: Vite (`./react`, `./vue`, `./vite`; Nuxt rides this) or Rsbuild/rspack (`./rsbuild`).
 
 ## Supported frameworks
 
@@ -14,7 +14,7 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 ## Runtime flow (end-to-end)
 
-1. **Plugin setup** (`src/unplugin.ts` + `src/create-component-highlighter-plugin.ts` + `src/devframe.ts`)
+1. **Plugin setup** (`src/unplugin.ts` + `src/create-component-highlighter-plugin.ts` + `src/rsbuild.ts` + `src/hub-setup.ts` + `src/devframe.ts`)
    - `unplugin.ts` is the portable instrumentation core, built on `unplugin`:
      the transform pipeline (filter → `framework.detect` →
      `framework.transform`, coverage tracking, diagnostics dedupe), the
@@ -23,9 +23,10 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      the built-dist path always available, the dev-source path supplied by
      a bundler-specific `host.loadDevSource`), and the `entry`
      hook-injection strategy (see below). `createComponentHighlighterUnplugin(framework, options, host)`
-     returns the `unplugin` instance; `.vite()` produces the Vite plugin —
-     the same call unit tests use to exercise the real, Vite-composed hooks
-     without a running Vite instance.
+     returns the `unplugin` instance; `.vite()` produces the Vite plugin and
+     `.rspack()` produces the rspack plugin — the same `.vite()` call unit
+     tests use to exercise the real, Vite-composed hooks without a running
+     Vite instance.
    - `create-component-highlighter-plugin.ts` is the Vite adapter: it calls
      `.vite()` and extends the result with the Vite-only hooks unplugin has
      no equivalent for — `config` (optimizeDeps/alias/dedupe mutations),
@@ -34,14 +35,46 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      `server.transformRequest`), `transformIndexHtml` (`'html'`
      hook-injection mode only), and `handleHotUpdate` — then returns
      `[transformPlugin, createPluginFromDevframe(definition, { setup:
-     kitSetup })]` — Vite flattens plugin arrays
+     kitSetup })]` — Vite flattens plugin arrays. `kitSetup` pre-seeds Vite's
+     `/@id/{specifier}` client-module-resolution template (avoids the hub's
+     DF8111 "unresolvable client script" startup warning) and delegates the
+     rest to `registerStorybookHubSurfaces` (`hub-setup.ts`)
+   - `rsbuild.ts` is the Rsbuild/rspack adapter (`storybookDevtoolsRsbuild`):
+     mounts instrumentation via `unplugin.rspack()` in `modifyRspackConfig`
+     (the `\0` virtual ids from `unplugin.ts` round-trip unchanged — rspack's
+     unplugin adapter encodes any non-file `resolveId` result onto a virtual
+     filesystem path and decodes it for `load`), delivers the devtools-hook
+     script and the hub's embedded-dock bootstrap via `modifyHTMLTags`, and
+     mounts a `@devframes/hub` (+ `@devframes/hub-ui` dock) on the dev
+     server's Connect middlewares in `onBeforeStartDevServer`, riding
+     devframe's sidecar WebSocket (`ws: { sidecar: true }`, since Rsbuild's
+     request handlers never see socket upgrades). It has no
+     `host.loadDevSource` — rspack has no equivalent of Vite's
+     `server.transformRequest`, so the runtime-helpers/framework virtual
+     modules always read from built `dist/` (`pnpm build` must have run).
+     The highlighter action dock's client script is served as a
+     self-contained browser bundle (`dist/client-bundled/`, built by
+     `tsdown.config.ts`'s second entry) from a dedicated middleware at
+     `/__storybook-devtools-client/vite-devtools.mjs`, because rspack has no
+     `/@id/{specifier}` module-graph URL for a bare-specifier client-script
+     import; the dock entry's `importFrom` is that URL, which bypasses the
+     `clientModuleResolution` template Vite uses. React alias/dedupe
+     (`react-element-to-jsx-string`/`react-is` → this package's copies,
+     `resolve.dedupe` via `react-dedupe.ts`) is applied in
+     `modifyRsbuildConfig`.
+   - `hub-setup.ts` (`registerStorybookHubSurfaces`) holds the host-neutral
+     hub surfaces — notifications, diagnostics catalog, terminals ref, the
+     action dock, Mod+K commands — shared by the Vite adapter's `kitSetup`
+     and the Rsbuild adapter, since a kit's `KitNodeContext` is a
+     `DevframeHubContext` (from `@devframes/hub`) plus Vite-only extras. Only
+     the Vite-only `clientModuleResolution` pre-seed stays out of it.
+   - `react-dedupe.ts` (`resolveReactDedupe`) is the shared React-major-
+     mismatch decision (see invariant 6 below) — both adapters call it with
+     their own dedupe-list mutation.
    - `devframe.ts` builds the `storybook-devtools` devframe (`defineDevframe`):
      registers the plugin's full RPC surface and shared state on the
      framework-neutral `DevframeNodeContext`, and serves the panel as
      `clientAssets`
-   - `kitSetup` (kit-only, runs after the devframe's own `setup(ctx)`) wires
-     docks, commands, terminals, messages, and diagnostics — surfaces not part
-     of the portable `DevframeNodeContext`
    - Handles story file creation via RPC
 
 2. **Framework transform** (`src/frameworks/*/transform.ts`)
@@ -193,7 +226,10 @@ below.
 | Module | Responsibility |
 |--------|---------------|
 | `src/unplugin.ts` | Portable instrumentation core, built on `unplugin`: `createComponentHighlighterUnplugin(framework, options, host)`. Owns the transform pipeline (filter → `framework.detect` → `framework.transform`, coverage tracking, diagnostics dedupe), `resolveId`/`load` for the runtime-helpers and framework virtual modules plus the `virtual:component-highlighter/devtools-hook` module, and the `'entry'` hook-injection strategy. Bundler-specific needs (reading dev-source through a running server) come from the `ComponentHighlighterUnpluginHost` the caller supplies |
-| `src/create-component-highlighter-plugin.ts` | Vite adapter: entrypoint `createComponentHighlighterPlugin(framework, options)`. Calls `createComponentHighlighterUnplugin(...).vite()` and extends the result with the Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`), mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) registers docks via `defineDockEntry`, commands, and a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/create-component-highlighter-plugin.ts` | Vite adapter: entrypoint `createComponentHighlighterPlugin(framework, options)`. Calls `createComponentHighlighterUnplugin(...).vite()` and extends the result with the Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`), mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) pre-seeds the Vite `clientModuleResolution` template, then delegates docks/commands/diagnostics registration to `registerStorybookHubSurfaces` (`hub-setup.ts`) |
+| `src/rsbuild.ts` | `./rsbuild` entry: `storybookDevtoolsRsbuild({ framework, clientAuth, ...options })`. Mounts instrumentation via `unplugin.rspack()`, delivers the devtools-hook script and hub dock bootstrap via `modifyHTMLTags`, mounts a `@devframes/hub` on the dev server's middlewares (sidecar WebSocket), serves the highlighter dock's self-contained client bundle from `dist/client-bundled/` by URL, and applies the React alias/dedupe config for rspack |
+| `src/hub-setup.ts` | `registerStorybookHubSurfaces(ctx, options)`: host-neutral hub surfaces (notifications, diagnostics catalog, terminals ref, the `component-highlighter` action dock, Mod+K commands) against the bundler-neutral `DevframeHubContext`, shared by the Vite adapter's `kitSetup` and the Rsbuild adapter |
+| `src/react-dedupe.ts` | `resolveReactDedupe(options)`: shared React-major-mismatch detection driving the `dedupeReact` option, called by both the Vite and Rsbuild adapters with their own `resolve.dedupe` mutation |
 | `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
 | `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
@@ -370,7 +406,10 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
      apps get no config mutation; React 18 apps get the fix automatically.
      `false` opts out (advanced multi-React setups) but logs a warning on a
      detected mismatch so it never fails silently. Do not make the dedupe
-     unconditional again — it must stay opt-in-when-needed.
+     unconditional again — it must stay opt-in-when-needed. The detection
+     logic is shared (`src/react-dedupe.ts` → `resolveReactDedupe`) between
+     the Vite and Rsbuild adapters; each applies the result to its own
+     bundler's `resolve.dedupe`.
    - The inline hook script carries the app's CSP nonce when `html.cspNonce`
      is configured (so it survives a strict Content-Security-Policy), and
      rides along with (never clobbers) a real React DevTools extension hook —
@@ -407,6 +446,9 @@ pnpm exec playwright test e2e/playground-react-detection.spec.ts     # React 19
 pnpm exec playwright test e2e/playground-react18-detection.spec.ts    # React 18 + serialization fidelity
 pnpm exec playwright test e2e/playground-vue-detection.spec.ts
 pnpm exec playwright test e2e/playground-nuxt-detection.spec.ts       # Nuxt SSR
+
+# Rsbuild host detection (React 19, playground/react/src via symlink) + shared suites
+pnpm exec playwright test e2e/playground-rsbuild-detection.spec.ts   # port 5177 — run `pnpm build` first
 
 # Highlighter interaction tests (context menu, story creation)
 pnpm exec playwright test e2e/component-highlighter.spec.ts
