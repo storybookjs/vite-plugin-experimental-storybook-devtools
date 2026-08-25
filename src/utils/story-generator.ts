@@ -22,6 +22,8 @@ export interface StoryGenerationData {
   playFunction?: string[]
   /** Import statements required by the play function */
   playImports?: string[]
+  /** Storybook framework package for the `Meta`/`StoryObj` type import (defaults to the generator's framework package) */
+  storybookFramework?: string
 }
 
 export interface GeneratedStory {

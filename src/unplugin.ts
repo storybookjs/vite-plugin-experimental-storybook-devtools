@@ -263,15 +263,14 @@ function buildComponentHighlighterUnpluginOptions(
     },
     async load(id: string) {
       if (id === paths.resolvedRuntimeHelperVirtualId) {
+        const { loadDevSource } = host
         const shouldUseSource =
           host.isServe() &&
           !!host.loadDevSource &&
           fs.existsSync(paths.runtimeHelperSourcePath)
 
         if (shouldUseSource) {
-          const devSource = await host.loadDevSource?.(
-            paths.runtimeHelperSourcePath,
-          )
+          const devSource = await loadDevSource(paths.runtimeHelperSourcePath)
           if (devSource != null) {
             return devSource
           }
@@ -286,6 +285,7 @@ function buildComponentHighlighterUnpluginOptions(
         return fs.readFileSync(paths.runtimeHelperFilePath, 'utf-8')
       }
       if (id === paths.resolvedFrameworkVirtualModuleId) {
+        const { loadDevSource } = host
         const shouldUseSource =
           host.isServe() &&
           !!host.loadDevSource &&
@@ -321,9 +321,7 @@ function buildComponentHighlighterUnpluginOptions(
             )
 
         if (shouldUseSource) {
-          const devSource = await host.loadDevSource?.(
-            paths.runtimeModuleSourcePath,
-          )
+          const devSource = await loadDevSource(paths.runtimeModuleSourcePath)
           if (devSource != null) {
             return injectBuildConstants(normalizeRuntimeImports(devSource))
           }
