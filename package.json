@@ -75,10 +75,14 @@
   },
   "peerDependencies": {
     "@rsbuild/core": ">=1.1.7",
-    "@vitejs/devtools": ">=0.6.0"
+    "@vitejs/devtools": ">=0.6.0",
+    "next": ">=15.0.0"
   },
   "peerDependenciesMeta": {
     "@rsbuild/core": {
+      "optional": true
+    },
+    "next": {
       "optional": true
     }
   },

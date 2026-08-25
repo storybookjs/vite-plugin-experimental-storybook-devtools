@@ -1,13 +1,465 @@
 /**
- * Next.js Entry Point (placeholder)
+ * Next.js Entry Point
  *
- * Next.js is not supported yet; Vite is the only supported bundler today —
- * see the phased migration in docs/plans/DEVFRAME_OPPORTUNITIES.md.
+ * `next dev` + webpack host (App Router). Turbopack has no unplugin adapter,
+ * so instrumentation is skipped there with a warning — never a crash.
+ *
+ * Two independently-loaded module instances cooperate here: `withStorybookDevtools`
+ * runs inside next.config's module graph (build-time, webpack composition),
+ * while `createStorybookDevtoolsRoute` runs inside the compiled route handler
+ * (request-time). They share `transformedComponents` and the registered
+ * diagnostics dispatch through a `globalThis` singleton — the same reason
+ * `@devframes/next` itself memoizes the hub instance there.
  */
-export default function componentHighlighterNext(): never {
-  throw new Error(
-    'vite-plugin-experimental-storybook-devtools/next is not supported yet; ' +
-      'Vite is the only supported bundler today — see the phased migration in ' +
-      'docs/plans/DEVFRAME_OPPORTUNITIES.md.',
+import * as fs from 'fs'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
+import { normalizeHubBase } from '@devframes/hub/constants'
+import type { DevframeHubContext } from '@devframes/hub'
+import { nextDevframeHub } from '@devframes/next/hub'
+import {
+  createComponentHighlighterUnplugin,
+  type ChDiagnostics,
+  type ComponentHighlighterUnpluginHost,
+} from './unplugin'
+import type { ComponentHighlighterOptions } from './create-component-highlighter-plugin'
+import { createStorybookDevframe, type StorybookDevframeState } from './devframe'
+import { registerStorybookHubSurfaces } from './hub-setup'
+import { ConsoleNotificationService } from './notifications'
+import { reactFramework } from './frameworks/react'
+import { getDevToolsHookScript } from './frameworks/react/devtools-hook'
+import type { FrameworkConfig } from './frameworks/types'
+
+/** Next.js framework config: React instrumentation, `@storybook/nextjs` story output. */
+export const nextFramework: FrameworkConfig = {
+  ...reactFramework,
+  storybookFramework: '@storybook/nextjs',
+}
+
+const DEFAULT_BASE = '/__devframes/'
+const DEFAULT_STORYBOOK_URL = 'http://localhost:6006'
+const DEFAULT_DEVTOOLS_DOCK_ID = 'component-highlighter'
+
+/**
+ * Next's App Router client bootstrap in dev (webpack, non-Turbopack). These
+ * modules run before any app code, so injecting the devtools hook into any
+ * one of them installs it before react-dom registers its renderer.
+ * Determined empirically against Next 15's compiled `.next/static` output;
+ * matching more than one is harmless — the hook module is only ever
+ * evaluated once regardless of how many importers request it.
+ */
+const DEFAULT_NEXT_CLIENT_ENTRY = [
+  '**/next/dist/client/app-next-dev.js',
+  '**/next/dist/client/app-index.js',
+  '**/next/dist/client/next-dev.js',
+]
+
+const SERVER_EXTERNAL_PACKAGES = [
+  'vite-plugin-experimental-storybook-devtools',
+  'devframe',
+  '@devframes/next',
+  '@devframes/hub',
+  '@devframes/hub-ui',
+]
+
+/**
+ * Public path the dock's self-contained client bundle is served from — the
+ * same convention `src/rsbuild.ts` uses for its dedicated dev-server
+ * middleware, so a shim aliasing a playground's `client/listeners` /
+ * `client/overlay` imports to a top-level-await `import()` of this URL (the
+ * pattern that keeps the eagerly-loaded playground client and the
+ * embedded-dock-loaded client as one shared browser module instance) works
+ * unmodified across both hosts.
+ */
+const CLIENT_BUNDLE_PUBLIC_PATH = '/__storybook-devtools-client/vite-devtools.mjs'
+/** Rejects path-traversal attempts in a bundle request; a bare filename never needs `/`. */
+const SAFE_BASENAME = /^[\w.-]+$/
+
+export interface NextComponentHighlighterOptions {
+  /** URL of the Storybook instance. */
+  storybookUrl?: string
+  /** Glob patterns to include for component instrumentation. */
+  include?: string[]
+  /** Glob patterns to exclude from component instrumentation. */
+  exclude?: string[]
+  /** Force instrumentation even outside dev. @default false */
+  force?: boolean
+  /** Enable verbose debug logging (browser + server console). @default false */
+  debugMode?: boolean
+  /** Automatically write story files when "Create Story" is clicked. @default true */
+  writeStoryFiles?: boolean
+  /** Custom directory for story files, relative to the component. */
+  storiesDir?: string
+  /** Custom devtools dock ID. @default 'component-highlighter' */
+  devtoolsDockId?: string
+  /**
+   * React Server Components mode. The App Router ships Server Components by
+   * default, so only modules with a `"use client"` directive are
+   * instrumented; server components are left untouched.
+   * @default true
+   */
+  rsc?: boolean
+  /**
+   * Picomatch pattern(s) matching Next's client bootstrap module id(s) —
+   * where the devtools hook import is injected. Next has no HTML-transform
+   * hook to lean on (unlike Vite), so hook delivery always goes through
+   * entry injection.
+   * @default DEFAULT_NEXT_CLIENT_ENTRY
+   */
+  entry?: string | string[]
+  /**
+   * Mount the hub-ui embedded floating dock by appending a
+   * `<script type="module">` pointing at `<base>embedded.js` alongside the
+   * devtools hook.
+   * @default true
+   */
+  mountEmbeddedDock?: boolean
+  /**
+   * Hub mount base. Must match the `base` the catch-all route is mounted at
+   * (`createStorybookDevtoolsRoute`'s `base` option) so the embedded-dock
+   * script URL resolves.
+   * @default '/__devframes/'
+   */
+  base?: string
+}
+
+interface ResolvedNextComponentHighlighterOptions {
+  storybookUrl: string
+  include: string[] | undefined
+  exclude: string[] | undefined
+  force: boolean
+  debugMode: boolean
+  writeStoryFiles: boolean
+  storiesDir: string | undefined
+  devtoolsDockId: string
+  rsc: boolean
+  entry: string | string[]
+  mountEmbeddedDock: boolean
+  base: string
+}
+
+/** Applies `NextComponentHighlighterOptions` defaults. Exported for tests. */
+export function resolveNextOptions(
+  options: NextComponentHighlighterOptions,
+): ResolvedNextComponentHighlighterOptions {
+  return {
+    storybookUrl: options.storybookUrl ?? DEFAULT_STORYBOOK_URL,
+    include: options.include,
+    exclude: options.exclude,
+    force: options.force ?? false,
+    debugMode: options.debugMode ?? false,
+    writeStoryFiles: options.writeStoryFiles ?? true,
+    storiesDir: options.storiesDir,
+    devtoolsDockId: options.devtoolsDockId ?? DEFAULT_DEVTOOLS_DOCK_ID,
+    rsc: options.rsc ?? true,
+    entry: options.entry ?? DEFAULT_NEXT_CLIENT_ENTRY,
+    mountEmbeddedDock: options.mountEmbeddedDock ?? true,
+    base: normalizeHubBase(options.base ?? DEFAULT_BASE),
+  }
+}
+
+// ─── Cross-module-instance shared state ───────────────────────────────────
+
+interface StorybookDevtoolsNextGlobalState {
+  resolvedOptions: ResolvedNextComponentHighlighterOptions | null
+  state: StorybookDevframeState
+  diagnostics: ChDiagnostics | null
+}
+
+const GLOBAL_STATE_KEY = '__storybookDevtoolsNextGlobalState__'
+
+function getGlobalState(): StorybookDevtoolsNextGlobalState {
+  const g = globalThis as unknown as Record<
+    string,
+    StorybookDevtoolsNextGlobalState | undefined
+  >
+  let existing = g[GLOBAL_STATE_KEY]
+  if (!existing) {
+    existing = {
+      resolvedOptions: null,
+      state: {
+        server: undefined,
+        notifications: new ConsoleNotificationService(),
+        transformedComponents: new Map<string, string>(),
+        devtoolsTerminals: null,
+        storybookSession: null,
+        terminalLogs: [],
+        registryState: null,
+        pendingVisitState: null,
+        pendingTabState: null,
+      },
+      diagnostics: null,
+    }
+    g[GLOBAL_STATE_KEY] = existing
+  }
+  return existing
+}
+
+// ─── Devtools-hook script composition ─────────────────────────────────────
+
+/**
+ * Body of the `virtual:component-highlighter/devtools-hook` module for
+ * Next: the React DevTools global-hook bootstrap, plus (when enabled) a
+ * script that mounts the hub-ui embedded dock — Next serves no HTML the way
+ * Vite's `transformIndexHtml` does, so the dock has to be mounted from
+ * client JS instead. Uses `document.createElement` + `appendChild`, not a
+ * dynamic `import()`, so webpack never tries to resolve `<base>embedded.js`
+ * as a module at build time.
+ */
+export function composeNextHookScript(
+  opts: Pick<ResolvedNextComponentHighlighterOptions, 'base' | 'mountEmbeddedDock'>,
+): string {
+  const reactSnippet = getDevToolsHookScript()
+  if (!opts.mountEmbeddedDock) return reactSnippet
+  const embeddedSrc = `${opts.base}embedded.js`
+  return `${reactSnippet}\n(function(){\n  if (window.__storybookDevtoolsEmbeddedDockMounted) return;\n  window.__storybookDevtoolsEmbeddedDockMounted = true;\n  var s = document.createElement('script');\n  s.type = 'module';\n  s.src = ${JSON.stringify(embeddedSrc)};\n  document.head.appendChild(s);\n})();`
+}
+
+/**
+ * The devtools-hook script text, for manual delivery when entry injection
+ * isn't viable — e.g. `<Script strategy="beforeInteractive">` in the root
+ * layout.
+ */
+export function getNextDevToolsHookScript(
+  options: Pick<NextComponentHighlighterOptions, 'base' | 'mountEmbeddedDock'> = {},
+): string {
+  return composeNextHookScript({
+    base: normalizeHubBase(options.base ?? DEFAULT_BASE),
+    mountEmbeddedDock: options.mountEmbeddedDock ?? true,
+  })
+}
+
+// ─── next.config.ts: webpack composition ──────────────────────────────────
+
+interface NextWebpackConfig {
+  plugins?: unknown[]
+}
+
+interface NextWebpackContext {
+  dev: boolean
+  isServer: boolean
+  nextRuntime?: string
+}
+
+type NextWebpackFn = (
+  config: NextWebpackConfig,
+  context: NextWebpackContext,
+) => NextWebpackConfig
+
+export interface NextConfigWebpackShape {
+  webpack?: NextWebpackFn
+  serverExternalPackages?: string[]
+}
+
+/**
+ * `next.config.ts` composer. Dev-only instrumentation: pushes the
+ * component-highlighter webpack plugin onto the client compilation only
+ * (`context.dev && !context.isServer`) — the runtime module uses
+ * browser-only APIs and would crash under Node or the edge runtime.
+ *
+ * Turbopack has no unplugin adapter; when `next dev` runs under Turbopack
+ * (`process.env.TURBOPACK`) this prints one warning and otherwise no-ops —
+ * it never crashes the build.
+ */
+export function withStorybookDevtools(
+  options: NextComponentHighlighterOptions = {},
+) {
+  if (process.env['TURBOPACK']) {
+    console.warn(
+      '[component-highlighter] Turbopack is not supported — there is no unplugin ' +
+        'adapter for it. Run `next dev` without `--turbopack` (Next 15), or pass ' +
+        '`--webpack` explicitly on majors where Turbopack is the default (Next 16+). ' +
+        'The app runs normally; component instrumentation is just skipped.',
+    )
+  }
+
+  const resolved = resolveNextOptions(options)
+  const globalState = getGlobalState()
+  globalState.resolvedOptions = resolved
+
+  const framework: FrameworkConfig = {
+    ...reactFramework,
+    storybookFramework: '@storybook/nextjs',
+    htmlHeadSnippet: () =>
+      composeNextHookScript({
+        base: resolved.base,
+        mountEmbeddedDock: resolved.mountEmbeddedDock,
+      }),
+  }
+
+  const host: ComponentHighlighterUnpluginHost = {
+    isServe: () => true,
+    transformedComponents: globalState.state.transformedComponents,
+    getDiagnostics: () => globalState.diagnostics,
+  }
+
+  const unpluginOptions: ComponentHighlighterOptions = {
+    storybookUrl: resolved.storybookUrl,
+    ...(resolved.include ? { include: resolved.include } : {}),
+    ...(resolved.exclude ? { exclude: resolved.exclude } : {}),
+    force: resolved.force,
+    debugMode: resolved.debugMode,
+    rsc: resolved.rsc,
+    hookInjection: 'entry',
+    entry: resolved.entry,
+  }
+
+  const webpackPlugin = createComponentHighlighterUnplugin(
+    framework,
+    unpluginOptions,
+    host,
+  ).webpack()
+
+  return function configureNextConfig<T extends NextConfigWebpackShape>(
+    nextConfig: T = {} as T,
+  ): T {
+    const userWebpack = nextConfig.webpack
+
+    const composedWebpack: NextWebpackFn = (config, context) => {
+      let cfg = userWebpack ? (userWebpack(config, context) ?? config) : config
+      if (context.dev && !context.isServer && context.nextRuntime !== 'edge') {
+        cfg = { ...cfg, plugins: [...(cfg.plugins ?? []), webpackPlugin] }
+      }
+      return cfg
+    }
+
+    const existingExternals = nextConfig.serverExternalPackages ?? []
+    const serverExternalPackages = Array.from(
+      new Set([...existingExternals, ...SERVER_EXTERNAL_PACKAGES]),
+    )
+
+    return {
+      ...nextConfig,
+      webpack: composedWebpack,
+      serverExternalPackages,
+    } as T
+  }
+}
+
+// ─── app/__devframes/[[...path]]/route.ts ─────────────────────────────────
+
+export interface CreateStorybookDevtoolsRouteOptions {
+  /** Gate the hub behind interactive auth. @default true */
+  auth?: boolean
+  /** Pin the side-car RPC/WS port (Next routes can't accept WS upgrades). */
+  port?: number
+  /** Hub mount base — must match `withStorybookDevtools`'s `base`. */
+  base?: string
+  /** Public origin the Next app is reachable at. */
+  origin?: string
+  storybookUrl?: string
+  writeStoryFiles?: boolean
+  storiesDir?: string
+  devtoolsDockId?: string
+}
+
+/**
+ * Builds the `app/__devframes/[[...path]]/route.ts` handler: a devframes hub
+ * mounting the `storybook-devtools` devframe, with RPC/docks/commands/
+ * diagnostics wired by the same host-neutral `registerStorybookHubSurfaces`
+ * the Vite adapter uses. Reads defaults set by `withStorybookDevtools` (a
+ * different module instance) off the `globalThis` singleton; explicit
+ * `options` here override them.
+ *
+ * The dock's `importFrom` points at `CLIENT_BUNDLE_PUBLIC_PATH`, served by
+ * `createStorybookDevtoolsClientBundleRoute` at a separate catch-all route —
+ * Next's file-system routing can't answer two different top-level path
+ * prefixes from one route module.
+ */
+export function createStorybookDevtoolsRoute(
+  options: CreateStorybookDevtoolsRouteOptions = {},
+) {
+  const globalState = getGlobalState()
+  const configured = globalState.resolvedOptions ?? resolveNextOptions({})
+
+  const base = normalizeHubBase(options.base ?? configured.base)
+  const storybookUrl = options.storybookUrl ?? configured.storybookUrl
+  const writeStoryFiles = options.writeStoryFiles ?? configured.writeStoryFiles
+  const storiesDir = options.storiesDir ?? configured.storiesDir
+  const devtoolsDockId = options.devtoolsDockId ?? configured.devtoolsDockId
+  const debugMode = configured.debugMode
+
+  const hub = nextDevframeHub({
+    base,
+    ...(options.port != null ? { port: options.port } : {}),
+    ...(options.origin != null ? { origin: options.origin } : {}),
+    auth: options.auth ?? true,
+    devframes: [
+      createStorybookDevframe({
+        framework: nextFramework,
+        storybookUrl,
+        writeStoryFiles,
+        storiesDir,
+        logDebug: (...args) => {
+          if (debugMode) console.log('[component-highlighter]', ...args)
+        },
+        state: globalState.state,
+      }),
+    ],
+    configure: (ctx: DevframeHubContext) => {
+      const { diagnostics } = registerStorybookHubSurfaces(ctx, {
+        state: globalState.state,
+        storiesDir,
+        devtoolsDockId,
+        dockClientScript: {
+          importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
+          importName: 'default',
+        },
+      })
+      globalState.diagnostics = diagnostics
+    },
+  })
+
+  return {
+    GET: (req: Request) => hub.handler(req),
+    POST: (req: Request) => hub.handler(req),
+    DELETE: (req: Request) => hub.handler(req),
+  }
+}
+
+/**
+ * Builds a dedicated catch-all route serving the dock's self-contained
+ * client bundle (`dist/client-bundled/*`) at `CLIENT_BUNDLE_PUBLIC_PATH` —
+ * mount it at `app/__storybook-devtools-client/[[...path]]/route.ts`. A
+ * consuming app's own client bootstrap (or a playground's eager-activation
+ * shim) imports this same URL by `import()`, so the browser's module cache
+ * keeps one client instance shared with the embedded dock.
+ */
+export function createStorybookDevtoolsClientBundleRoute() {
+  const packageRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
   )
+  const bundleDir = path.join(packageRoot, 'dist', 'client-bundled')
+
+  const GET = async (request: Request): Promise<Response> => {
+    const { pathname } = new URL(request.url)
+    const basename = pathname.split('/').pop() ?? ''
+    const filePath = basename ? path.join(bundleDir, basename) : ''
+    const isSafe =
+      !!basename &&
+      SAFE_BASENAME.test(basename) &&
+      !!filePath &&
+      filePath.startsWith(bundleDir + path.sep)
+    if (!isSafe) {
+      return new Response('Not found', { status: 404 })
+    }
+    try {
+      const data = await fs.promises.readFile(filePath)
+      return new Response(new Uint8Array(data), {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/javascript; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      })
+    } catch {
+      return new Response(
+        `[component-highlighter] ${basename} not found in dist/client-bundled — run \`pnpm build\` first.`,
+        { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+      )
+    }
+  }
+
+  return { GET }
 }
