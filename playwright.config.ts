@@ -29,6 +29,14 @@ export default defineConfig({
       },
     },
     {
+      name: 'rsbuild-chromium',
+      testMatch: /playground-rsbuild-detection\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:5177',
+      },
+    },
+    {
       name: 'vue-chromium',
       testMatch: /playground-vue-detection\.spec\.ts/,
       use: {
@@ -58,6 +66,12 @@ export default defineConfig({
       command:
         'pnpm --dir playground/react18 dev --host 127.0.0.1 --port 5175',
       url: 'http://127.0.0.1:5175',
+      reuseExistingServer: !process.env.CI,
+      timeout: 60000,
+    },
+    {
+      command: 'pnpm --dir playground/rsbuild dev',
+      url: 'http://127.0.0.1:5177',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
     },

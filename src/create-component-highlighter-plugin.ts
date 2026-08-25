@@ -4,9 +4,9 @@ import { createPluginFromDevframe } from '@vitejs/devtools-kit/node'
 import type { KitNodeContext } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
-import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
 import { ConsoleNotificationService } from './notifications'
+import { resolveReactDedupe } from './react-dedupe'
 import { createStorybookDevframe } from './devframe'
 import type { StorybookDevframeState } from './context'
 import {
@@ -290,37 +290,13 @@ export function createComponentHighlighterPlugin(
         // (`dedupeReact: 'auto'`) we detect that and apply the dedupe only
         // then — so a single-version app (the common React 19 case today)
         // gets no config mutation at all.
-        const majorOf = (fromDir: string): number | null => {
-          try {
-            const req = createRequire(path.join(fromDir, 'noop.js'))
-            const pkg = req('react/package.json') as { version?: string }
-            const m = /^(\d+)\./.exec(pkg.version || '')
-            return m ? Number(m[1]) : null
-          } catch {
-            return null
-          }
-        }
         const appRoot =
           (viteConfig.root && path.resolve(viteConfig.root)) || process.cwd()
-        const appReactMajor = majorOf(appRoot)
-        const pluginReactMajor = majorOf(
-          path.dirname(fileURLToPath(import.meta.url)),
-        )
-        // Mismatch (or an undetectable app version → assume the safe path).
-        const mismatch =
-          appReactMajor === null ||
-          pluginReactMajor === null ||
-          appReactMajor !== pluginReactMajor
-
-        const shouldDedupe =
-          dedupeReact === true ||
-          (dedupeReact === 'auto' && mismatch)
-
-        logDebug(
-          `dedupeReact=${String(dedupeReact)} appReactMajor=${appReactMajor} ` +
-            `pluginReactMajor=${pluginReactMajor} mismatch=${mismatch} ` +
-            `→ ${shouldDedupe ? 'APPLY react/react-dom dedupe' : 'NO config mutation'}`,
-        )
+        const { shouldDedupe } = resolveReactDedupe({
+          appRoot,
+          dedupeReact,
+          logDebug,
+        })
         if (shouldDedupe) {
           viteConfig.resolve.dedupe ??= []
           for (const dep of ['react', 'react-dom']) {
@@ -328,17 +304,6 @@ export function createComponentHighlighterPlugin(
               viteConfig.resolve.dedupe.push(dep)
             }
           }
-        } else if (dedupeReact === false && mismatch) {
-          // Never fail silently: the user explicitly opted out but we detect
-          // the exact condition that degrades prop serialization.
-          console.warn(
-            '[component-highlighter] Detected a React version mismatch ' +
-              `(app: ${appReactMajor ?? 'unknown'}, plugin serializer: ` +
-              `${pluginReactMajor ?? 'unknown'}) while \`dedupeReact: false\`. ` +
-              'Prop serialization may degrade to "Failed to serialize". ' +
-              'Add react/react-dom to resolve.dedupe, or set ' +
-              "`dedupeReact: 'auto'`. See the README (React version support).",
-          )
         }
       }
     },
