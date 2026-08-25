@@ -118,7 +118,9 @@ describe('withStorybookDevtools', () => {
     const nextConfig = configure({})
 
     const clientDev = callWebpack(nextConfig, { dev: true, isServer: false })
-    expect(clientDev.plugins).toHaveLength(1)
+    // The component-highlighter unplugin plugin, plus the webpack5
+    // "virtual:" scheme-compat plugin it needs (see createVirtualSchemeWebpackPlugin).
+    expect(clientDev.plugins).toHaveLength(2)
 
     const serverDev = callWebpack(nextConfig, { dev: true, isServer: true })
     expect(serverDev.plugins ?? []).toHaveLength(0)
@@ -146,7 +148,7 @@ describe('withStorybookDevtools', () => {
 
     expect(userWebpack).toHaveBeenCalledTimes(1)
     expect(result.plugins).toContain('user-plugin')
-    expect(result.plugins).toHaveLength(2)
+    expect(result.plugins).toHaveLength(3)
   })
 
   it('extends serverExternalPackages without clobbering user entries', () => {

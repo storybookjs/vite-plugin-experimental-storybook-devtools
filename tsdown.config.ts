@@ -24,6 +24,7 @@ export default defineConfig([
       'vite',
       'unplugin',
       'unplugin-utils',
+      'webpack-virtual-modules',
       '@vitejs/devtools-kit',
       '@vitejs/devtools-kit/node',
       '@vitejs/devtools-kit/client',

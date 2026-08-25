@@ -1,0 +1,31 @@
+{
+  "name": "playground-next",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Next.js (App Router, webpack) playground for vite-plugin-experimental-storybook-devtools",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "storybook": "STORYBOOK=true storybook dev -p 6006",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "15.5.24",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "vite-plugin-experimental-storybook-devtools": "link:../.."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@storybook/addon-a11y": "10.3.3",
+    "@storybook/addon-docs": "10.3.3",
+    "@storybook/nextjs": "10.3.3",
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "playwright": "^1.57.0",
+    "storybook": "10.3.3",
+    "typescript": "^5.9.3"
+  }
+}

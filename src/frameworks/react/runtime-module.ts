@@ -602,7 +602,15 @@ function walkRoot(root: Fiber) {
 
 function handleCommit(rendererId: number, root: Fiber) {
   // Capture the react-dom renderer (exposes `overrideProps` in dev builds).
-  if (!reactRenderer && typeof window !== 'undefined') {
+  // Multiple renderers can register on one hook — e.g. Next's App Router
+  // registers a react-dom instance without `overrideProps` alongside the
+  // real client one, plus react-server-dom-webpack's flight renderer for
+  // RSC. Keep checking each commit's renderer until one actually exposes
+  // `overrideProps`, instead of latching onto whichever committed first.
+  if (
+    (!reactRenderer || typeof reactRenderer.overrideProps !== 'function') &&
+    typeof window !== 'undefined'
+  ) {
     try {
       const hook = (
         window as unknown as {
@@ -611,7 +619,7 @@ function handleCommit(rendererId: number, root: Fiber) {
           }
         }
       ).__REACT_DEVTOOLS_GLOBAL_HOOK__
-      reactRenderer = hook?.renderers?.get(rendererId) ?? null
+      reactRenderer = hook?.renderers?.get(rendererId) ?? reactRenderer
     } catch {
       // ignore — overrides will report unavailable
     }

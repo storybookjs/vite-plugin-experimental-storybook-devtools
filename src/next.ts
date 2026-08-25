@@ -14,6 +14,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import { normalizeHubBase } from '@devframes/hub/constants'
 import type { DevframeHubContext } from '@devframes/hub'
 import { nextDevframeHub } from '@devframes/next/hub'
@@ -49,6 +50,16 @@ const DEFAULT_DEVTOOLS_DOCK_ID = 'component-highlighter'
  * evaluated once regardless of how many importers request it.
  */
 const DEFAULT_NEXT_CLIENT_ENTRY = [
+  // The client chunk's actual first-executed module (per webpack's own
+  // `__webpack_exec__` entry list) — Next's Fast Refresh runtime installs
+  // its own minimal `__REACT_DEVTOOLS_GLOBAL_HOOK__` here (a `renderers`-less
+  // stub, just enough for HMR) before `app-next-dev.js` below ever runs. Our
+  // hook must win that race — installing after Fast Refresh's stub means
+  // react-dom's `inject()` call never reaches ours, so
+  // `hook.renderers` (and therefore live prop editing) stays empty even
+  // though fiber commits still come through fine via the wrapped
+  // `onCommitFiberRoot`.
+  '**/@next/react-refresh-utils/dist/runtime.js',
   '**/next/dist/client/app-next-dev.js',
   '**/next/dist/client/app-index.js',
   '**/next/dist/client/next-dev.js',
@@ -60,6 +71,13 @@ const SERVER_EXTERNAL_PACKAGES = [
   '@devframes/next',
   '@devframes/hub',
   '@devframes/hub-ui',
+  // unplugin's own top-level code resolves its webpack loader paths via
+  // `import.meta.dirname` — a Node-native ESM field webpack's module
+  // wrapper doesn't populate when it bundles (rather than externalizes) the
+  // module, which throws before any of this package's own code runs.
+  'unplugin',
+  'unplugin-utils',
+  'webpack-virtual-modules',
 ]
 
 /**
@@ -251,6 +269,137 @@ export interface NextConfigWebpackShape {
   serverExternalPackages?: string[]
 }
 
+// ─── webpack5 "virtual:" scheme compatibility ─────────────────────────────
+
+/**
+ * webpack5 treats any bare import specifier shaped like a URI
+ * (`letter+alnum...:` before the first `/`/`?`/`#`) as having a "scheme",
+ * and resolves it through `NormalModuleFactory.hooks.resolveForScheme`
+ * instead of the normal enhanced-resolve resolver chain — bypassing the
+ * `resolver.hooks.resolve` tap unplugin's webpack adapter installs for its
+ * `resolveId` hook entirely. The portable core's virtual module ids all use
+ * the Vite/Rollup `virtual:...` convention, so under webpack every one of
+ * them (`virtual:component-highlighter/devtools-hook`,
+ * `.../runtime`, `.../runtime-helpers`, `.../vue-runtime`) is misread as an
+ * unhandled URI scheme and fails with `UnhandledSchemeError` before
+ * `resolveId` ever runs.
+ *
+ * This registers a `resolveForScheme.for('virtual')` handler that relays the
+ * request through the SAME `resolveId`/`load` hooks the Vite adapter uses
+ * (obtained from the same unplugin instance's `.vite()` output — a plain,
+ * bundler-agnostic pair of functions), then writes the result into a real,
+ * scheme-less file path via `webpack-virtual-modules` so webpack's normal
+ * (unhandled-scheme-free) read path takes over. Content is never
+ * reimplemented here — only relayed.
+ */
+interface WebpackResourceData {
+  resource: string
+  path?: string
+  query?: string
+  fragment?: string
+  context?: string
+}
+
+interface WebpackNormalModuleFactoryLike {
+  hooks: {
+    resolveForScheme: {
+      for: (scheme: string) => {
+        tapPromise: (
+          name: string,
+          fn: (resourceData: WebpackResourceData) => Promise<void>,
+        ) => void
+      }
+    }
+  }
+}
+
+interface WebpackCompilerLike {
+  options: { context?: string }
+  hooks: {
+    compilation: {
+      tap: (
+        name: string,
+        fn: (
+          compilation: unknown,
+          args: { normalModuleFactory: WebpackNormalModuleFactoryLike },
+        ) => void,
+      ) => void
+    }
+  }
+}
+
+interface RawResolveLoadPlugin {
+  resolveId?: (
+    id: string,
+    importer: string | undefined,
+    opts: { isEntry: boolean },
+  ) => unknown
+  load?: (id: string) => unknown
+}
+
+const VIRTUAL_SCHEME = 'virtual'
+const VIRTUAL_SCHEME_DIR = '_component_highlighter_virtual_'
+
+function createVirtualSchemeWebpackPlugin(rawPlugin: RawResolveLoadPlugin): {
+  apply: (compiler: WebpackCompilerLike) => void
+} {
+  return {
+    apply(compiler) {
+      const require_ = createRequire(import.meta.url)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const VirtualModulesPluginCtor = require_('webpack-virtual-modules') as new () => {
+        writeModule: (filePath: string, contents: string) => void
+        apply: (compiler: unknown) => void
+      }
+      const vfs = new VirtualModulesPluginCtor()
+      vfs.apply(compiler)
+
+      compiler.hooks.compilation.tap(
+        'component-highlighter-virtual-scheme',
+        (_compilation, { normalModuleFactory }) => {
+          normalModuleFactory.hooks.resolveForScheme
+            .for(VIRTUAL_SCHEME)
+            .tapPromise(
+              'component-highlighter-virtual-scheme',
+              async (resourceData) => {
+                if (!rawPlugin.resolveId) return
+                const resolved = await rawPlugin.resolveId(
+                  resourceData.resource,
+                  undefined,
+                  { isEntry: false },
+                )
+                const resolvedId =
+                  typeof resolved === 'string'
+                    ? resolved
+                    : ((resolved as { id?: string } | null)?.id ?? null)
+                if (!resolvedId || !rawPlugin.load) return
+
+                const loaded = await rawPlugin.load(resolvedId)
+                const code =
+                  typeof loaded === 'string'
+                    ? loaded
+                    : ((loaded as { code?: string } | null)?.code ?? '')
+
+                const virtualPath = path.join(
+                  compiler.options.context ?? process.cwd(),
+                  VIRTUAL_SCHEME_DIR,
+                  `${encodeURIComponent(resolvedId)}.js`,
+                )
+                vfs.writeModule(virtualPath, code)
+
+                resourceData.path = virtualPath
+                resourceData.query = ''
+                resourceData.fragment = ''
+                resourceData.resource = virtualPath
+                resourceData.context = path.dirname(virtualPath)
+              },
+            )
+        },
+      )
+    },
+  }
+}
+
 /**
  * `next.config.ts` composer. Dev-only instrumentation: pushes the
  * component-highlighter webpack plugin onto the client compilation only
@@ -304,11 +453,18 @@ export function withStorybookDevtools(
     entry: resolved.entry,
   }
 
-  const webpackPlugin = createComponentHighlighterUnplugin(
+  const unplugin = createComponentHighlighterUnplugin(
     framework,
     unpluginOptions,
     host,
-  ).webpack()
+  )
+  const webpackPlugin = unplugin.webpack()
+  // Same resolveId/load hooks the Vite adapter drives, called directly (no
+  // Vite instance involved) to relay "virtual:" scheme requests — see
+  // createVirtualSchemeWebpackPlugin.
+  const virtualSchemePlugin = createVirtualSchemeWebpackPlugin(
+    unplugin.vite() as RawResolveLoadPlugin,
+  )
 
   return function configureNextConfig<T extends NextConfigWebpackShape>(
     nextConfig: T = {} as T,
@@ -318,7 +474,10 @@ export function withStorybookDevtools(
     const composedWebpack: NextWebpackFn = (config, context) => {
       let cfg = userWebpack ? (userWebpack(config, context) ?? config) : config
       if (context.dev && !context.isServer && context.nextRuntime !== 'edge') {
-        cfg = { ...cfg, plugins: [...(cfg.plugins ?? []), webpackPlugin] }
+        cfg = {
+          ...cfg,
+          plugins: [...(cfg.plugins ?? []), webpackPlugin, virtualSchemePlugin],
+        }
       }
       return cfg
     }
@@ -343,6 +502,14 @@ export interface CreateStorybookDevtoolsRouteOptions {
   auth?: boolean
   /** Pin the side-car RPC/WS port (Next routes can't accept WS upgrades). */
   port?: number
+  /**
+   * Bind host for the side-car server. `'localhost'` (the library default)
+   * resolves to whichever of `127.0.0.1`/`::1` the OS prefers, which can
+   * mismatch the browser's explicit WebSocket target when the Next dev
+   * server itself is bound to a specific address (e.g. `next dev -H
+   * 127.0.0.1`) — pin the same address here to avoid a connection refused.
+   */
+  host?: string
   /** Hub mount base — must match `withStorybookDevtools`'s `base`. */
   base?: string
   /** Public origin the Next app is reachable at. */
@@ -382,8 +549,12 @@ export function createStorybookDevtoolsRoute(
   const hub = nextDevframeHub({
     base,
     ...(options.port != null ? { port: options.port } : {}),
+    ...(options.host != null ? { host: options.host } : {}),
     ...(options.origin != null ? { origin: options.origin } : {}),
     auth: options.auth ?? true,
+    // The aggregate MCP endpoint needs the optional `@modelcontextprotocol/server`
+    // peer this package doesn't declare; out of scope for the DevTools panel.
+    mcp: false,
     devframes: [
       createStorybookDevframe({
         framework: nextFramework,
