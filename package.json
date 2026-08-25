@@ -111,6 +111,7 @@
     "@babel/generator": "^7.28.6",
     "@devframes/hub": "^0.9.5",
     "@devframes/hub-ui": "^0.9.5",
+    "@devframes/next": "^0.9.5",
     "@medv/finder": "^3.1.0",
     "@rollup/pluginutils": "^5.4.0",
     "@testing-library/dom": "^10.4.0",

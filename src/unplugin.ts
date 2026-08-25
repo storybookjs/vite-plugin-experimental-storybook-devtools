@@ -265,8 +265,8 @@ function buildComponentHighlighterUnpluginOptions(
       if (id === paths.resolvedRuntimeHelperVirtualId) {
         const { loadDevSource } = host
         const shouldUseSource =
+          loadDevSource != null &&
           host.isServe() &&
-          !!host.loadDevSource &&
           fs.existsSync(paths.runtimeHelperSourcePath)
 
         if (shouldUseSource) {
@@ -287,8 +287,8 @@ function buildComponentHighlighterUnpluginOptions(
       if (id === paths.resolvedFrameworkVirtualModuleId) {
         const { loadDevSource } = host
         const shouldUseSource =
+          loadDevSource != null &&
           host.isServe() &&
-          !!host.loadDevSource &&
           fs.existsSync(paths.runtimeModuleSourcePath)
 
         // Replace the loader-injected build constants declared by the runtime

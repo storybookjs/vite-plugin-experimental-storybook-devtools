@@ -31,9 +31,16 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
      19 are both required and both E2E-gated. Do not replace the symlinks
      with copies.
    - The `rsc` option's `"use client"` transform gate is covered by unit tests
-     (`src/frameworks/react/transform.test.ts` → "RSC mode"), not a playground.
-     If you add runtime RSC coverage later, it needs its own playground in
-     `rsc: true` mode — it cannot share the `rsc: false` SPA playgrounds.
+     (`src/frameworks/react/transform.test.ts` → "RSC mode"). Runtime RSC
+     coverage lives separately in `playground/next` (App Router, React 19,
+     `rsc: true`, mixed server + client components): it has its own source
+     tree rather than joining the symlink group above, since the RSC gate
+     needs a real server component in the render tree, which the `rsc: false`
+     SPA playgrounds don't have. It uses the same client-bundle shim pattern
+     as `playground/rsbuild` (`playground/next/shims/`), since Next has no
+     `/@id/{specifier}` resolution either.
+     `e2e/playground-next-detection.spec.ts` asserts the client component set
+     registers and that the server component never appears in the registry.
    - Keep `docs/SUPPORTED_FRAMEWORKS.md` current.
 
 3. **Use shared test primitives**
@@ -50,8 +57,8 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
 
 5. **Make CI reliable**
    - Avoid relying on manual DevTools authorization in CI (Vite's trust
-     prompt, or devframe's OTP gate on Rsbuild — disable the latter with
-     `clientAuth: false`).
+     prompt, or devframe's OTP gate on Rsbuild/Next — disable it with
+     `clientAuth: false` on Rsbuild or `auth: false` on Next).
    - Keep E2E activation deterministic (automation hooks + config).
 
 6. **Keep documentation up to date**

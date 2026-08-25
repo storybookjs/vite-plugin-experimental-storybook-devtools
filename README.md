@@ -29,7 +29,7 @@ yarn add vite-plugin-experimental-storybook-devtools
 ### Peer Dependencies
 
 This plugin requires:
-- One bundler host: `vite` >= 5.0.0 with `@vitejs/devtools` >= 0.6.0, or `@rsbuild/core` >= 1.1.7
+- One bundler host: `vite` >= 5.0.0 with `@vitejs/devtools` >= 0.6.0, `@rsbuild/core` >= 1.1.7, or `next` (App Router, webpack dev)
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
 ## Quick Start
@@ -171,6 +171,65 @@ On Rsbuild, instrumentation mounts through rspack via the shared `unplugin` core
 - **`framework: 'vue'`** is accepted, but only `framework: 'react'` is playground/E2E-verified on Rsbuild today.
 - **Dev-time runtime is always the built `dist/` output** — Rsbuild has no equivalent of Vite's `server.transformRequest`, so there's no dev-source read path. Run `pnpm build` before `rsbuild dev` for the plugin's own runtime modules to be present.
 - The `dedupeReact` option and its React-major-mismatch detection (see "React version support" below) work the same way on Rsbuild, via `resolve.dedupe`.
+
+### Next.js (webpack)
+
+`./next` mounts the same instrumentation on Next's App Router dev server (`next dev`, webpack — Turbopack has no unplugin adapter, see below). Dev-only, client-compilation-only: the webpack plugin is only pushed onto the client compilation (`context.dev && !context.isServer && context.nextRuntime !== 'edge'`), so server components and the edge runtime are never touched.
+
+```typescript
+// next.config.ts
+import type { NextConfig } from 'next'
+import { withStorybookDevtools } from 'vite-plugin-experimental-storybook-devtools/next'
+
+const nextConfig: NextConfig = {
+  // Next's App Router treats a leading-underscore path segment as a private,
+  // unroutable folder, so the hub and client-bundle routes live at
+  // non-underscore paths and get rewritten to their public URLs here.
+  async rewrites() {
+    return [
+      { source: '/__devframes/:path*', destination: '/internal-devframes-hub/:path*' },
+      {
+        source: '/__storybook-devtools-client/:path*',
+        destination: '/internal-devframes-client/:path*',
+      },
+    ]
+  },
+}
+
+export default withStorybookDevtools()(nextConfig)
+```
+
+```typescript
+// app/internal-devframes-hub/[[...path]]/route.ts
+import { createStorybookDevtoolsRoute } from 'vite-plugin-experimental-storybook-devtools/next'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+export const { GET, POST, DELETE } = createStorybookDevtoolsRoute()
+```
+
+```typescript
+// app/internal-devframes-client/[[...path]]/route.ts
+import { createStorybookDevtoolsClientBundleRoute } from 'vite-plugin-experimental-storybook-devtools/next'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+export const { GET } = createStorybookDevtoolsClientBundleRoute()
+```
+
+`createStorybookDevtoolsRoute` mounts the devframes hub (`@devframes/hub`) on a sidecar WebSocket, since Next route handlers can't accept socket upgrades. `createStorybookDevtoolsClientBundleRoute` serves the dock's self-contained client bundle (`dist/client-bundled/`) at `/__storybook-devtools-client/vite-devtools.mjs` — the same public path the Rsbuild host uses, so a consuming app's own client bootstrap can `import()` it by URL and share one browser module instance with the embedded dock. Next has no HTML-transform hook the way Vite has `transformIndexHtml`, so hook delivery on this host always goes through entry injection: `withStorybookDevtools` prepends the devtools-hook import to Next's client bootstrap modules (`@next/react-refresh-utils/dist/runtime.js` and the `next/dist/client/*` entries) rather than any served HTML.
+
+Notable differences from the Vite host:
+
+- **`auth`** *(default `true`)* — `createStorybookDevtoolsRoute({ auth: false })` disables the hub's interactive auth gate for single-user localhost or E2E setups (same purpose as Rsbuild's `clientAuth: false`).
+- **`host`** — pin the side-car server's bind address (e.g. `host: '127.0.0.1'`) to match `next dev -H 127.0.0.1`; the library default (`'localhost'`) can resolve to a loopback address the browser's explicit WebSocket target can't reach.
+- **Turbopack is unsupported** — there is no unplugin adapter for it. Running `next dev` under Turbopack prints one console warning and otherwise no-ops; the app runs normally, just without instrumentation. Run `next dev` without `--turbopack` on Next 15, or pass `--webpack` explicitly on majors where Turbopack is the default (Next 16+).
+- **RSC (`rsc` option, default `true`)** — the App Router ships Server Components by default, so only modules with a `"use client"` directive are instrumented; server components never register and are invisible to highlighting/coverage. This also means a module that is client-side only *transitively* (imported by a `"use client"` module but carrying no directive of its own) is **not** instrumented — only modules with their own `"use client"` directive are tagged.
+- **No `/__open-in-editor`** — that's a Vite dev-server feature Next doesn't have; the context menu's "Open Code" affordance hides itself when the probe fails.
+- **Story generation** maps to `@storybook/nextjs`.
+- **Manual hook fallback** — when entry injection isn't viable, `getNextDevToolsHookScript()` returns the same hook script body for manual delivery, e.g. via `<Script strategy="beforeInteractive">` in the root layout.
 
 ### Start developing
 
@@ -335,10 +394,8 @@ export default defineConfig({
 
 ### Other bundlers
 
-Vite and Rsbuild are the two supported bundler hosts (see "Rsbuild (rspack)"
-above). `./next` remains a placeholder entry point — importing it throws
-immediately, pointing at the phased migration in
-`docs/plans/DEVFRAME_OPPORTUNITIES.md`.
+Vite, Rsbuild, and Next.js (webpack) are the supported bundler hosts — see
+"Rsbuild (rspack)" and "Next.js (webpack)" above.
 
 ### Default Exclusions
 
@@ -485,6 +542,9 @@ pnpm --filter playground-vue dev
 pnpm build
 pnpm --filter playground-rsbuild dev
 
+# Run Next.js playground (App Router, webpack — not Turbopack)
+pnpm --filter playground-next dev
+
 # Run unit tests
 pnpm test
 
@@ -507,13 +567,13 @@ src/
   vite.ts                                 # Unified `./vite` entry — storybookDevtools({ framework })
   devframe-export.ts                      # `./devframe` entry — createStorybookDevframe for custom hosts
   rsbuild.ts                              # `./rsbuild` entry — Rsbuild/rspack adapter, mounts a devframe hub
-  next.ts                                 # `./next` placeholder (throws — not supported yet)
+  next.ts                                 # `./next` entry — Next.js (App Router, webpack) adapter, devframes hub route builders
   devframe.ts                             # Devframe definition: scoped shared state + serverFunctions registration, panel clientAssets
   context.ts                              # WeakMap<DevframeNodeContext, deps> so RPC functions' setup(ctx) can read createStorybookDevframe's deps
   rpc/
     index.ts                              # serverFunctions barrel + declare module 'devframe' augmentation
     functions/                            # One file per RPC function (bare name, namespaced to component-highlighter:<name>)
-  hub-setup.ts                            # Host-neutral hub surfaces (docks, commands, terminals, diagnostics) shared by the Vite kitSetup and the Rsbuild adapter
+  hub-setup.ts                            # Host-neutral hub surfaces (docks, commands, terminals, diagnostics) shared by the Vite kitSetup, the Rsbuild adapter, and the Next.js adapter
   react-dedupe.ts                         # React-major-mismatch detection shared by the Vite and Rsbuild adapters
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
   coverage-dashboard.ts                   # Server-side coverage computation
@@ -572,14 +632,15 @@ playground/
   react/                                  # React development app (Vite host)
   vue/                                    # Vue development app (Vite host)
   rsbuild/                                # React development app (Rsbuild host); src is a symlink to playground/react/src
+  next/                                   # Next.js App Router app (webpack host), mixed server/client components
 ```
 
 ## Limitations
 
 - **Framework scope** - Currently supports React, Vue, and Nuxt SSR through the Vue integration
-- **Bundler hosts** - Vite and Rsbuild are supported; on Rsbuild, only `framework: 'react'` is playground/E2E-verified (Vue is accepted but unverified)
+- **Bundler hosts** - Vite, Rsbuild, and Next.js (webpack) are supported; on Rsbuild, only `framework: 'react'` is playground/E2E-verified (Vue is accepted but unverified); Next.js is React-only (`@storybook/nextjs`) and only instruments `"use client"` modules
 - **Development only** - Disabled in production builds by default
-- **DevTools required** - Vite hosts need `@vitejs/devtools` for the dock panel and RPC; Rsbuild hosts get the dock via a bundled devframe hub instead
+- **DevTools required** - Vite hosts need `@vitejs/devtools` for the dock panel and RPC; Rsbuild and Next.js hosts get the dock via a bundled devframe hub instead
 - **Function components** - Class components are not supported
 - **Provider dependencies** - Components requiring context providers may need Storybook decorators
 
