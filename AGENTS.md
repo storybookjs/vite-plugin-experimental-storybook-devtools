@@ -97,7 +97,7 @@ iframeDoc?.querySelector('.act-btn.locate');      // scroll-to-component buttons
 
 If the DevTools shows "Unauthorized", auto-authorize with:
 ```js
-// devtools-kit 0.3 (devframe core): the auth token global was renamed to
+// devtools-kit 0.6 (devframe 0.9 core): the auth token global is
 // __DEVFRAME_CONNECTION_AUTH_TOKEN__ (read from localStorage or window).
 const ctx = window.__VITE_DEVTOOLS_CLIENT_CONTEXT__;
 const token =

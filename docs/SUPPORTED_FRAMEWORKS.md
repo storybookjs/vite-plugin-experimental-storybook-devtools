@@ -88,3 +88,13 @@ Current integrations:
   `127.0.0.1` so the page and DevTools websocket use the same host in live and
   E2E runs. The Vite transform still skips SSR module transforms, so the
   browser-only runtime is imported only by the hydrated client graph.
+
+  **Known limitation (devframe 0.9 / devtools-kit 0.6):** the embedded
+  DevTools **dock UI does not load under Nuxt SSR**. 0.6 serves the dock from a
+  connect-middleware route (`/__devtools/embedded.js`) instead of the old Vite
+  module-graph virtual module, and Nuxt's Nitro server does not forward
+  `/__devtools/*` to Vite's middleware. The in-page component
+  highlighter/overlay and RPC still work; only the dock panel is affected. The
+  corresponding E2E test is skipped. Restoring the dock is tracked Nuxt
+  host-adapter work — see `docs/DEVFRAME_MIGRATION.md`
+  (Phase 1 → Nuxt SSR dock follow-up).

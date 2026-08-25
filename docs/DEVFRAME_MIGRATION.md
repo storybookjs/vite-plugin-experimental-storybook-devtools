@@ -1,9 +1,11 @@
 # Devframe Migration — Feasibility Report & Phased Plan
 
-Status: **planned** (no code migrated yet). This document records the
-investigation into migrating this plugin onto [devframe](https://devfra.me/)
-(the extracted core of Vite DevTools) and extending it to non-Vite hosts, plus
-the agreed phased plan.
+Status: **Phase 1 implemented** (Vite family: React 19 / React 18 / Vue green
+on devframe 0.9 / devtools-kit 0.6). Phases 2–4 planned. This document records
+the investigation into migrating this plugin onto [devframe](https://devfra.me/)
+(the extracted core of Vite DevTools) and extending it to non-Vite hosts, the
+agreed phased plan, and the as-built Phase 1 outcome (see
+[Phase 1 — as built](#phase-1--as-built)).
 
 ## TL;DR
 
@@ -161,6 +163,67 @@ column.
 
 Risks: auth/trust flow differences; shared-state semantics under reconnect;
 CSP-nonce handling for injected scripts under the new host.
+
+#### Phase 1 — as built
+
+The migration was **materially smaller than planned**, because
+`@vitejs/devtools-kit` 0.6 kept the `devtools.setup(ctx)` plugin surface
+(RPC, docks, `views.hostStatic`, terminals, messages, diagnostics, commands)
+API-compatible with 0.3. So the plan's more invasive items were **not needed**
+for the kit-hosted Vite path and are deferred to the host-adapter phases:
+
+- **Not done (unnecessary for kit-hosted Vite):** re-expressing the tool as a
+  standalone `defineDevframe()` definition, `createPluginFromDevframe`,
+  transport unification (the `/__component-highlighter/*` middleware and the
+  `component-highlighter:story-created` HMR event still work unchanged), and
+  migrating terminals/messages/commands to raw hub APIs. These become relevant
+  only when mounting outside `@vitejs/devtools` (Phases 3–4 + the Nuxt adapter
+  below).
+
+What actually changed:
+
+- Bumped `@vitejs/devtools` + `@vitejs/devtools-kit` to `^0.6.0` in the root
+  and in **all four playgrounds** (clean cut from 0.3.x).
+- **Shared-state object envelopes** — the only real API break. devframe 0.9
+  shared state is immer-backed and typed `get<T extends object>`, so primitive
+  and `null` top-level states are rejected at compile time *and* runtime.
+  Every scalar/nullable state moved to a `{ value }` envelope
+  (`highlight-active`, `highlighter-tab-active`, `pending-visit`,
+  `pending-tab`, `selected-component`); `registry` stays flat (arrays are
+  objects). Updated both the server (`create-component-highlighter-plugin.ts`)
+  and every client reader/writer (`panel.ts`, `client/listeners.ts`,
+  `client/overlay.ts`).
+- **Nuxt injection helper** updated for 0.6: the old
+  `virtual:vite-devtools-injection` module is gone; 0.6 serves the embedded
+  dock from `<mountPath>embedded.js`, so `getNuxtViteDevToolsInjectionScript()`
+  now emits the runtime `<script src="/__devtools/embedded.js">` bootstrap
+  (mirroring `@vitejs/devtools`' own injection plugin).
+
+Verification: `pnpm typecheck` clean, `pnpm test` 254 passing, `pnpm exec
+playwright test` 76/76 on React 19 / React 18 / Vue.
+
+##### Nuxt SSR dock — descoped to a follow-up
+
+0.6 stopped serving the dock through Vite's module graph and now serves it from
+a connect-middleware route at `/__devtools/embedded.js`. Under Nuxt SSR, Nitro
+owns the request path and does **not** forward `/__devtools/*` to Vite's
+middleware, so the embedded dock UI never loads (the in-page overlay/RPC still
+work — only the dock panel is affected). The `injects the Vite DevTools dock`
+E2E test is therefore `test.skip`ped with an in-code explanation.
+
+Restoring it is dedicated Nuxt host-adapter work, with a known direction:
+express the tool as a `defineDevframe()` definition mounted via
+`@devframes/nuxt/hub` (which wires `@devframes/vite/hub` into Nuxt's Vite
+server and injects `<base>embedded.js`), or integrate with `@nuxt/devtools`,
+which speaks the hub protocol natively. Note `@devframes/nuxt/hub` mounts raw
+`DevframeDefinition`s (not kit `devtools.setup` plugins), so this is a second,
+distinct integration path — hence a follow-up, not part of core Phase 1. A DX
+issue was filed upstream about the gap:
+[devframes/devframe#289](https://github.com/devframes/devframe/issues/289).
+
+A separate non-fatal `DF8111` warning (dock bare-specifier client script needs
+host client-module resolution) fires in **all** hosts including plain Vite,
+where the dock still works; worth a follow-up but not a blocker.
 
 ### Phase 2 — unplugin refactor (Vite still the sole consumer)
 

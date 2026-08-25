@@ -103,16 +103,24 @@ declare module '@vitejs/devtools-kit' {
     }) => void
   }
 
+  // devframe 0.9 / devtools-kit 0.6 shared state is immer-backed and requires
+  // an object value (`get<T extends object>`). Primitives and `null` are no
+  // longer valid top-level states, so every scalar/nullable state is wrapped
+  // in a `{ value }` envelope. Arrays are objects, so `registry` stays flat.
   interface DevToolsRpcSharedStates {
     'component-highlighter:registry': SerializedRegistryInstance[]
     'component-highlighter:pending-visit': {
-      relativeFilePath: string
-      preferredStoryName?: string
-    } | null
-    'component-highlighter:pending-tab': string | null
-    'component-highlighter:highlight-active': boolean
-    'component-highlighter:selected-component': SerializedRegistryInstance | null
-    'component-highlighter:highlighter-tab-active': boolean
+      value: {
+        relativeFilePath: string
+        preferredStoryName?: string
+      } | null
+    }
+    'component-highlighter:pending-tab': { value: string | null }
+    'component-highlighter:highlight-active': { value: boolean }
+    'component-highlighter:selected-component': {
+      value: SerializedRegistryInstance | null
+    }
+    'component-highlighter:highlighter-tab-active': { value: boolean }
   }
 }
 
@@ -817,10 +825,12 @@ export function createComponentHighlighterPlugin(
 
         ctx.rpc.sharedState
           .get('component-highlighter:pending-visit', {
-            initialValue: null as {
-              relativeFilePath: string
-              preferredStoryName?: string
-            } | null,
+            initialValue: {
+              value: null as {
+                relativeFilePath: string
+                preferredStoryName?: string
+              } | null,
+            },
           })
           .then((s) => {
             pendingVisitState = s
@@ -828,24 +838,26 @@ export function createComponentHighlighterPlugin(
 
         ctx.rpc.sharedState
           .get('component-highlighter:pending-tab', {
-            initialValue: null as string | null,
+            initialValue: { value: null as string | null },
           })
           .then((s) => {
             pendingTabState = s
           })
 
         ctx.rpc.sharedState.get('component-highlighter:highlight-active', {
-          initialValue: false,
+          initialValue: { value: false },
         })
 
         ctx.rpc.sharedState.get('component-highlighter:selected-component', {
-          initialValue: null as SerializedRegistryInstance | null,
+          initialValue: {
+            value: null as SerializedRegistryInstance | null,
+          },
         })
 
         ctx.rpc.sharedState.get(
           'component-highlighter:highlighter-tab-active',
           {
-            initialValue: false,
+            initialValue: { value: false },
           },
         )
 
@@ -1249,7 +1261,9 @@ export function createComponentHighlighterPlugin(
                 preferredStoryName?: string
               }) => {
                 if (pendingVisitState) {
-                  pendingVisitState.mutate(() => data)
+                  pendingVisitState.mutate((s: { value: unknown }) => {
+                    s.value = data
+                  })
                 }
                 ctx.rpc.broadcast({
                   method: 'component-highlighter:do-visit-story',
@@ -1304,7 +1318,9 @@ export function createComponentHighlighterPlugin(
         function openPanelTab(devtoolsCtx: any, tab: string) {
           // Store in shared state so the panel picks it up on load or via subscription
           if (pendingTabState) {
-            pendingTabState.mutate(() => tab)
+            pendingTabState.mutate((s: { value: string | null }) => {
+              s.value = tab
+            })
           }
           // Tell the client to switch the dock to the panel (if not already open)
           devtoolsCtx.rpc.broadcast({
