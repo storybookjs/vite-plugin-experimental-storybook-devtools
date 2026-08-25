@@ -1,7 +1,8 @@
 # Devframe Migration — Feasibility Report & Phased Plan
 
-Status: **Phase 1 implemented** (Vite family: React 19 / React 18 / Vue green
-on devframe 0.9 / devtools-kit 0.6). Phases 2–4 planned. This document records
+Status: **Phases 1–2 implemented** (Vite family: React 19 / React 18 / Vue
+green on devframe 0.9 / devtools-kit 0.6; core re-platformed onto `unplugin`
+with zero behavior change). Phases 3–4 planned. This document records
 the investigation into migrating this plugin onto [devframe](https://devfra.me/)
 (the extracted core of Vite DevTools) and extending it to non-Vite hosts, the
 agreed phased plan, and the as-built Phase 1 outcome (see
@@ -242,6 +243,41 @@ Goal: re-platform instrumentation delivery without changing behavior.
 
 Risks: virtual-module id conventions differ across bundlers (`\0` prefix
 handling); HMR-adjacent behavior (`handleHotUpdate`) must stay Vite-side.
+
+#### Phase 2 — as built
+
+`create-component-highlighter-plugin.ts` now builds an **`unplugin` factory**
+instead of a raw Vite `Plugin`:
+
+- **Portable hooks at the top level** — `resolveId`, `load`, `transform` — so
+  Phase 3+ bundlers (Rsbuild/webpack) pick them up unchanged. The `transform`
+  keeps an optional 3rd `options` param for Vite's `ssr` flag: unplugin
+  forwards it at runtime under Vite (via `handler.apply(this, args)`) but
+  doesn't type it, and it's simply `undefined` on non-Vite bundlers.
+- **Everything Vite-specific under `vite: {}`** — `config`, `configResolved`,
+  `configureServer`, `transformIndexHtml`, `handleHotUpdate`, and the entire
+  `@vitejs/devtools-kit` `devtools.setup` hook. unplugin merges these onto the
+  Vite plugin via `Object.assign`, so the Vite plugin is functionally the same
+  object as before.
+- `createComponentHighlighterPlugin(framework, options)` **keeps its exact
+  public signature** — it returns `createUnplugin(factory).vite()`, which for a
+  single-plugin factory yields a single Vite `Plugin` (unchanged shape for the
+  `./react`, `./vue`, `./nuxt` entries and their consumers).
+
+Deliberately **deferred to Phase 3** (to avoid shipping unused code):
+
+- No `server.transformRequest`/`optimizeDeps`/`\0`-id portability adaptations
+  yet — they still work under Vite and only need per-bundler handling when a
+  non-Vite host actually consumes the portable hooks.
+- No entry-module injection path yet (that's the non-Vite HTML-injection
+  substitute — added with the first non-Vite host).
+- No new subpath exports (`./rsbuild`, `./next`) or per-framework unplugin
+  instances yet — those land with their consuming host so the package never
+  ships placeholder entry points.
+
+Verification: `pnpm typecheck` clean, `pnpm test` 254 passing, `pnpm exec
+playwright test` **101 passing / 1 skipped** — identical to Phase 1 (zero
+behavior change under Vite).
 
 ### Phase 3 — Rsbuild host
 

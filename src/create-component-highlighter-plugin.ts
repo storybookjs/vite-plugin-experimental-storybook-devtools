@@ -1,6 +1,7 @@
 /// <reference types="@vitejs/devtools-kit" />
 import type { Plugin, ViteDevServer } from 'vite'
 import { createFilter } from 'vite'
+import { createUnplugin, type UnpluginFactory } from 'unplugin'
 import type { FrameworkConfig, SerializedProps } from './frameworks'
 import {
   defineRpcFunction,
@@ -358,9 +359,14 @@ export function createComponentHighlighterPlugin(
   const terminalLogs: string[] = []
   const MAX_LOG_LINES = 2000
 
-  return {
+  // unplugin factory. Portable hooks (resolveId/load/transform) live at the
+  // top level so non-Vite bundlers (Phase 3+: Rsbuild/webpack) pick them up.
+  // Everything Vite-specific stays under `vite` — unplugin merges it onto the
+  // Vite plugin via `Object.assign`, so behavior under Vite is unchanged.
+  const unpluginFactory: UnpluginFactory<undefined> = () => ({
     name: 'vite-plugin-experimental-storybook-devtools',
     enforce: 'pre',
+    vite: {
     configResolved(config) {
       isServe = config.command === 'serve'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
@@ -1484,6 +1490,22 @@ export function createComponentHighlighterPlugin(
         },
       ]
     },
+    handleHotUpdate(ctx) {
+      if (ctx.file === runtimeHelperSourcePath) {
+        const mod = ctx.server.moduleGraph.getModuleById(
+          resolvedRuntimeHelperVirtualId,
+        )
+        return mod ? [mod] : []
+      }
+      if (ctx.file === runtimeModuleSourcePath) {
+        const mod = ctx.server.moduleGraph.getModuleById(
+          '\0' + framework.virtualModuleId,
+        )
+        return mod ? [mod] : []
+      }
+      return
+    },
+    },
     resolveId(id) {
       // HMR invalidation appends ?t=<timestamp> to re-fetched imports —
       // strip any query before matching our virtual ids.
@@ -1590,7 +1612,10 @@ export function createComponentHighlighterPlugin(
       }
       return null
     },
-    transform(code, id, options) {
+    // `options` is Vite's transform options (incl. `ssr`), forwarded by
+    // unplugin at runtime but absent from its 2-arg hook type — hence the
+    // optional 3rd param. On non-Vite bundlers it is simply `undefined`.
+    transform(code: string, id: string, options?: { ssr?: boolean }) {
       // Only transform in dev/serve mode unless force is enabled
       if (!isServe && !force) {
         return
@@ -1652,20 +1677,10 @@ export function createComponentHighlighterPlugin(
 
       return result
     },
-    handleHotUpdate(ctx) {
-      if (ctx.file === runtimeHelperSourcePath) {
-        const mod = ctx.server.moduleGraph.getModuleById(
-          resolvedRuntimeHelperVirtualId,
-        )
-        return mod ? [mod] : []
-      }
-      if (ctx.file === runtimeModuleSourcePath) {
-        const mod = ctx.server.moduleGraph.getModuleById(
-          '\0' + framework.virtualModuleId,
-        )
-        return mod ? [mod] : []
-      }
-      return
-    },
-  }
+  })
+
+  // Under Vite, unplugin reconstitutes a single plugin object (portable hooks
+  // + the `vite` escape hatch merged via Object.assign), so this preserves the
+  // exact Vite plugin behavior/shape the framework entry points expect.
+  return createUnplugin(unpluginFactory).vite() as unknown as Plugin
 }
