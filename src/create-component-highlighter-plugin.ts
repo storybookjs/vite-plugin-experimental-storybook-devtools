@@ -238,7 +238,7 @@ export function createComponentHighlighterPlugin(
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push(
         'vite-plugin-experimental-storybook-devtools > @testing-library/dom',
-        'aria-query',
+        'vite-plugin-experimental-storybook-devtools > @testing-library/dom > aria-query',
       )
 
       // The client modules above are excluded from optimization, so Vite never
@@ -449,6 +449,18 @@ export function createComponentHighlighterPlugin(
 
     // Store terminals reference for the start-storybook RPC handler
     state.devtoolsTerminals = ctx.terminals
+
+    // The kit advertises Vite's client-module-resolution template
+    // (`/@id/{specifier}`, the documented Vite convention) only when it
+    // creates the devtools hub — which happens after every plugin's devtools
+    // setup has run. Registering a bare-specifier action dock before that
+    // trips the hub's DF8111 "unresolvable client script" warning even
+    // though the template is advertised by the time any browser connects.
+    // Pre-seeding the same value makes the registration-time check pass;
+    // the hub later overwrite-assigns the identical template.
+    if (ctx.viteServer) {
+      ctx.staticConfig.dock ??= { clientModuleResolution: '/@id/{specifier}' }
+    }
 
     // Register dock entry for component highlighter UI
     ctx.docks.register(
