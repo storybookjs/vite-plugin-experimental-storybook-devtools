@@ -6,6 +6,7 @@ import { defineNuxtConfig } from 'nuxt/config'
 import componentHighlighter, {
   getNuxtDevToolsHookScript,
   getNuxtViteDevToolsInjectionScript,
+  viteDevToolsBridgeModule,
 } from '../../src/frameworks/nuxt/plugin'
 
 const r = (filepath: string) =>
@@ -19,6 +20,7 @@ if (!isStorybook) {
 
 export default defineNuxtConfig({
   ssr: true,
+  modules: isStorybook ? [] : [viteDevToolsBridgeModule],
   css: ['~/assets/style.css'],
   app: {
     head: {
