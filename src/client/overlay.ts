@@ -1,7 +1,7 @@
 import type { ComponentInstance, SerializedProps } from '../frameworks/types'
 import type { Emitter } from 'nanoevents'
 import { createNanoEvents } from 'nanoevents'
-import { getDevToolsClientContext } from '@vitejs/devtools-kit/client'
+import { getHostClientContext } from './utils/host-context'
 import { debug, warn, error as logError } from './logger'
 import {
   UI_MARKER,
@@ -560,13 +560,13 @@ export async function showContextMenu(
       onMenuClosed()
     },
     async visitStory(relativeFilePath: string) {
-      const ctx = getDevToolsClientContext() as any
+      const ctx = getHostClientContext() as any
       if (ctx?.docks?.switchEntry) {
         await ctx.docks.switchEntry('storybook-devtools-panel')
       }
 
       try {
-        const rpcCtx = getDevToolsClientContext()
+        const rpcCtx = getHostClientContext()
         if (rpcCtx?.rpc?.call) {
           await (rpcCtx.rpc.call as any)(
             'component-highlighter:visit-story',
@@ -653,7 +653,7 @@ export function pushSelectedComponentRPC(
   instance: ComponentInstance | null,
 ) {
   try {
-    const ctx = getDevToolsClientContext()
+    const ctx = getHostClientContext()
     if (!ctx?.rpc) return
 
     const data = instance

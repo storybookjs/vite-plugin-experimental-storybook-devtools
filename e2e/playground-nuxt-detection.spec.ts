@@ -58,24 +58,13 @@ test.describe('Nuxt SSR playground detection coverage', () => {
     expect(html).toContain('/__devtools/embedded.js')
   })
 
-  // Descoped in the devframe 0.9 / devtools-kit 0.6 migration. 0.6 stopped
-  // serving the embedded dock through Vite's module graph (the old
-  // `virtual:vite-devtools-injection`, which Nuxt exposed at
-  // `/_nuxt/@id/…`) and now serves it from a connect-middleware route at
-  // `/__devtools/embedded.js`. Under Nuxt SSR, Nitro owns the request path and
-  // does not forward `/__devtools/*` to Vite's middleware, so the dock UI
-  // never loads (the plugin's in-page overlay/RPC still work — only the
-  // embedded dock panel is affected). Restoring it needs a dedicated Nuxt host
-  // adapter: express the tool as a `defineDevframe()` definition mounted via
-  // `@devframes/nuxt/hub`, or integrate with `@nuxt/devtools` natively. Tracked
-  // as a follow-up (see docs/DEVFRAME_MIGRATION.md, Phase 1 → Nuxt follow-up).
-  test.skip('injects the Vite DevTools dock with Storybook tools', async ({
+  test('injects the Vite DevTools dock with Storybook tools', async ({
     page,
   }) => {
     await expect
       .poll(async () => {
         return page.evaluate(async () => {
-          const dock = document.querySelector('vite-devtools-dock-embedded') as
+          const dock = document.querySelector('devframes-dock-embedded') as
             | (HTMLElement & { shadowRoot?: ShadowRoot })
             | null
           const shadow = dock?.shadowRoot
