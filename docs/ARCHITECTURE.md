@@ -187,12 +187,17 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 
 ## Shared state (auto-synced between server and clients)
 
+> devframe 0.9 / devtools-kit 0.6 shared state is immer-backed and requires an
+> **object** value (`get<T extends object>`). Scalar/nullable states are
+> therefore wrapped in a `{ value }` envelope (the `Type` column shows the
+> envelope payload). Arrays are objects, so `registry` stays flat.
+
 | Key | Type | Purpose |
 |-----|------|---------|
 | `component-highlighter:registry` | `SerializedRegistryInstance[]` | Component instances synced from client to panel |
-| `component-highlighter:pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request (consumed by panel) |
-| `component-highlighter:pending-tab` | `string \| null` | Tab switch request (consumed by panel) |
-| `component-highlighter:highlight-active` | `boolean` | Whether highlight mode is on (syncs panel toggle button) |
+| `component-highlighter:pending-visit` | `{ value: { relativeFilePath, preferredStoryName } \| null }` | Story navigation request (consumed by panel) |
+| `component-highlighter:pending-tab` | `{ value: string \| null }` | Tab switch request (consumed by panel) |
+| `component-highlighter:highlight-active` | `{ value: boolean }` | Whether highlight mode is on (syncs panel toggle button) |
 
 ## DevTools commands (Mod+K palette)
 

@@ -30,7 +30,7 @@ yarn add vite-plugin-experimental-storybook-devtools
 
 This plugin requires:
 - `vite` >= 5.0.0
-- `@vitejs/devtools` >= 0.1.0
+- `@vitejs/devtools` >= 0.6.0 (devframe 0.9 core; the 0.3.x line is no longer supported)
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
 ## Quick Start
