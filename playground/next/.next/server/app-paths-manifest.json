@@ -1,0 +1,5 @@
+{
+  "/internal-devframes-hub/[[...path]]/route": "app/internal-devframes-hub/[[...path]]/route.js",
+  "/internal-devframes-client/[[...path]]/route": "app/internal-devframes-client/[[...path]]/route.js",
+  "/page": "app/page.js"
+}
