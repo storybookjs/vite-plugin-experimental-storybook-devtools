@@ -1,9 +1,10 @@
 # Devframe Migration — Feasibility Report & Phased Plan
 
-Status: **Phases 1–3 implemented** (Vite family: React 19 / React 18 / Vue
+Status: **Phases 1–4 implemented** (Vite family: React 19 / React 18 / Vue
 green on devframe 0.9 / devtools-kit 0.6; core re-platformed onto `unplugin`
-with zero behavior change; Rsbuild host green on the shared E2E suites).
-Phase 4 planned. This document records
+with zero behavior change; Rsbuild and Next.js hosts mounted on that core —
+see `docs/ARCHITECTURE.md` and the README's host sections for the as-built
+shapes). This document records
 the investigation into migrating this plugin onto [devframe](https://devfra.me/)
 (the extracted core of Vite DevTools) and extending it to non-Vite hosts, the
 agreed phased plan, and the as-built Phase 1 outcome (see
