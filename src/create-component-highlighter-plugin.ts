@@ -1,168 +1,28 @@
-/// <reference types="@vitejs/devtools-kit" />
-import type { Plugin, ViteDevServer } from 'vite'
+import type { Plugin } from 'vite'
 import { createFilter } from 'vite'
-import { createUnplugin, type UnpluginFactory } from 'unplugin'
-import type { FrameworkConfig, SerializedProps } from './frameworks'
-import {
-  defineRpcFunction,
-  defineCommand,
-  defineDockEntry,
-} from '@vitejs/devtools-kit'
-import type {
-  DevToolsViewAction,
-  DevToolsViewIframe,
-} from '@vitejs/devtools-kit'
+import type { FrameworkConfig } from './frameworks'
+import { defineCommand, defineDockEntry } from '@vitejs/devtools-kit'
+import { createPluginFromDevframe } from '@vitejs/devtools-kit/node'
+import type { DevToolsViewAction, KitNodeContext } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { createRequire } from 'module'
-import type { NotificationService } from './notifications'
 import {
   ConsoleNotificationService,
   DevToolsNotificationService,
 } from './notifications'
 import { computeCoverage } from './coverage-dashboard'
+import {
+  createStorybookDevframe,
+  type StorybookDevframeState,
+} from './devframe'
 
 import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
 export type { SerializedRegistryInstance, RegistryDiff }
 
-// RPC function type declarations (kit-documented augmentation surface).
-declare module '@vitejs/devtools-kit' {
-  interface DevToolsRpcServerFunctions {
-    'component-highlighter:highlight-target': (
-      data: ComponentHighlightData | null,
-    ) => void
-    'component-highlighter:toggle-overlay': (data: { enabled: boolean }) => void
-    'component-highlighter:create-story': (data: ComponentStoryData) => void
-    'component-highlighter:push-registry-diff': (diff: RegistryDiff) => void
-    'component-highlighter:scroll-to-component': (data: {
-      componentName: string
-    }) => void
-    'component-highlighter:highlight-coverage-instances': (
-      data: { componentName: string; hasStory: boolean } | null,
-    ) => void
-    'component-highlighter:highlight-coverage-batch': (
-      data: Array<{ componentName: string; hasStory: boolean }>,
-    ) => void
-    'component-highlighter:set-highlight-mode': (data: {
-      enabled: boolean
-    }) => void
-    'component-highlighter:visit-story': (data: {
-      relativeFilePath: string
-      preferredStoryName?: string
-    }) => void
-    'component-highlighter:notify': (data: {
-      message: string
-      level?: string
-    }) => void
-    'component-highlighter:select-component': (
-      data: SerializedRegistryInstance | null,
-    ) => void
-    'component-highlighter:set-prop': (data: {
-      id: string
-      path: Array<string | number>
-      payload: { kind: string; text: string }
-    }) => void
-    'component-highlighter:reset-prop': (data: {
-      id: string
-      path: Array<string | number>
-    }) => void
-  }
-
-  interface DevToolsRpcClientFunctions {
-    'component-highlighter:do-scroll-to-component': (data: {
-      componentName: string
-    }) => void
-    'component-highlighter:do-highlight-coverage': (
-      data: { componentName: string; hasStory: boolean } | null,
-    ) => void
-    'component-highlighter:do-highlight-coverage-batch': (
-      data: Array<{ componentName: string; hasStory: boolean }>,
-    ) => void
-    'component-highlighter:do-set-highlight-mode': (data: {
-      enabled: boolean
-      toggle?: boolean
-    }) => void
-    'component-highlighter:do-visit-story': (data: {
-      relativeFilePath: string
-      preferredStoryName?: string
-    }) => void
-    'component-highlighter:do-open-url': (data: { url: string }) => void
-    'component-highlighter:do-open-panel-tab': (data: { tab: string }) => void
-    'component-highlighter:do-switch-tab': (data: { tab: string }) => void
-    'component-highlighter:do-select-component': (
-      data: SerializedRegistryInstance | null,
-    ) => void
-    'component-highlighter:do-set-prop': (data: {
-      id: string
-      path: Array<string | number>
-      payload: { kind: string; text: string }
-    }) => void
-    'component-highlighter:do-reset-prop': (data: {
-      id: string
-      path: Array<string | number>
-    }) => void
-  }
-
-  // devframe 0.9 / devtools-kit 0.6 shared state is immer-backed and requires
-  // an object value (`get<T extends object>`). Primitives and `null` are no
-  // longer valid top-level states, so every scalar/nullable state is wrapped
-  // in a `{ value }` envelope. Arrays are objects, so `registry` stays flat.
-  interface DevToolsRpcSharedStates {
-    'component-highlighter:registry': SerializedRegistryInstance[]
-    'component-highlighter:pending-visit': {
-      value: {
-        relativeFilePath: string
-        preferredStoryName?: string
-      } | null
-    }
-    'component-highlighter:pending-tab': { value: string | null }
-    'component-highlighter:highlight-active': { value: boolean }
-    'component-highlighter:selected-component': {
-      value: SerializedRegistryInstance | null
-    }
-    'component-highlighter:highlighter-tab-active': { value: boolean }
-  }
-}
-
-interface ComponentHighlightData {
-  meta: {
-    componentName: string
-    filePath: string
-    relativeFilePath?: string
-    sourceId: string
-    isDefaultExport?: boolean
-  }
-  props: Record<string, unknown>
-  serializedProps?: SerializedProps
-  rect: DOMRect
-}
-
-interface ComponentStoryData {
-  meta: {
-    componentName: string
-    filePath: string
-    relativeFilePath?: string
-    sourceId: string
-    isDefaultExport?: boolean
-  }
-  /**
-   * Story generation reads `serializedProps` only. Raw `props` is never sent
-   * over RPC (it holds unclonable live values); kept optional for back-compat.
-   */
-  props?: Record<string, unknown>
-  serializedProps?: SerializedProps
-  /** Component registry for import resolution: componentName -> filePath */
-  componentRegistry?: Record<string, string>
-  /** Custom story name */
-  storyName?: string
-  /** Play function code lines generated from recorded interactions */
-  playFunction?: string[]
-  /** Import statements required by the play function */
-  playImports?: string[]
-  /** When true, skip navigating to the story after creation (e.g. batch "Create all") */
-  skipNavigation?: boolean
-}
+const COMPONENT_HIGHLIGHTER_ICON =
+  "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>"
 
 export interface ComponentHighlighterOptions {
   /** URL of the Storybook instance */
@@ -252,12 +112,14 @@ export interface ComponentHighlighterOptions {
 }
 
 /**
- * Create the component highlighter plugin for a specific framework
+ * Create the component highlighter plugin for a specific framework. Returns
+ * an array — Vite flattens plugin arrays — of the transform plugin and the
+ * devframe mount plugin.
  */
 export function createComponentHighlighterPlugin(
   framework: FrameworkConfig,
   options: ComponentHighlighterOptions = {},
-): Plugin {
+): Plugin[] {
   const logDebug = (...args: unknown[]) => {
     if (options.debugMode) {
       console.log('[component-highlighter]', ...args)
@@ -320,11 +182,9 @@ export function createComponentHighlighterPlugin(
   // stamps its injected tags with this nonce. We mirror it onto the inline
   // DevTools-hook <script> so it survives a strict Content-Security-Policy.
   let cspNonce: string | undefined
-  let server: ViteDevServer | undefined
-  let notifications: NotificationService = new ConsoleNotificationService()
-  // Structured diagnostics (DevTools `ctx.diagnostics`), wired in
-  // `devtools.setup`. Handles surface non-fatal instrumentation issues —
-  // parse failures and unsupported authoring patterns — to the DevTools UI.
+  // Structured diagnostics (DevTools `ctx.diagnostics`), wired in `kitSetup`.
+  // Handles surface non-fatal instrumentation issues — parse failures and
+  // unsupported authoring patterns — to the DevTools UI.
   type ChDiagnostics = {
     CH_TRANSFORM_FAILED: (p: {
       file: string
@@ -342,31 +202,28 @@ export function createComponentHighlighterPlugin(
   // Diagnostics dedupe — a file re-transforms on every HMR edit; emit each
   // distinct issue once so the UI isn't spammed.
   const reportedDiagnostics = new Set<string>()
-  // Track transformed components for coverage dashboard: componentName → filePath
-  const transformedComponents = new Map<string, string>()
-  let coverageCwd = ''
-  // Shared state handles (initialized in devtools.setup)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let registryState: any = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let pendingVisitState: any = null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let pendingTabState: any = null
 
-  // Terminal-based Storybook launcher state
-  let devtoolsTerminals: any = null // ctx.terminals reference from devtools.setup
-  let storybookSession: any = null
-  const terminalLogs: string[] = []
-  const MAX_LOG_LINES = 2000
+  // State shared between this plugin's transform hooks and the devframe's
+  // RPC handlers (registered in `./devframe.ts`) and `kitSetup` below. Values
+  // not yet known when the devframe's `setup(ctx)` runs (terminals, the
+  // DevTools notification service, shared-state handles) are filled in by
+  // `kitSetup`, which runs after it; handlers read these fields lazily at
+  // call time so they always see the current value.
+  const state: StorybookDevframeState = {
+    server: undefined,
+    notifications: new ConsoleNotificationService(),
+    transformedComponents: new Map<string, string>(),
+    devtoolsTerminals: null,
+    storybookSession: null,
+    terminalLogs: [],
+    registryState: null,
+    pendingVisitState: null,
+    pendingTabState: null,
+  }
 
-  // unplugin factory. Portable hooks (resolveId/load/transform) live at the
-  // top level so non-Vite bundlers (Phase 3+: Rsbuild/webpack) pick them up.
-  // Everything Vite-specific stays under `vite` — unplugin merges it onto the
-  // Vite plugin via `Object.assign`, so behavior under Vite is unchanged.
-  const unpluginFactory: UnpluginFactory<undefined> = () => ({
+  const transformPlugin: Plugin = {
     name: 'vite-plugin-experimental-storybook-devtools',
     enforce: 'pre',
-    vite: {
     configResolved(config) {
       isServe = config.command === 'serve'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
@@ -392,7 +249,7 @@ export function createComponentHighlighterPlugin(
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push(
         'vite-plugin-experimental-storybook-devtools > @testing-library/dom',
-        'vite-plugin-experimental-storybook-devtools > @testing-library/dom > aria-query',
+        'aria-query',
       )
 
       // The client modules above are excluded from optimization, so Vite never
@@ -405,7 +262,6 @@ export function createComponentHighlighterPlugin(
         'nanoevents',
         '@medv/finder',
         'dom-accessibility-api',
-        '@vitejs/devtools-kit/client',
       )
 
       if (framework.name === 'react') {
@@ -512,7 +368,7 @@ export function createComponentHighlighterPlugin(
       }
     },
     configureServer(srv) {
-      server = srv
+      state.server = srv
 
       if (fs.existsSync(runtimeHelperSourcePath)) {
         srv.watcher.add(runtimeHelperSourcePath)
@@ -520,980 +376,6 @@ export function createComponentHighlighterPlugin(
       if (fs.existsSync(runtimeModuleSourcePath)) {
         srv.watcher.add(runtimeModuleSourcePath)
       }
-
-      // ── Middleware: coverage data ──────────────────────────────────
-      srv.middlewares.use('/__component-highlighter/coverage', (_req, res) => {
-        const coverage = computeCoverage(
-          transformedComponents,
-          coverageCwd || process.cwd(),
-          storiesDir,
-        )
-        res.setHeader('Content-Type', 'application/json')
-        res.end(JSON.stringify(coverage))
-      })
-
-      // ── Middleware: Storybook status check ────────────────────────
-      srv.middlewares.use(
-        '/__component-highlighter/storybook-status',
-        async (_req, res) => {
-          try {
-            const r = await fetch(storybookUrl, {
-              signal: AbortSignal.timeout(3000),
-            })
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ running: r.ok }))
-          } catch {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ running: false }))
-          }
-        },
-      )
-
-      // ── Middleware: proxy Storybook index.json ────────────────────
-      srv.middlewares.use(
-        '/__component-highlighter/storybook-index',
-        async (_req, res) => {
-          try {
-            const indexUrl = new URL('/index.json', storybookUrl).href
-            const r = await fetch(indexUrl, {
-              signal: AbortSignal.timeout(5000),
-            })
-            const data = await r.text()
-            res.setHeader('Content-Type', 'application/json')
-            res.end(data)
-          } catch {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ v: 0, entries: {} }))
-          }
-        },
-      )
-
-      // ── Middleware: start Storybook via terminals API ─────────────
-      srv.middlewares.use(
-        '/__component-highlighter/start-storybook',
-        async (_req, res) => {
-          res.setHeader('Content-Type', 'application/json')
-
-          if (storybookSession) {
-            res.end(JSON.stringify({ started: true, alreadyRunning: true }))
-            return
-          }
-
-          if (!devtoolsTerminals) {
-            res.end(
-              JSON.stringify({
-                started: false,
-                error: 'Terminals API not available',
-              }),
-            )
-            return
-          }
-
-          try {
-            storybookSession = await devtoolsTerminals.startChildProcess(
-              {
-                command: 'npx',
-                args: [
-                  'storybook',
-                  'dev',
-                  '-p',
-                  new URL(storybookUrl).port || '6006',
-                  '--no-open',
-                ],
-                cwd: coverageCwd || process.cwd(),
-              },
-              {
-                id: 'storybook-dev',
-                title: 'Storybook',
-                icon: 'ph:book-duotone',
-              },
-            )
-
-            // Capture stdout/stderr into the log buffer
-            const cp = storybookSession.getChildProcess()
-            if (cp?.stdout) {
-              cp.stdout.on('data', (chunk: Buffer) => {
-                const lines = chunk.toString().split('\n')
-                for (const line of lines) {
-                  if (line) {
-                    terminalLogs.push(line)
-                    if (terminalLogs.length > MAX_LOG_LINES) {
-                      terminalLogs.shift()
-                    }
-                  }
-                }
-              })
-            }
-            if (cp?.stderr) {
-              cp.stderr.on('data', (chunk: Buffer) => {
-                const lines = chunk.toString().split('\n')
-                for (const line of lines) {
-                  if (line) {
-                    terminalLogs.push(line)
-                    if (terminalLogs.length > MAX_LOG_LINES) {
-                      terminalLogs.shift()
-                    }
-                  }
-                }
-              })
-            }
-            if (cp) {
-              cp.on('exit', (code: number | null) => {
-                terminalLogs.push(`[process exited with code ${code}]`)
-                storybookSession = null
-              })
-            }
-
-            res.end(JSON.stringify({ started: true }))
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            terminalLogs.push(`[error] Failed to start Storybook: ${msg}`)
-            res.end(JSON.stringify({ started: false, error: msg }))
-          }
-        },
-      )
-
-      // ── Middleware: terminal log output ────────────────────────────
-      srv.middlewares.use(
-        '/__component-highlighter/terminal-logs',
-        (req, res) => {
-          const url = new URL(req.url || '', 'http://localhost')
-          const since = parseInt(url.searchParams.get('since') || '0', 10)
-          const lines = terminalLogs.slice(since)
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ lines, total: terminalLogs.length }))
-        },
-      )
-
-      // ── Middleware: check if story files exist ─────────────────────
-      srv.middlewares.use(
-        '/__component-highlighter/check-story',
-        (req, res) => {
-          const url = new URL(req.url || '', 'http://localhost')
-          const componentPath = url.searchParams.get('componentPath')
-
-          if (!componentPath) {
-            res.statusCode = 400
-            res.end(
-              JSON.stringify({ error: 'Missing componentPath parameter' }),
-            )
-            return
-          }
-
-          // Check for story file
-          const componentDir = path.dirname(componentPath)
-          const componentFileName = path.basename(
-            componentPath,
-            path.extname(componentPath),
-          )
-
-          // Check both with and without storiesDir
-          const possiblePaths = [
-            path.join(componentDir, `${componentFileName}.stories.tsx`),
-            path.join(componentDir, `${componentFileName}.stories.ts`),
-            path.join(componentDir, `${componentFileName}.stories.jsx`),
-            path.join(componentDir, `${componentFileName}.stories.js`),
-          ]
-
-          if (storiesDir) {
-            possiblePaths.push(
-              path.join(
-                componentDir,
-                storiesDir,
-                `${componentFileName}.stories.tsx`,
-              ),
-              path.join(
-                componentDir,
-                storiesDir,
-                `${componentFileName}.stories.ts`,
-              ),
-              path.join(
-                componentDir,
-                storiesDir,
-                `${componentFileName}.stories.jsx`,
-              ),
-              path.join(
-                componentDir,
-                storiesDir,
-                `${componentFileName}.stories.js`,
-              ),
-            )
-          }
-
-          let storyPath: string | null = null
-          for (const p of possiblePaths) {
-            if (fs.existsSync(p)) {
-              storyPath = p
-              break
-            }
-          }
-
-          res.setHeader('Content-Type', 'application/json')
-          res.end(
-            JSON.stringify({
-              hasStory: !!storyPath,
-              storyPath,
-            }),
-          )
-        },
-      )
-    },
-    devtools: {
-      setup(ctx) {
-        // Upgrade to DevTools notifications when the Messages API is available
-        // (devtools-kit 0.3 renamed the `logs` host to `messages`).
-        if (ctx.messages) {
-          notifications = new DevToolsNotificationService(ctx.messages)
-        }
-
-        // Structured diagnostics: a coded catalog of the plugin's non-fatal
-        // detection gaps, surfaced through the DevTools diagnostics host instead
-        // of bare console warnings. Emitted from the transform hook.
-        if (ctx.diagnostics) {
-          const diagnostics = ctx.diagnostics.defineDiagnostics({
-            // Function form returns a clean URL for every code (the string form
-            // would append the lowercased code as a path segment).
-            docsBase: () =>
-              'https://github.com/yannbf/vite-plugin-experimental-storybook-devtools/blob/main/docs/REACT_PATTERNS.md',
-            codes: {
-              CH_TRANSFORM_FAILED: {
-                why: (p: { file: string; detail: string }) =>
-                  `Failed to instrument ${p.file} for component detection: ${p.detail}`,
-                fix: 'The file was served unmodified, so its components have no stories/highlights. Check that it parses as valid TS/JSX.',
-              },
-              CH_UNSUPPORTED_PATTERN: {
-                why: (p: { name: string; detail: string }) =>
-                  `Component "${p.name}" can’t be detected: ${p.detail}`,
-                fix: 'See the supported authoring-pattern matrix for the recommended form.',
-              },
-            },
-          })
-          ctx.diagnostics.register(diagnostics)
-          chDiagnostics = diagnostics as ChDiagnostics
-        }
-
-        // The kit's `defineRpcFunction` types its definitions with
-        // `ViteDevToolsNodeContext`, whereas `ctx.rpc.register` is typed for the
-        // base `DevframeNodeContext` — and the definition's optional props trip
-        // `exactOptionalPropertyTypes`. Both are type-only mismatches (the
-        // shapes are runtime-identical), so centralize the single cast here
-        // rather than scattering `as` across every register call site.
-        const registerRpc = (def: unknown) =>
-          ctx.rpc.register(
-            def as Parameters<typeof ctx.rpc.register>[0],
-          )
-
-        // Store terminals reference for use by middleware
-        devtoolsTerminals = ctx.terminals
-
-        // The kit advertises Vite's client-module-resolution template
-        // (`/@id/{specifier}`, the documented Vite convention) only when it
-        // creates the devtools hub — which happens after every plugin's
-        // devtools setup has run. Registering a bare-specifier action dock
-        // before that trips the hub's DF8111 "unresolvable client script"
-        // warning even though the template is advertised by the time any
-        // browser connects. Pre-seeding the same value makes the
-        // registration-time check pass; the hub later overwrite-assigns the
-        // identical template.
-        {
-          const kitCtx = ctx as unknown as {
-            viteServer?: unknown
-            staticConfig: { dock?: { clientModuleResolution?: string } }
-          }
-          if (kitCtx.viteServer) {
-            kitCtx.staticConfig.dock ??= {
-              clientModuleResolution: '/@id/{specifier}',
-            }
-          }
-        }
-
-        // Register dock entry for component highlighter UI
-        ctx.docks.register(
-          defineDockEntry<DevToolsViewAction>({
-            id: devtoolsDockId,
-            title: 'Component Highlighter',
-            icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>",
-            type: 'action',
-            action: {
-              importFrom:
-                'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
-              importName: 'default',
-            },
-          }),
-        )
-
-        // Merged Storybook + Coverage panel (iframe dock served via hostStatic)
-        if (ctx.mode === 'dev') {
-          const panelDist = path.join(packageRoot, 'dist', 'panel')
-          ctx.views.hostStatic('/.storybook-devtools/', panelDist)
-
-          ctx.docks.register(
-            defineDockEntry<DevToolsViewIframe>({
-              id: 'storybook-devtools-panel',
-              title: 'Storybook',
-              icon: "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><g transform='translate(1.49,0)'><path d='M0.424547 12.6139L0.000492865 1.31474C-0.013512 0.941579 0.272618 0.625325 0.645319 0.602032L10.256 0.00136365C10.6354 -0.0223467 10.9621 0.265968 10.9858 0.645333C10.9867 0.659626 10.9872 0.673944 10.9872 0.688265V13.0006C10.9872 13.3808 10.679 13.6889 10.2989 13.6889C10.2886 13.6889 10.2783 13.6887 10.2681 13.6882L1.08142 13.2756C0.723641 13.2595 0.437978 12.9717 0.424547 12.6139Z' fill='%23FF4785'/></g><g transform='translate(4.32,0.05)'><path d='M2.8709 2.41309C4.66253 2.41309 5.64141 3.37189 5.64141 5.19531C5.39918 5.38328 3.59731 5.51136 3.59551 5.24414C3.63363 4.2224 3.17581 4.17676 2.92168 4.17676C2.6802 4.17684 2.27422 4.25082 2.27422 4.79785C2.27474 6.1477 5.75567 6.07536 5.75567 8.7998C5.75543 10.3321 4.50986 11.1787 2.92168 11.1787C1.28271 11.1786 -0.149264 10.5148 0.0125021 8.21582C0.0781737 7.94653 2.15713 8.01044 2.15996 8.21582C2.13456 9.16434 2.35021 9.4442 2.89629 9.44434C3.31561 9.44434 3.50664 9.21248 3.50664 8.82324C3.50588 7.43713 0.0764084 7.38812 0.0759787 4.84668C0.0759787 3.38715 1.07952 2.41323 2.8709 2.41309ZM6.72637 1.58008C6.72811 1.63655 6.68328 1.68357 6.62676 1.68555C6.60253 1.68637 6.57842 1.67907 6.55938 1.66406L6.05059 1.2627L5.44805 1.71973C5.40288 1.75399 5.33876 1.74536 5.30449 1.7002C5.29007 1.68118 5.28299 1.65764 5.28399 1.63379L5.34844 0.0830078L6.67071 0L6.72637 1.58008Z' fill='white'/></g></svg>",
-              type: 'iframe',
-              url:
-                '/.storybook-devtools/?sbUrl=' +
-                encodeURIComponent(storybookUrl),
-            }),
-          )
-        }
-
-        // ─── Shared state initialization ─────────────────────────────────
-
-        ctx.rpc.sharedState
-          .get('component-highlighter:registry', {
-            initialValue: [] as SerializedRegistryInstance[],
-          })
-          .then((s) => {
-            registryState = s
-          })
-
-        ctx.rpc.sharedState
-          .get('component-highlighter:pending-visit', {
-            initialValue: {
-              value: null as {
-                relativeFilePath: string
-                preferredStoryName?: string
-              } | null,
-            },
-          })
-          .then((s) => {
-            pendingVisitState = s
-          })
-
-        ctx.rpc.sharedState
-          .get('component-highlighter:pending-tab', {
-            initialValue: { value: null as string | null },
-          })
-          .then((s) => {
-            pendingTabState = s
-          })
-
-        ctx.rpc.sharedState.get('component-highlighter:highlight-active', {
-          initialValue: { value: false },
-        })
-
-        ctx.rpc.sharedState.get('component-highlighter:selected-component', {
-          initialValue: {
-            value: null as SerializedRegistryInstance | null,
-          },
-        })
-
-        ctx.rpc.sharedState.get(
-          'component-highlighter:highlighter-tab-active',
-          {
-            initialValue: { value: false },
-          },
-        )
-
-        // Register RPC functions for communication with the client
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:highlight-target',
-            type: 'action',
-            setup: () => ({
-              handler: (data: ComponentHighlightData | null) => {
-                logDebug('Highlight target:', data)
-              },
-            }),
-          }),
-        )
-
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:toggle-overlay',
-            type: 'action',
-            setup: () => ({
-              handler: (data: { enabled: boolean }) => {
-                logDebug('Toggle overlay:', data.enabled)
-              },
-            }),
-          }),
-        )
-
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:create-story',
-            type: 'action',
-            setup: () => ({
-              handler: async (data: ComponentStoryData) => {
-                logDebug(
-                  'Create story:',
-                  data.meta.componentName,
-                  'name:',
-                  data.storyName,
-                )
-
-                // Generate and write the story file
-                if (writeStoryFiles && data.serializedProps) {
-                  try {
-                    // Convert component registry from object to Map
-                    const registryMap = new Map<string, string>()
-                    if (data.componentRegistry) {
-                      for (const [name, filePath] of Object.entries(
-                        data.componentRegistry,
-                      )) {
-                        registryMap.set(name, filePath)
-                      }
-                    }
-                    // Augment/fallback from the server's synced registry so
-                    // referenced components (e.g. <TaskCard> inside
-                    // <TaskList>'s children) resolve to real imports even when
-                    // the caller didn't pass a componentRegistry — e.g.
-                    // coverage "Generate all" and the command palette. Without
-                    // this they'd be replaced with a "not exported" div.
-                    try {
-                      const all = (registryState?.value() ??
-                        []) as SerializedRegistryInstance[]
-                      for (const inst of all) {
-                        const n = inst?.meta?.componentName
-                        const fp = inst?.meta?.filePath
-                        if (n && fp && !registryMap.has(n)) {
-                          registryMap.set(n, fp)
-                        }
-                      }
-                    } catch {
-                      // registry not ready — fall back to caller-provided map
-                    }
-
-                    // Determine the output path
-                    const componentDir = path.dirname(data.meta.filePath)
-                    const componentFileName = path.basename(
-                      data.meta.filePath,
-                      path.extname(data.meta.filePath),
-                    )
-                    const storyExtension =
-                      framework.name === 'vue' ? 'ts' : 'tsx'
-                    let outputPath = path.join(
-                      componentDir,
-                      `${componentFileName}.stories.${storyExtension}`,
-                    )
-                    if (storiesDir) {
-                      outputPath = path.join(
-                        componentDir,
-                        storiesDir,
-                        `${componentFileName}.stories.${storyExtension}`,
-                      )
-                    }
-
-                    // Check if file already exists
-                    let existingContent: string | undefined
-                    if (fs.existsSync(outputPath)) {
-                      existingContent = fs.readFileSync(outputPath, 'utf-8')
-                      logDebug(
-                        `Appending to existing story file: ${outputPath}`,
-                      )
-                    }
-
-                    // Dynamically import the framework-specific story generator
-                    let generateStory: typeof import('./frameworks/react/story-generator').generateStory
-
-                    if (framework.name === 'react') {
-                      const { generateStory: generateReactStory } =
-                        await import('./frameworks/react/story-generator')
-                      generateStory = generateReactStory
-                    } else if (framework.name === 'vue') {
-                      const { generateStory: generateVueStory } =
-                        await import('./frameworks/vue/story-generator')
-                      generateStory = generateVueStory
-                    } else {
-                      throw new Error(
-                        `Unsupported framework: ${framework.name}`,
-                      )
-                    }
-
-                    const story = generateStory({
-                      meta: {
-                        componentName: data.meta.componentName,
-                        filePath: data.meta.filePath,
-                        relativeFilePath:
-                          data.meta.relativeFilePath ??
-                          path.relative(process.cwd(), data.meta.filePath),
-                        sourceId: data.meta.sourceId,
-                        isDefaultExport: data.meta.isDefaultExport ?? false,
-                      },
-                      props: data.serializedProps,
-                      componentRegistry: registryMap,
-                      ...(data.storyName ? { storyName: data.storyName } : {}),
-                      ...(existingContent ? { existingContent } : {}),
-                      ...(data.playFunction
-                        ? { playFunction: data.playFunction }
-                        : {}),
-                      ...(data.playImports
-                        ? { playImports: data.playImports }
-                        : {}),
-                    })
-
-                    if (data.playFunction?.length) {
-                      logDebug(
-                        `Story includes a play function with ${data.playFunction.length} lines`,
-                      )
-                    }
-
-                    // Ensure the directory exists
-                    const outputDir = path.dirname(outputPath)
-                    if (!fs.existsSync(outputDir)) {
-                      fs.mkdirSync(outputDir, { recursive: true })
-                    }
-
-                    // Write the story file
-                    fs.writeFileSync(outputPath, story.content, 'utf-8')
-                    logDebug(
-                      `Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
-                    )
-
-                    const verb = existingContent ? 'added to' : 'created in'
-                    notifications.notify({
-                      message: `Story "${story.storyName}" ${verb} ${path.basename(outputPath)}`,
-                      level: 'success',
-                      toast: true,
-                      autoDismissMs: 4000,
-                      filePosition: { file: outputPath, line: 1 },
-                      category: 'story-creation',
-                    })
-
-                    // Notify the client about the created file
-                    if (server) {
-                      server.ws.send({
-                        type: 'custom',
-                        event: 'component-highlighter:story-created',
-                        data: {
-                          filePath: outputPath,
-                          componentName: data.meta.componentName,
-                          componentPath: data.meta.filePath,
-                          relativeFilePath:
-                            data.meta.relativeFilePath ??
-                            path.relative(process.cwd(), data.meta.filePath),
-                          storyName: story.storyName,
-                          isAppend: !!existingContent,
-                          skipNavigation: !!data.skipNavigation,
-                        },
-                      })
-                    }
-
-                    // Coverage dashboard auto-refreshes via client-side RPC polling
-                  } catch (error) {
-                    notifications.notify({
-                      message: `Failed to create story for ${data.meta.componentName}`,
-                      level: 'error',
-                      toast: true,
-                      description:
-                        error instanceof Error ? error.message : String(error),
-                      category: 'story-creation',
-                    })
-
-                    // Still try to notify the client so the button resets
-                    if (server) {
-                      server.ws.send({
-                        type: 'custom',
-                        event: 'component-highlighter:story-created',
-                        data: {
-                          filePath: '',
-                          componentName: data.meta.componentName,
-                          componentPath: data.meta.filePath,
-                          storyName: data.storyName ?? 'Unknown',
-                          isAppend: false,
-                        },
-                      })
-                    }
-                  }
-                }
-              },
-            }),
-          }),
-        )
-
-        // Coverage dashboard — RPC to fetch coverage data
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:get-coverage',
-            type: 'query',
-            setup: () => ({
-              handler: () => {
-                const coverage = computeCoverage(
-                  transformedComponents,
-                  ctx.cwd,
-                  storiesDir,
-                )
-                return coverage
-              },
-            }),
-          }),
-        )
-
-        // ─── Registry sync & panel→client relay RPCs ───────────────────
-
-        // Client pushes incremental diffs; server applies them to shared state
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:push-registry-diff',
-            type: 'action',
-            setup: () => ({
-              handler: (diff: RegistryDiff) => {
-                if (!registryState) return
-                registryState.mutate((draft: SerializedRegistryInstance[]) => {
-                  // Full sync: replace the entire registry
-                  if (diff.fullSync) {
-                    draft.length = 0
-                    for (const inst of diff.added) {
-                      draft.push(inst)
-                    }
-                    return
-                  }
-                  // Remove
-                  for (const id of diff.removed) {
-                    const idx = draft.findIndex((inst) => inst.id === id)
-                    if (idx !== -1) draft.splice(idx, 1)
-                  }
-                  // Add (deduplicate by id to prevent stale re-pushes)
-                  for (const inst of diff.added) {
-                    const existing = draft.findIndex((i) => i.id === inst.id)
-                    if (existing !== -1) {
-                      draft[existing] = inst
-                    } else {
-                      draft.push(inst)
-                    }
-                  }
-                  // Update
-                  for (const inst of diff.updated) {
-                    const idx = draft.findIndex((i) => i.id === inst.id)
-                    if (idx !== -1) draft[idx] = inst
-                    else draft.push(inst)
-                  }
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: scroll to a component
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:scroll-to-component',
-            type: 'action',
-            setup: () => ({
-              handler: (data: { componentName: string }) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-scroll-to-component',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: apply a live prop override
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:set-prop',
-            type: 'action',
-            setup: () => ({
-              handler: (data: {
-                id: string
-                path: Array<string | number>
-                payload: { kind: string; text: string }
-              }) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-set-prop',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: reset a prop to its original value
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:reset-prop',
-            type: 'action',
-            setup: () => ({
-              handler: (data: {
-                id: string
-                path: Array<string | number>
-              }) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-reset-prop',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: highlight coverage instances on the app page
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:highlight-coverage-instances',
-            type: 'action',
-            setup: () => ({
-              handler: (
-                data: { componentName: string; hasStory: boolean } | null,
-              ) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-highlight-coverage',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: batch highlight coverage instances (Preview button)
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:highlight-coverage-batch',
-            type: 'action',
-            setup: () => ({
-              handler: (
-                data: Array<{ componentName: string; hasStory: boolean }>,
-              ) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-highlight-coverage-batch',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Panel → server → client: toggle highlight mode
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:set-highlight-mode',
-            type: 'action',
-            setup: () => ({
-              handler: (data: { enabled: boolean }) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-set-highlight-mode',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Client/overlay → server → panel: navigate to a story
-        // Stores as pending visit AND broadcasts so the panel can pick it up
-        // either via client RPC handler or by polling the pending-visit endpoint
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:visit-story',
-            type: 'action',
-            setup: () => ({
-              handler: (data: {
-                relativeFilePath: string
-                preferredStoryName?: string
-              }) => {
-                if (pendingVisitState) {
-                  pendingVisitState.mutate((s: { value: unknown }) => {
-                    s.value = data
-                  })
-                }
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-visit-story',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Client/overlay → server → panel: select a component in the highlighter panel
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:select-component',
-            type: 'action',
-            setup: () => ({
-              handler: (data: SerializedRegistryInstance | null) => {
-                ctx.rpc.broadcast({
-                  method: 'component-highlighter:do-select-component',
-                  args: [data],
-                })
-              },
-            }),
-          }),
-        )
-
-        // Client → server: show a toast notification
-        registerRpc(
-          defineRpcFunction({
-            name: 'component-highlighter:notify',
-            type: 'action',
-            setup: () => ({
-              handler: (data: { message: string; level?: string }) => {
-                const level =
-                  (data.level as 'info' | 'warn' | 'error' | 'success') ||
-                  'info'
-                notifications.notify({
-                  message: data.message,
-                  level,
-                  toast: true,
-                  autoDismissMs: 3000,
-                  category: 'component-highlighter',
-                })
-              },
-            }),
-          }),
-        )
-
-        // ─── Helper: open a specific tab in the panel ──────────────────
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        function openPanelTab(devtoolsCtx: any, tab: string) {
-          // Store in shared state so the panel picks it up on load or via subscription
-          if (pendingTabState) {
-            pendingTabState.mutate((s: { value: string | null }) => {
-              s.value = tab
-            })
-          }
-          // Tell the client to switch the dock to the panel (if not already open)
-          devtoolsCtx.rpc.broadcast({
-            method: 'component-highlighter:do-open-panel-tab',
-            args: [{ tab }],
-          })
-          // Tell the panel directly to switch tabs (if already open)
-          devtoolsCtx.rpc.broadcast({
-            method: 'component-highlighter:do-switch-tab',
-            args: [{ tab }],
-          })
-        }
-
-        // ─── Commands (Mod+K palette) ──────────────────────────────────
-
-        ctx.commands.register(
-          defineCommand({
-            id: 'storybook:toggle-highlight-mode',
-            title: 'Toggle Component Highlighter',
-            description: 'Start or stop inspecting components on the page',
-            icon: 'ph:crosshair',
-            category: 'Storybook',
-            keybindings: [{ key: 'Mod+Shift+H' }],
-            handler: () => {
-              ctx.rpc.broadcast({
-                method: 'component-highlighter:do-set-highlight-mode',
-                args: [{ enabled: true, toggle: true }],
-              })
-            },
-          }),
-        )
-
-        ctx.commands.register(
-          defineCommand({
-            id: 'storybook:create-missing-stories',
-            title: 'Write Stories for Missing Components',
-            description:
-              'Generate story files for all visible components without stories',
-            icon: 'ph:file-plus-duotone',
-            category: 'Storybook',
-            handler: async () => {
-              // Use the registry snapshot + coverage data to find uncovered visible components
-              const coverage = computeCoverage(
-                transformedComponents,
-                ctx.cwd,
-                storiesDir,
-              )
-              const uncovered = coverage.entries.filter((e) => !e.hasStory)
-              if (uncovered.length === 0) {
-                notifications.notify({
-                  message: 'All components already have stories',
-                  level: 'success',
-                  toast: true,
-                  autoDismissMs: 3000,
-                  category: 'story-creation',
-                })
-                return
-              }
-
-              // Find visible uncovered components in the registry snapshot
-              let storiesCreated = 0
-              for (const entry of uncovered) {
-                // Find a matching instance in the registry
-                const allInstances = registryState?.value() ?? []
-                const instances = (
-                  allInstances as SerializedRegistryInstance[]
-                ).filter(
-                  (inst) =>
-                    inst.meta.filePath === entry.filePath && inst.isConnected,
-                )
-                if (instances.length === 0) continue
-
-                // Deduplicate by props fingerprint
-                const seen = new Set<string>()
-                for (const inst of instances) {
-                  const fp = inst.serializedProps
-                    ? JSON.stringify(inst.serializedProps)
-                    : '{}'
-                  if (seen.has(fp)) continue
-                  seen.add(fp)
-
-                  // Invoke the create-story handler directly
-                  await (ctx.rpc.invokeLocal as any)(
-                    'component-highlighter:create-story',
-                    {
-                      meta: inst.meta,
-                      serializedProps: inst.serializedProps,
-                      skipNavigation: true,
-                    },
-                  )
-                  storiesCreated++
-                }
-              }
-
-              notifications.notify({
-                message:
-                  storiesCreated > 0
-                    ? `Created stories for ${storiesCreated} component${storiesCreated === 1 ? '' : 's'}`
-                    : 'No visible uncovered components found — navigate to a page with components first',
-                level: storiesCreated > 0 ? 'success' : 'info',
-                toast: true,
-                autoDismissMs: 4000,
-                category: 'story-creation',
-              })
-
-              // Open the coverage tab so the user can see the updated results
-              openPanelTab(ctx, 'coverage')
-            },
-          }),
-        )
-
-        ctx.commands.register(
-          defineCommand({
-            id: 'storybook:see-coverage',
-            title: 'See Component Coverage',
-            description:
-              'Open the coverage dashboard showing story status for all components',
-            icon: 'ph:chart-bar-duotone',
-            category: 'Storybook',
-            handler: () => {
-              openPanelTab(ctx, 'coverage')
-            },
-          }),
-        )
-
-        ctx.commands.register(
-          defineCommand({
-            id: 'storybook:open-docs',
-            title: 'Open Storybook Docs',
-            description: 'Open the Storybook documentation website',
-            icon: 'ph:book-open-duotone',
-            category: 'Storybook',
-            handler: () => {
-              // Server-side commands can't open browser tabs directly,
-              // but we can broadcast to the client to do it
-              ctx.rpc.broadcast({
-                method: 'component-highlighter:do-open-url',
-                args: [{ url: 'https://storybook.js.org/docs' }],
-              })
-            },
-          }),
-        )
-
-        // Store cwd for coverage computation
-        coverageCwd = ctx.cwd
-      },
     },
     transformIndexHtml() {
       if (!isServe && !force) return
@@ -1510,22 +392,6 @@ export function createComponentHighlighterPlugin(
           injectTo: 'head-prepend',
         },
       ]
-    },
-    handleHotUpdate(ctx) {
-      if (ctx.file === runtimeHelperSourcePath) {
-        const mod = ctx.server.moduleGraph.getModuleById(
-          resolvedRuntimeHelperVirtualId,
-        )
-        return mod ? [mod] : []
-      }
-      if (ctx.file === runtimeModuleSourcePath) {
-        const mod = ctx.server.moduleGraph.getModuleById(
-          '\0' + framework.virtualModuleId,
-        )
-        return mod ? [mod] : []
-      }
-      return
-    },
     },
     resolveId(id) {
       // HMR invalidation appends ?t=<timestamp> to re-fetched imports —
@@ -1547,8 +413,8 @@ export function createComponentHighlighterPlugin(
         const shouldUseSource =
           isServe && fs.existsSync(runtimeHelperSourcePath)
 
-        if (shouldUseSource && server) {
-          const transformed = await server.transformRequest(
+        if (shouldUseSource && state.server) {
+          const transformed = await state.server.transformRequest(
             runtimeHelperSourcePath,
           )
           if (transformed?.code) {
@@ -1600,8 +466,8 @@ export function createComponentHighlighterPlugin(
               'virtual:component-highlighter/runtime-helpers',
             )
 
-        if (shouldUseSource && server) {
-          const transformed = await server.transformRequest(
+        if (shouldUseSource && state.server) {
+          const transformed = await state.server.transformRequest(
             runtimeModuleSourcePath,
           )
           if (transformed?.code) {
@@ -1633,10 +499,7 @@ export function createComponentHighlighterPlugin(
       }
       return null
     },
-    // `options` is Vite's transform options (incl. `ssr`), forwarded by
-    // unplugin at runtime but absent from its 2-arg hook type — hence the
-    // optional 3rd param. On non-Vite bundlers it is simply `undefined`.
-    transform(code: string, id: string, options?: { ssr?: boolean }) {
+    transform(code, id, options) {
       // Only transform in dev/serve mode unless force is enabled
       if (!isServe && !force) {
         return
@@ -1691,17 +554,246 @@ export function createComponentHighlighterPlugin(
       // Track transformed components for coverage
       if (result) {
         const componentName = path.basename(id, path.extname(id))
-        transformedComponents.set(componentName, id)
+        state.transformedComponents.set(componentName, id)
 
         // Coverage dashboard auto-refreshes via client-side RPC polling
       }
 
       return result
     },
+    handleHotUpdate(ctx) {
+      if (ctx.file === runtimeHelperSourcePath) {
+        const mod = ctx.server.moduleGraph.getModuleById(
+          resolvedRuntimeHelperVirtualId,
+        )
+        return mod ? [mod] : []
+      }
+      if (ctx.file === runtimeModuleSourcePath) {
+        const mod = ctx.server.moduleGraph.getModuleById(
+          '\0' + framework.virtualModuleId,
+        )
+        return mod ? [mod] : []
+      }
+      return
+    },
+  }
+
+  const definition = createStorybookDevframe({
+    framework,
+    storybookUrl,
+    writeStoryFiles,
+    storiesDir,
+    logDebug,
+    state,
   })
 
-  // Under Vite, unplugin reconstitutes a single plugin object (portable hooks
-  // + the `vite` escape hatch merged via Object.assign), so this preserves the
-  // exact Vite plugin behavior/shape the framework entry points expect.
-  return createUnplugin(unpluginFactory).vite() as unknown as Plugin
+  // Kit-only setup: docks, commands, terminals, messages, diagnostics — none
+  // of these are part of the portable `DevframeNodeContext`, so they're wired
+  // here (against the kit-augmented `KitNodeContext`) rather than in the
+  // devframe's own `setup(ctx)`. Runs after the devframe-level setup above.
+  const kitSetup = (ctx: KitNodeContext) => {
+    // Upgrade to DevTools notifications when the Messages API is available.
+    if (ctx.messages) {
+      state.notifications = new DevToolsNotificationService(ctx.messages)
+    }
+
+    // Structured diagnostics: a coded catalog of the plugin's non-fatal
+    // detection gaps, surfaced through the DevTools diagnostics host instead
+    // of bare console warnings. Emitted from the transform hook.
+    if (ctx.diagnostics) {
+      const diagnostics = ctx.diagnostics.defineDiagnostics({
+        // Function form returns a clean URL for every code (the string form
+        // would append the lowercased code as a path segment).
+        docsBase: () =>
+          'https://github.com/yannbf/vite-plugin-experimental-storybook-devtools/blob/main/docs/REACT_PATTERNS.md',
+        codes: {
+          CH_TRANSFORM_FAILED: {
+            why: (p: { file: string; detail: string }) =>
+              `Failed to instrument ${p.file} for component detection: ${p.detail}`,
+            fix: 'The file was served unmodified, so its components have no stories/highlights. Check that it parses as valid TS/JSX.',
+          },
+          CH_UNSUPPORTED_PATTERN: {
+            why: (p: { name: string; detail: string }) =>
+              `Component "${p.name}" can’t be detected: ${p.detail}`,
+            fix: 'See the supported authoring-pattern matrix for the recommended form.',
+          },
+        },
+      })
+      ctx.diagnostics.register(diagnostics)
+      chDiagnostics = diagnostics as ChDiagnostics
+    }
+
+    // Store terminals reference for the start-storybook RPC handler
+    state.devtoolsTerminals = ctx.terminals
+
+    // Register dock entry for component highlighter UI
+    ctx.docks.register(
+      defineDockEntry<DevToolsViewAction>({
+        id: devtoolsDockId,
+        title: 'Component Highlighter',
+        icon: COMPONENT_HIGHLIGHTER_ICON,
+        type: 'action',
+        action: {
+          importFrom:
+            'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
+          importName: 'default',
+        },
+      }),
+    )
+
+    // ─── Helper: open a specific tab in the panel ──────────────────
+
+    function openPanelTab(tab: string) {
+      // Store in shared state so the panel picks it up on load or via subscription
+      if (state.pendingTabState) {
+        state.pendingTabState.mutate(() => tab)
+      }
+      // Tell the client to switch the dock to the panel (if not already open)
+      ctx.rpc.broadcast({
+        method: 'component-highlighter:do-open-panel-tab',
+        args: [{ tab }],
+      })
+      // Tell the panel directly to switch tabs (if already open)
+      ctx.rpc.broadcast({
+        method: 'component-highlighter:do-switch-tab',
+        args: [{ tab }],
+      })
+    }
+
+    // ─── Commands (Mod+K palette) ──────────────────────────────────
+
+    ctx.commands.register(
+      defineCommand({
+        id: 'storybook:toggle-highlight-mode',
+        title: 'Toggle Component Highlighter',
+        description: 'Start or stop inspecting components on the page',
+        icon: 'ph:crosshair',
+        category: 'Storybook',
+        keybindings: [{ key: 'Mod+Shift+H' }],
+        handler: () => {
+          ctx.rpc.broadcast({
+            method: 'component-highlighter:do-set-highlight-mode',
+            args: [{ enabled: true, toggle: true }],
+          })
+        },
+      }),
+    )
+
+    ctx.commands.register(
+      defineCommand({
+        id: 'storybook:create-missing-stories',
+        title: 'Write Stories for Missing Components',
+        description:
+          'Generate story files for all visible components without stories',
+        icon: 'ph:file-plus-duotone',
+        category: 'Storybook',
+        handler: async () => {
+          // Use the registry snapshot + coverage data to find uncovered visible components
+          const coverage = computeCoverage(
+            state.transformedComponents,
+            ctx.cwd,
+            storiesDir,
+          )
+          const uncovered = coverage.entries.filter((e) => !e.hasStory)
+          if (uncovered.length === 0) {
+            state.notifications.notify({
+              message: 'All components already have stories',
+              level: 'success',
+              toast: true,
+              autoDismissMs: 3000,
+              category: 'story-creation',
+            })
+            return
+          }
+
+          // Find visible uncovered components in the registry snapshot
+          let storiesCreated = 0
+          for (const entry of uncovered) {
+            // Find a matching instance in the registry
+            const allInstances = state.registryState?.value() ?? []
+            const instances = (
+              allInstances as SerializedRegistryInstance[]
+            ).filter(
+              (inst) =>
+                inst.meta.filePath === entry.filePath && inst.isConnected,
+            )
+            if (instances.length === 0) continue
+
+            // Deduplicate by props fingerprint
+            const seen = new Set<string>()
+            for (const inst of instances) {
+              const fp = inst.serializedProps
+                ? JSON.stringify(inst.serializedProps)
+                : '{}'
+              if (seen.has(fp)) continue
+              seen.add(fp)
+
+              // Invoke the create-story handler directly
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (ctx.rpc.invokeLocal as any)(
+                'component-highlighter:create-story',
+                {
+                  meta: inst.meta,
+                  serializedProps: inst.serializedProps,
+                  skipNavigation: true,
+                },
+              )
+              storiesCreated++
+            }
+          }
+
+          state.notifications.notify({
+            message:
+              storiesCreated > 0
+                ? `Created stories for ${storiesCreated} component${storiesCreated === 1 ? '' : 's'}`
+                : 'No visible uncovered components found — navigate to a page with components first',
+            level: storiesCreated > 0 ? 'success' : 'info',
+            toast: true,
+            autoDismissMs: 4000,
+            category: 'story-creation',
+          })
+
+          // Open the coverage tab so the user can see the updated results
+          openPanelTab('coverage')
+        },
+      }),
+    )
+
+    ctx.commands.register(
+      defineCommand({
+        id: 'storybook:see-coverage',
+        title: 'See Component Coverage',
+        description:
+          'Open the coverage dashboard showing story status for all components',
+        icon: 'ph:chart-bar-duotone',
+        category: 'Storybook',
+        handler: () => {
+          openPanelTab('coverage')
+        },
+      }),
+    )
+
+    ctx.commands.register(
+      defineCommand({
+        id: 'storybook:open-docs',
+        title: 'Open Storybook Docs',
+        description: 'Open the Storybook documentation website',
+        icon: 'ph:book-open-duotone',
+        category: 'Storybook',
+        handler: () => {
+          // Server-side commands can't open browser tabs directly,
+          // but we can broadcast to the client to do it
+          ctx.rpc.broadcast({
+            method: 'component-highlighter:do-open-url',
+            args: [{ url: 'https://storybook.js.org/docs' }],
+          })
+        },
+      }),
+    )
+  }
+
+  return [
+    transformPlugin,
+    createPluginFromDevframe(definition, { setup: kitSetup }),
+  ]
 }

@@ -34,21 +34,14 @@ export function getNuxtDevToolsHookScript(): string {
  * transformIndexHtml hook, so @vitejs/devtools cannot inject its embedded dock
  * script by itself. Add this module script to Nuxt's head in dev.
  *
- * devframe 0.9 / devtools-kit 0.6 replaced the old
- * `virtual:vite-devtools-injection` module with the hub-ui embedded bootstrap
- * served at `<mountPath>embedded.js`. Mirror @vitejs/devtools' own injection
- * plugin: create the module `<script>` at runtime so the host build never
- * processes the hub-served asset (keeps its `import.meta.url`-relative fetches
- * intact).
+ * Mirrors the inline bootstrap `@vitejs/devtools` injects into plain-Vite
+ * HTML: a runtime-created `<script type="module">` pointing at the hub-served
+ * `embedded.js`. The dock bootstrap is served by the devtools middleware at a
+ * fixed mount path, not from Nuxt's build-assets directory.
  */
-export function getNuxtViteDevToolsInjectionScript(
-  mountPath: string = DEVTOOLS_MOUNT_PATH,
-): string {
-  const base = mountPath.endsWith('/') ? mountPath : `${mountPath}/`
-  const src = `${base}embedded.js`
-  return `const s = document.createElement('script'); s.type = 'module'; s.src = ${JSON.stringify(
-    src,
-  )}; document.body.appendChild(s);`
+export function getNuxtViteDevToolsInjectionScript(): string {
+  const src = `${DEVTOOLS_MOUNT_PATH}embedded.js`
+  return `const s = document.createElement('script'); s.type = 'module'; s.src = ${JSON.stringify(src)}; document.body.appendChild(s);`
 }
 
 /**

@@ -30,7 +30,7 @@ yarn add vite-plugin-experimental-storybook-devtools
 
 This plugin requires:
 - `vite` >= 5.0.0
-- `@vitejs/devtools` >= 0.6.0 (devframe 0.9 core; the 0.3.x line is no longer supported)
+- `@vitejs/devtools` >= 0.6.0
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
 ## Quick Start
@@ -80,10 +80,12 @@ import { defineNuxtConfig } from 'nuxt/config'
 import componentHighlighter, {
   getNuxtDevToolsHookScript,
   getNuxtViteDevToolsInjectionScript,
+  viteDevToolsBridgeModule,
 } from 'vite-plugin-experimental-storybook-devtools/nuxt'
 
 export default defineNuxtConfig({
   ssr: true,
+  modules: [viteDevToolsBridgeModule],
   app: {
     head: {
       script: [
@@ -115,11 +117,14 @@ export default defineNuxtConfig({
 Nuxt SSR uses the Vue component runtime, but Nuxt does not rely on Vite's
 `transformIndexHtml` hook for its rendered HTML. Add the first script so the
 Vue devtools hook exists before hydration mounts the client app, and add the
-module script so the embedded Vite DevTools dock is mounted. The playground
-also pins `vite.server.host` to `127.0.0.1` so the page and DevTools websocket
-use the same host. When running Storybook for Nuxt components, omit the
-DevTools plugin, component highlighter plugin, and head scripts from the
-Storybook process.
+module script so the embedded Vite DevTools dock is mounted. Register
+`viteDevToolsBridgeModule` so the DevTools HTTP routes (the dock UI, panel
+assets, and client-script resolution) are reachable through Nuxt's dev
+server — Nuxt otherwise diverts non-build-asset requests around the Vite
+middlewares that serve them. The playground also pins `vite.server.host` to
+`127.0.0.1` so the page and DevTools websocket use the same host. When running
+Storybook for Nuxt components, omit the module, DevTools plugin, component
+highlighter plugin, and head scripts from the Storybook process.
 
 ### Start developing
 
@@ -363,7 +368,7 @@ For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTU
 |                 |    |                  |    |                 |
 | - Transform     |--->| - Registration   |--->| - Panel UI      |
 | - Inject meta   |    | - Registry       |    | - RPC Handler   |
-| - Endpoints     |    | - Serialization  |    | - Story create  |
+| - RPC surface   |    | - Serialization  |    | - Story create  |
 +-----------------+    +------------------+    +-----------------+
                              |                         |
                              v                         v
@@ -430,7 +435,8 @@ pnpm typecheck
 
 ```
 src/
-  create-component-highlighter-plugin.ts  # Main Vite plugin (server endpoints, RPC, transforms)
+  create-component-highlighter-plugin.ts  # Main Vite plugin: transform hooks, virtual modules, mounts the devframe
+  devframe.ts                             # Devframe definition: RPC surface, shared state, panel clientAssets
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
   coverage-dashboard.ts                   # Server-side coverage computation
   notifications.ts                        # Notification abstraction (DevTools logs + console)

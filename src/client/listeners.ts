@@ -230,7 +230,7 @@ function autoInitRpc() {
             type: 'action',
             handler: (_data: { tab: string }) => {
               const clientCtx = getHostClientContext() as any
-              clientCtx?.docks?.switchEntry?.('storybook-devtools-panel')
+              clientCtx?.docks?.switchEntry?.('storybook-devtools')
             },
           } as any)
         } catch {
@@ -253,8 +253,8 @@ function autoInitRpc() {
                 actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
               }
             }
-            handleTabChange(!!state.value()?.value)
-            state.on('updated', (val: any) => handleTabChange(!!val?.value))
+            handleTabChange(!!state.value())
+            state.on('updated', (val: any) => handleTabChange(!!val))
           })
           .catch(() => {})
       }
@@ -410,11 +410,7 @@ function syncHighlightState(active: boolean) {
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlight-active')
-    .then((state: any) =>
-      state.mutate((s: any) => {
-        s.value = active
-      }),
-    )
+    .then((state: any) => state.mutate(() => active))
     .catch(() => {})
 }
 
@@ -424,11 +420,7 @@ function syncHighlighterTabActive(active: boolean) {
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlighter-tab-active')
-    .then((state: any) =>
-      state.mutate((s: any) => {
-        s.value = active
-      }),
-    )
+    .then((state: any) => state.mutate(() => active))
     .catch(() => {})
 }
 

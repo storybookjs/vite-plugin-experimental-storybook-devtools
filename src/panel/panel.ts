@@ -1,16 +1,13 @@
 /**
  * Merged Storybook + Coverage panel.
  *
- * Hosted as a standalone HTML app via `ctx.views.hostStatic`.
- * Communicates with the server plugin via RPC and fetch-based middleware endpoints.
- * All client-side DOM operations are delegated to the client via RPC broadcast
- * so that the panel works whether inline or popped out into a separate window.
+ * Served as the devframe's `clientAssets` SPA. Communicates with the server
+ * plugin entirely over devframe RPC. All client-side DOM operations are
+ * delegated to the app-page client via RPC broadcast so that the panel works
+ * whether inline or popped out into a separate window.
  */
 
-import {
-  getDevToolsRpcClient,
-  type DevToolsRpcClient,
-} from '@vitejs/devtools-kit/client'
+import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
 import {
@@ -21,15 +18,28 @@ import {
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
-let rpcClient: DevToolsRpcClient | null = null
+let rpcClient: DevframeRpcClient | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let registrySharedState: any = null
 
 async function initRpcClient() {
   try {
-    const client = await getDevToolsRpcClient()
+    const client = await connectDevframe()
     await client.ensureTrusted()
     rpcClient = client
+
+    // Boot-time config: the storybookUrl the app was launched with — an
+    // auto-derived dock URL can't carry query params, so it arrives over RPC.
+    try {
+      const config = (await (client.call as any)(
+        'component-highlighter:get-config',
+      )) as { storybookUrl?: string }
+      if (config.storybookUrl) {
+        storybookUrl = config.storybookUrl
+      }
+    } catch {
+      // Keep the default storybookUrl
+    }
 
     // Subscribe to shared state
     const regState = await client.sharedState.get(
@@ -47,30 +57,33 @@ async function initRpcClient() {
     const visitState = await client.sharedState.get(
       'component-highlighter:pending-visit',
     )
-    // React to pending visit changes in real time. Shared state values are
-    // `{ value }` envelopes (devframe 0.9 requires object states).
-    const consumeVisit = (visit: any) => {
-      if (!visit) return
-      visitState.mutate((s: any) => {
-        s.value = null
-      }) // consume
-      visitStory(visit.relativeFilePath, visit.preferredStoryName)
+    // React to pending visit changes in real time
+    const currentVisit = visitState.value()
+    if (currentVisit) {
+      visitState.mutate(() => null) // consume
+      visitStory(currentVisit.relativeFilePath, currentVisit.preferredStoryName)
     }
-    consumeVisit(visitState.value()?.value)
-    visitState.on('updated', (val: any) => consumeVisit(val?.value))
+    visitState.on('updated', (val: any) => {
+      if (val) {
+        visitState.mutate(() => null) // consume
+        visitStory(val.relativeFilePath, val.preferredStoryName)
+      }
+    })
 
     const tabState = await client.sharedState.get(
       'component-highlighter:pending-tab',
     )
-    const consumeTab = (tab: any) => {
-      if (!tab) return
-      tabState.mutate((s: any) => {
-        s.value = null
-      }) // consume
-      switchTab(tab as TabId)
+    const currentTab = tabState.value()
+    if (currentTab) {
+      tabState.mutate(() => null) // consume
+      switchTab(currentTab as TabId)
     }
-    consumeTab(tabState.value()?.value)
-    tabState.on('updated', (val: any) => consumeTab(val?.value))
+    tabState.on('updated', (val: any) => {
+      if (val) {
+        tabState.mutate(() => null) // consume
+        switchTab(val as TabId)
+      }
+    })
 
     // Sync highlight toggle button state
     const hlState = await client.sharedState.get(
@@ -89,15 +102,15 @@ async function initRpcClient() {
       highlightEnabled = shouldBeActive
       syncHighlighterTabState(shouldBeActive)
     }
-    enforceHighlightForTab(hlState.value()?.value ?? false)
-    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val?.value))
+    enforceHighlightForTab(hlState.value() ?? false)
+    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val))
 
     // Subscribe to selected-component shared state
     const selState = await client.sharedState.get(
       'component-highlighter:selected-component',
     )
     selState.on('updated', (val: any) => {
-      selectedComponent = val?.value
+      selectedComponent = val
       // Only rebuild if already on the highlighter tab — don't auto-switch
       // when the user is on another tab (context menu handles interaction there).
       if (activeTab === 'highlighter') {
@@ -120,11 +133,7 @@ function syncHighlighterTabState(active: boolean) {
   if (!rpcClient) return
   rpcClient.sharedState
     ?.get('component-highlighter:highlighter-tab-active')
-    .then((state: any) =>
-      state.mutate((s: any) => {
-        s.value = active
-      }),
-    )
+    .then((state: any) => state.mutate(() => active))
     .catch(() => {})
 }
 
@@ -203,10 +212,11 @@ function openInEditor(filePath: string) {
   )
 }
 
-/** Get the storybookUrl from the query string (set by the server plugin) */
+/** The Storybook URL, fetched once via the `get-config` RPC at boot. */
+let storybookUrl = 'http://localhost:6006'
+
 function getStorybookUrl(): string {
-  const params = new URLSearchParams(window.location.search)
-  return params.get('sbUrl') || 'http://localhost:6006'
+  return storybookUrl
 }
 
 // ─── Visit Story ────────────────────────────────────────────────────
@@ -230,8 +240,9 @@ async function getStorybookIndex(): Promise<
     return storybookIndexCache
   }
   try {
-    const res = await fetch('/__component-highlighter/storybook-index')
-    const data = await res.json()
+    const data = (await rpcCall('component-highlighter:storybook-index')) as {
+      entries?: Record<string, StorybookIndexEntry>
+    }
     storybookIndexCache = data.entries || {}
     storybookIndexFetchedAt = Date.now()
     return storybookIndexCache!
@@ -325,7 +336,7 @@ async function visitStory(
   // Start Storybook, show terminal, then navigate once ready
   renderStorybookState('starting')
   try {
-    await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+    await rpcCall('component-highlighter:start-storybook')
   } catch {
     // Server may not support terminal start
   }
@@ -664,8 +675,9 @@ function renderStorybookState(state: SbState) {
 
 async function checkStorybook(): Promise<boolean> {
   try {
-    const res = await fetch('/__component-highlighter/storybook-status')
-    const data = await res.json()
+    const data = (await rpcCall('component-highlighter:storybook-status')) as {
+      running?: boolean
+    }
     return data.running === true
   } catch {
     return false
@@ -682,7 +694,7 @@ async function startStorybook() {
   renderStorybookState('starting')
 
   try {
-    await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+    await rpcCall('component-highlighter:start-storybook')
   } catch {
     // Server may not support terminal start; fall through to polling
   }
@@ -827,8 +839,9 @@ let lastVisibilityKey = ''
 
 async function fetchCoverage(): Promise<CoverageData | null> {
   try {
-    const res = await fetch('/__component-highlighter/coverage')
-    return await res.json()
+    return (await rpcCall(
+      'component-highlighter:get-coverage',
+    )) as CoverageData
   } catch {
     return null
   }
@@ -1554,7 +1567,7 @@ async function buildHighlighterPanel() {
       showTerminalTab()
 
       try {
-        await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+        await rpcCall('component-highlighter:start-storybook')
       } catch { /* best effort */ }
 
       // Replace with loading spinner
@@ -1705,10 +1718,9 @@ function stripAnsi(s: string): string {
 
 async function pollTerminalLogs() {
   try {
-    const res = await fetch(
-      `/__component-highlighter/terminal-logs?since=${terminalLogOffset}`,
-    )
-    const data: { lines: string[]; total: number } = await res.json()
+    const data = (await rpcCall('component-highlighter:get-terminal-logs', {
+      since: terminalLogOffset,
+    })) as { lines: string[]; total: number }
 
     if (data.lines.length > 0) {
       terminalLogOffset = data.total
