@@ -201,12 +201,9 @@ export function createComponentHighlighterPlugin(
   // distinct issue once so the UI isn't spammed.
   const reportedDiagnostics = new Set<string>()
 
-  // State shared between this plugin's transform hooks and the devframe's
-  // RPC handlers (registered in `./devframe.ts`) and `kitSetup` below. Values
-  // not yet known when the devframe's `setup(ctx)` runs (terminals, the
-  // DevTools notification service, shared-state handles) are filled in by
-  // `kitSetup`, which runs after it; handlers read these fields lazily at
-  // call time so they always see the current value.
+  // Shared mutable state for the transform hooks, the RPC handlers
+  // (`src/rpc/functions/`), and `kitSetup` below. Fields unknown until
+  // `kitSetup` runs are filled in there; handlers read them lazily at call time.
   const state: StorybookDevframeState = {
     server: undefined,
     notifications: new ConsoleNotificationService(),

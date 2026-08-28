@@ -102,7 +102,6 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
         initialValue: false,
       })
 
-      // Register RPC functions for communication with the client
       for (const fn of serverFunctions) {
         scope.rpc.register(fn)
       }
