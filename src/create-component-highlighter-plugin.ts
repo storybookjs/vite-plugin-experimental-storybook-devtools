@@ -626,6 +626,26 @@ export function createComponentHighlighterPlugin(
     // Store terminals reference for the start-storybook RPC handler
     state.devtoolsTerminals = ctx.terminals
 
+    // The kit advertises Vite's client-module-resolution template
+    // (`/@id/{specifier}`) only when it creates the devtools hub — after
+    // every plugin's devtools setup has run. Registering a bare-specifier
+    // action dock before that trips the hub's DF8111 "unresolvable client
+    // script" warning even though the template is advertised by the time any
+    // browser connects. Pre-seeding the same value makes the
+    // registration-time check pass; the hub later overwrite-assigns the
+    // identical template.
+    {
+      const kitCtx = ctx as unknown as {
+        viteServer?: unknown
+        staticConfig: { dock?: { clientModuleResolution?: string } }
+      }
+      if (kitCtx.viteServer) {
+        kitCtx.staticConfig.dock ??= {
+          clientModuleResolution: '/@id/{specifier}',
+        }
+      }
+    }
+
     // Register dock entry for component highlighter UI
     ctx.docks.register(
       defineDockEntry<DevToolsViewAction>({
