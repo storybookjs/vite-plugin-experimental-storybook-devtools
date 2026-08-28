@@ -15,7 +15,11 @@ export const visitStory = defineRpcFunction({
         preferredStoryName?: string
       }) => {
         if (state.pendingVisitState) {
-          state.pendingVisitState.mutate(() => data)
+          state.pendingVisitState.mutate(
+            (s: { value: typeof data | null }) => {
+              s.value = data
+            },
+          )
         }
         ctx.rpc.broadcast({
           method: 'component-highlighter:do-visit-story',

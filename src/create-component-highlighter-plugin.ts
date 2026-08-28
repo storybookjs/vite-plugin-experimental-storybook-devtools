@@ -477,7 +477,9 @@ export function createComponentHighlighterPlugin(
     function openPanelTab(tab: string) {
       // Store in shared state so the panel picks it up on load or via subscription
       if (state.pendingTabState) {
-        state.pendingTabState.mutate(() => tab)
+        state.pendingTabState.mutate((s: { value: string | null }) => {
+          s.value = tab
+        })
       }
       // Tell the client to switch the dock to the panel (if not already open)
       ctx.rpc.broadcast({

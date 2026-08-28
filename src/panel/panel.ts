@@ -57,33 +57,30 @@ async function initRpcClient() {
     const visitState = await client.sharedState.get(
       'component-highlighter:pending-visit',
     )
-    // React to pending visit changes in real time
-    const currentVisit = visitState.value()
-    if (currentVisit) {
-      visitState.mutate(() => null) // consume
-      visitStory(currentVisit.relativeFilePath, currentVisit.preferredStoryName)
+    // React to pending visit changes in real time. Shared state values are
+    // `{ value }` envelopes (devframe 0.9 requires object states).
+    const consumeVisit = (visit: any) => {
+      if (!visit) return
+      visitState.mutate((s: any) => {
+        s.value = null
+      }) // consume
+      visitStory(visit.relativeFilePath, visit.preferredStoryName)
     }
-    visitState.on('updated', (val: any) => {
-      if (val) {
-        visitState.mutate(() => null) // consume
-        visitStory(val.relativeFilePath, val.preferredStoryName)
-      }
-    })
+    consumeVisit(visitState.value()?.value)
+    visitState.on('updated', (val: any) => consumeVisit(val?.value))
 
     const tabState = await client.sharedState.get(
       'component-highlighter:pending-tab',
     )
-    const currentTab = tabState.value()
-    if (currentTab) {
-      tabState.mutate(() => null) // consume
-      switchTab(currentTab as TabId)
+    const consumeTab = (tab: any) => {
+      if (!tab) return
+      tabState.mutate((s: any) => {
+        s.value = null
+      }) // consume
+      switchTab(tab as TabId)
     }
-    tabState.on('updated', (val: any) => {
-      if (val) {
-        tabState.mutate(() => null) // consume
-        switchTab(val as TabId)
-      }
-    })
+    consumeTab(tabState.value()?.value)
+    tabState.on('updated', (val: any) => consumeTab(val?.value))
 
     // Sync highlight toggle button state
     const hlState = await client.sharedState.get(
@@ -102,15 +99,15 @@ async function initRpcClient() {
       highlightEnabled = shouldBeActive
       syncHighlighterTabState(shouldBeActive)
     }
-    enforceHighlightForTab(hlState.value() ?? false)
-    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val))
+    enforceHighlightForTab(hlState.value()?.value ?? false)
+    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val?.value))
 
     // Subscribe to selected-component shared state
     const selState = await client.sharedState.get(
       'component-highlighter:selected-component',
     )
     selState.on('updated', (val: any) => {
-      selectedComponent = val
+      selectedComponent = val?.value
       // Only rebuild if already on the highlighter tab — don't auto-switch
       // when the user is on another tab (context menu handles interaction there).
       if (activeTab === 'highlighter') {
@@ -133,7 +130,11 @@ function syncHighlighterTabState(active: boolean) {
   if (!rpcClient) return
   rpcClient.sharedState
     ?.get('component-highlighter:highlighter-tab-active')
-    .then((state: any) => state.mutate(() => active))
+    .then((state: any) =>
+      state.mutate((s: any) => {
+        s.value = active
+      }),
+    )
     .catch(() => {})
 }
 

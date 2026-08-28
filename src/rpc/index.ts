@@ -100,15 +100,21 @@ declare module 'devframe' {
     }) => void
   }
 
+  // Scalar/nullable states carry their payload in a `{ value }` envelope —
+  // devframe shared state is object-only. `registry` is an array and stays flat.
   interface DevframeRpcSharedStates {
     'component-highlighter:registry': SerializedRegistryInstance[]
     'component-highlighter:pending-visit': {
-      relativeFilePath: string
-      preferredStoryName?: string
-    } | null
-    'component-highlighter:pending-tab': string | null
-    'component-highlighter:highlight-active': boolean
-    'component-highlighter:selected-component': SerializedRegistryInstance | null
-    'component-highlighter:highlighter-tab-active': boolean
+      value: {
+        relativeFilePath: string
+        preferredStoryName?: string
+      } | null
+    }
+    'component-highlighter:pending-tab': { value: string | null }
+    'component-highlighter:highlight-active': { value: boolean }
+    'component-highlighter:selected-component': {
+      value: SerializedRegistryInstance | null
+    }
+    'component-highlighter:highlighter-tab-active': { value: boolean }
   }
 }
