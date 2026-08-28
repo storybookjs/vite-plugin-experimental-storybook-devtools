@@ -13,10 +13,8 @@ import {
   DevToolsNotificationService,
 } from './notifications'
 import { computeCoverage } from './coverage-dashboard'
-import {
-  createStorybookDevframe,
-  type StorybookDevframeState,
-} from './devframe'
+import { createStorybookDevframe } from './devframe'
+import type { StorybookDevframeState } from './context'
 
 import type { SerializedRegistryInstance, RegistryDiff } from './shared-types'
 export type { SerializedRegistryInstance, RegistryDiff }

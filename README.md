@@ -436,7 +436,11 @@ pnpm typecheck
 ```
 src/
   create-component-highlighter-plugin.ts  # Main Vite plugin: transform hooks, virtual modules, mounts the devframe
-  devframe.ts                             # Devframe definition: RPC surface, shared state, panel clientAssets
+  devframe.ts                             # Devframe definition: scoped shared state + serverFunctions registration, panel clientAssets
+  context.ts                              # WeakMap<DevframeNodeContext, deps> so RPC functions' setup(ctx) can read createStorybookDevframe's deps
+  rpc/
+    index.ts                              # serverFunctions barrel + declare module 'devframe' augmentation
+    functions/                            # One file per RPC function (bare name, namespaced to component-highlighter:<name>)
   runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
   coverage-dashboard.ts                   # Server-side coverage computation
   notifications.ts                        # Notification abstraction (DevTools logs + console)

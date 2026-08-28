@@ -128,12 +128,17 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 ## Server RPC surface
 
-There is no HTTP middleware. Every server routine is a `devframe` RPC function
-registered in `src/devframe.ts` via `defineRpcFunction`, typed through a
-`declare module 'devframe'` augmentation of `DevframeRpcServerFunctions` /
-`DevframeRpcClientFunctions` / `DevframeRpcSharedStates` (`devframe`, not
-`@vitejs/devtools-kit`, owns these registries as of kit 0.6 — the kit
-re-exports the same interfaces).
+There is no HTTP middleware. Every server routine is a `devframe` RPC function,
+one file per function under `src/rpc/functions/`, collected by the
+`src/rpc/index.ts` barrel into `serverFunctions` and registered in
+`src/devframe.ts` via `ctx.scope('component-highlighter').rpc.register(fn)` —
+functions declare bare names (e.g. `create-story`) and the scope namespaces
+them to `component-highlighter:create-story` on the wire. `src/rpc/index.ts`
+also carries the `declare module 'devframe'` augmentation of
+`DevframeRpcServerFunctions` (derived from `serverFunctions` via
+`RpcDefinitionsToFunctionsWithNamespace`) / `DevframeRpcClientFunctions` /
+`DevframeRpcSharedStates` (`devframe`, not `@vitejs/devtools-kit`, owns these
+registries as of kit 0.6 — the kit re-exports the same interfaces).
 
 Panel bootstrap and Storybook process control:
 
@@ -159,7 +164,10 @@ below.
 | Module | Responsibility |
 |--------|---------------|
 | `src/create-component-highlighter-plugin.ts` | Server entrypoint: transform hooks, virtual module serving, mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) registers docks via `defineDockEntry`, commands, and a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
-| `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): registers the full RPC surface (registry sync, panel↔client relay, Storybook process control, panel bootstrap) and shared state on the framework-neutral `DevframeNodeContext`; serves the panel as `clientAssets` |
+| `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
+| `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
+| `src/rpc/index.ts` | Barrel: `serverFunctions` array + the `declare module 'devframe'` augmentation (`DevframeRpcServerFunctions`/`DevframeRpcClientFunctions`/`DevframeRpcSharedStates`) |
+| `src/context.ts` | `WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>` — lets each RPC function's `setup(ctx)` read the deps `createStorybookDevframe` was called with |
 | `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
 | `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |
