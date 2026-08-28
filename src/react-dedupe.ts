@@ -71,7 +71,7 @@ export function resolveReactDedupe(
       `→ ${shouldDedupe ? 'APPLY react/react-dom dedupe' : 'NO config mutation'}`,
   )
 
-  if (!shouldDedupe && dedupeReact === false && mismatch) {
+  if (dedupeReact === false && mismatch) {
     // Never fail silently: the user explicitly opted out but we detect
     // the exact condition that degrades prop serialization.
     console.warn(

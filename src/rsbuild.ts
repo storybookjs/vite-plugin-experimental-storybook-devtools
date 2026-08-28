@@ -232,7 +232,7 @@ export function storybookDevtoolsRsbuild(
           ui: createUi(),
           ws: { sidecar: true },
           cwd: api.context.rootPath,
-          ...(clientAuth === false ? { auth: false } : {}),
+          auth: clientAuth,
           configure(ctx) {
             const { diagnostics } = registerStorybookHubSurfaces(ctx, {
               state,
