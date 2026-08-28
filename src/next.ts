@@ -82,12 +82,9 @@ const SERVER_EXTERNAL_PACKAGES = [
 
 /**
  * Public path the dock's self-contained client bundle is served from — the
- * same convention `src/rsbuild.ts` uses for its dedicated dev-server
- * middleware, so a shim aliasing a playground's `client/listeners` /
- * `client/overlay` imports to a top-level-await `import()` of this URL (the
- * pattern that keeps the eagerly-loaded playground client and the
- * embedded-dock-loaded client as one shared browser module instance) works
- * unmodified across both hosts.
+ * same convention `src/rsbuild.ts` uses, so a consuming app can `import()`
+ * this URL on either host and the browser's module cache keeps one client
+ * instance shared with the embedded dock.
  */
 const CLIENT_BUNDLE_PUBLIC_PATH = '/__storybook-devtools-client/vite-devtools.mjs'
 /** Rejects path-traversal attempts in a bundle request; a bare filename never needs `/`. */
@@ -427,8 +424,7 @@ export function withStorybookDevtools(
   globalState.resolvedOptions = resolved
 
   const framework: FrameworkConfig = {
-    ...reactFramework,
-    storybookFramework: '@storybook/nextjs',
+    ...nextFramework,
     htmlHeadSnippet: () =>
       composeNextHookScript({
         base: resolved.base,
