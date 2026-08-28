@@ -206,8 +206,6 @@ export function createComponentHighlighterPlugin(
 
   const transformPlugin: Plugin = {
     ...unpluginVitePlugin,
-    name: 'vite-plugin-experimental-storybook-devtools',
-    enforce: 'pre',
     configResolved(config) {
       isServe = config.command === 'serve'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
@@ -445,14 +443,11 @@ export function createComponentHighlighterPlugin(
     // Store terminals reference for the start-storybook RPC handler
     state.devtoolsTerminals = ctx.terminals
 
-    // The kit advertises Vite's client-module-resolution template
-    // (`/@id/{specifier}`, the documented Vite convention) only when it
-    // creates the devtools hub — which happens after every plugin's devtools
-    // setup has run. Registering a bare-specifier action dock before that
-    // trips the hub's DF8111 "unresolvable client script" warning even
-    // though the template is advertised by the time any browser connects.
-    // Pre-seeding the same value makes the registration-time check pass;
-    // the hub later overwrite-assigns the identical template.
+    // The kit advertises Vite's `/@id/{specifier}` client-module-resolution
+    // template only when it creates the devtools hub, after every plugin's
+    // devtools setup — too late for the registration-time check on a
+    // bare-specifier action dock (DF8111). Pre-seed the same value; the hub
+    // later overwrite-assigns it identically.
     if (ctx.viteServer) {
       ctx.staticConfig.dock ??= { clientModuleResolution: '/@id/{specifier}' }
     }

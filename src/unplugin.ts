@@ -1,25 +1,12 @@
 /**
- * Portable instrumentation core, built on `unplugin`.
- *
- * Owns everything that has no bundler-specific shape: the transform pipeline
+ * Portable instrumentation core, built on `unplugin`: the transform pipeline
  * (filter → framework.detect → framework.transform), the virtual modules
- * (runtime helpers, the framework runtime module, the devtools-hook module),
- * and the entry-injection strategy for delivering the devtools hook without
- * an HTML transform. Bundler-only concerns a plugin still needs — reading a
- * file through a running dev server, config/HTML mutation, HMR wiring — are
- * supplied by the caller through {@link ComponentHighlighterUnpluginHost} or
- * layered on afterwards (see `src/create-component-highlighter-plugin.ts`,
- * the Vite adapter).
- *
- * unplugin's generic `transform` hook type has no third parameter, so it
- * cannot see Vite's `{ ssr }` transform option — SSR must never run this
- * instrumentation (the runtime module uses browser-only APIs). The `vite`
- * field on `UnpluginOptions` is unplugin's own per-bundler override
- * mechanism: at `.vite()` time it is `Object.assign`-merged onto the
- * produced plugin, so `vite.transform` fully replaces the generic
- * `transform` for the Vite target. That replacement is a thin wrapper
- * around the same core logic that adds the `{ ssr }` gate Vite's real
- * transform hook receives as its third argument.
+ * (runtime helpers, framework runtime, devtools hook), and the entry-injection
+ * strategy for delivering the devtools hook without an HTML transform.
+ * Bundler-only concerns — reading a file through a running dev server,
+ * config/HTML mutation, HMR wiring — are supplied by the caller through
+ * {@link ComponentHighlighterUnpluginHost} or layered on afterwards (see
+ * `src/create-component-highlighter-plugin.ts`, the Vite adapter).
  */
 import * as fs from 'fs'
 import * as path from 'path'
@@ -192,17 +179,12 @@ function buildComponentHighlighterUnpluginOptions(
     let mutated = false
 
     if (hookInjection === 'entry' && entryFilter?.(id)) {
-      // Vite re-runs `transform` from the on-disk source on every HMR
-      // update — there is no cross-call state to key a dedupe set on that
-      // would not go stale the moment the entry file is next edited. The
-      // content check alone is both sufficient and correct: each call
-      // starts from fresh source, so a call whose input does not already
-      // carry the import always needs it, and one whose input already does
-      // (e.g. the author wrote it by hand) never needs it twice.
+      // Vite re-runs `transform` from the on-disk source on every HMR update,
+      // so the per-call content check is the only dedupe that cannot go stale
+      // — and it also respects an import the author already wrote by hand.
       if (!workingCode.includes(DEVTOOLS_HOOK_VIRTUAL_ID)) {
-        // ES import hoisting runs this before the rest of the module body,
-        // and before the framework loads — independent of where it lands
-        // relative to other imports.
+        // ES import hoisting runs the hook before the module body regardless
+        // of where the statement lands.
         workingCode = DEVTOOLS_HOOK_IMPORT_STATEMENT + workingCode
         mutated = true
       }
@@ -365,10 +347,11 @@ function buildComponentHighlighterUnpluginOptions(
     transform(code: string, id: string) {
       return runTransform(code, id)
     },
+    // unplugin's generic `transform` type has no third parameter and cannot
+    // see Vite's `{ ssr }` option; this per-bundler override replaces it for
+    // the Vite target with the same core logic plus the SSR gate. The
+    // parameters stay unannotated so Vite's contextual types flow in.
     vite: {
-      // Untyped third parameter: letting it flow from the `UnpluginOptions`
-      // return type's `vite: Partial<VitePlugin>` contextual type is what
-      // gives it Vite's real `{ ssr, moduleType }` transform-options shape.
       transform(code, id, viteOptions) {
         return runTransform(code, id, viteOptions)
       },
@@ -378,10 +361,8 @@ function buildComponentHighlighterUnpluginOptions(
 
 /**
  * Builds the `unplugin` instance for one framework + options combination.
- * `.vite()` produces the Vite plugin (composed further by
- * `create-component-highlighter-plugin.ts` with Vite-only hooks); the same
- * call is also how unit tests exercise the real, Vite-composed hooks
- * (including the `{ ssr }`-gated transform) without a running Vite instance.
+ * `.vite()` produces the Vite plugin, composed further with Vite-only hooks
+ * by `create-component-highlighter-plugin.ts`.
  */
 export function createComponentHighlighterUnplugin(
   framework: FrameworkConfig,
