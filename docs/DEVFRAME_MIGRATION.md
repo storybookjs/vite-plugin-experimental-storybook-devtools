@@ -202,28 +202,28 @@ What actually changed:
 Verification: `pnpm typecheck` clean, `pnpm test` 254 passing, `pnpm exec
 playwright test` 76/76 on React 19 / React 18 / Vue.
 
-##### Nuxt SSR dock — descoped to a follow-up
+##### Nuxt SSR dock — restored via a bridge module
 
 0.6 stopped serving the dock through Vite's module graph and now serves it from
-a connect-middleware route at `/__devtools/embedded.js`. Under Nuxt SSR, Nitro
-owns the request path and does **not** forward `/__devtools/*` to Vite's
-middleware, so the embedded dock UI never loads (the in-page overlay/RPC still
-work — only the dock panel is affected). The `injects the Vite DevTools dock`
-E2E test is therefore `test.skip`ped with an in-code explanation.
+a connect-middleware route at `/__devtools/embedded.js`. Under Nuxt SSR, Nuxt
+does pipe requests through the client Vite middleware stack, but marks
+non-build-asset requests with `_skip_transform` and rewrites their URL onto
+`/__skip_vite/*` before the devtools middlewares match — so the dock UI (and
+every other devtools HTTP route) fell through to Nitro's SSR catch-all.
 
-Restoring it is dedicated Nuxt host-adapter work, with a known direction:
-express the tool as a `defineDevframe()` definition mounted via
-`@devframes/nuxt/hub` (which wires `@devframes/vite/hub` into Nuxt's Vite
-server and injects `<base>embedded.js`), or integrate with `@nuxt/devtools`,
-which speaks the hub protocol natively. Note `@devframes/nuxt/hub` mounts raw
-`DevframeDefinition`s (not kit `devtools.setup` plugins), so this is a second,
-distinct integration path — hence a follow-up, not part of core Phase 1. A DX
-issue was filed upstream about the gap:
+`viteDevToolsBridgeModule` (exported from the `/nuxt` entry, registered under
+`modules` in `nuxt.config.ts`) clears that flag for devtools-owned paths and
+re-bases `/@id/*` and dock-imports URLs onto Vite's build-assets base, making
+the full DevTools surface reachable through Nuxt's dev server. The RPC
+WebSocket needs no bridging: with Vite in middleware mode the devtools hub
+starts a sidecar WebSocket and advertises it through `__connection.json`. The
+`injects the Vite DevTools dock` E2E test runs (un-skipped) against this.
+
+A devframe-level fix could eventually replace the bridge — tracked upstream as
 [devframes/devframe#289](https://github.com/devframes/devframe/issues/289).
-
-A separate non-fatal `DF8111` warning (dock bare-specifier client script needs
-host client-module resolution) fires in **all** hosts including plain Vite,
-where the dock still works; worth a follow-up but not a blocker.
+The previously-noted non-fatal `DF8111` warning at startup is resolved by
+pre-seeding the host's client-module-resolution template before dock
+registration.
 
 ### Phase 2 — unplugin refactor (Vite still the sole consumer)
 
