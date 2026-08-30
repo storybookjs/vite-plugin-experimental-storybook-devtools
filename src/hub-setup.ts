@@ -165,12 +165,13 @@ export function registerStorybookHubSurfaces(
         }
 
         // Find visible uncovered components in the registry snapshot
+        const registryStore = await ctx.rpc.sharedState.get(
+          'component-highlighter:registry',
+        )
         let storiesCreated = 0
         for (const entry of uncovered) {
           // Find a matching instance in the registry
-          const allInstances = (
-            await ctx.rpc.sharedState.get('component-highlighter:registry')
-          ).value()
+          const allInstances = registryStore.value()
           const instances = (
             allInstances as SerializedRegistryInstance[]
           ).filter(
