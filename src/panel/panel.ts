@@ -395,6 +395,24 @@ function getActionPopover(): HTMLDivElement {
   return _actionPopover
 }
 
+/**
+ * Open the popover right-aligned to the anchor, below it — or above when a
+ * row near the viewport bottom would push items off-screen; clamp when
+ * neither side fully fits.
+ */
+function positionPopover(popover: HTMLDivElement, anchor: HTMLElement) {
+  const rect = anchor.getBoundingClientRect()
+  popover.style.left = `${rect.right}px`
+  popover.style.transform = 'translateX(-100%)'
+  popover.style.top = `${rect.bottom + 4}px`
+  popover.hidden = false
+  const height = popover.offsetHeight
+  if (rect.bottom + 4 + height > window.innerHeight) {
+    const above = rect.top - 4 - height
+    popover.style.top = `${above >= 0 ? above : Math.max(4, window.innerHeight - height - 4)}px`
+  }
+}
+
 function makePopoverItem(
   icon: string,
   label: string,
@@ -449,11 +467,7 @@ function showActionPopover(anchor: HTMLElement, entry: CoverageEntry) {
     )
   }
 
-  const rect = anchor.getBoundingClientRect()
-  popover.style.top = `${rect.bottom + 4}px`
-  popover.style.left = `${rect.right}px`
-  popover.style.transform = 'translateX(-100%)'
-  popover.hidden = false
+  positionPopover(popover, anchor)
 }
 
 /**
@@ -1703,11 +1717,7 @@ function showHighlighterPopover(
     )
   }
 
-  const rect = anchor.getBoundingClientRect()
-  popover.style.top = `${rect.bottom + 4}px`
-  popover.style.left = `${rect.right}px`
-  popover.style.transform = 'translateX(-100%)'
-  popover.hidden = false
+  positionPopover(popover, anchor)
 }
 
 // ─── Terminal tab ───────────────────────────────────────────────────
