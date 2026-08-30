@@ -1203,6 +1203,30 @@ async function buildCoveragePanel(coverage: CoverageData) {
 /** Currently selected component data (set via shared state from client) */
 let selectedComponent: RegistryInstance | null = null
 
+/**
+ * Scroll a story card into view after creation — match the requested name
+ * loosely (the index title-cases it); fall back to the newest card.
+ */
+function scrollToStoryCard(name?: string) {
+  const cards = document.querySelectorAll<HTMLElement>('.hl-story-card')
+  if (cards.length === 0) return
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  let target: HTMLElement | undefined
+  if (name) {
+    target = Array.from(cards).find(
+      (c) =>
+        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
+        norm(name),
+    )
+  }
+  const card = target ?? cards[cards.length - 1]
+  if (!card) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  // The cards' lazy preview iframes grow the list after the first scroll —
+  // re-assert once the layout has settled.
+  setTimeout(() => card.scrollIntoView({ block: 'nearest' }), 700)
+}
+
 /** Find stories matching a component by file path or title */
 async function findMatchingStories(relativeFilePath: string, componentName?: string): Promise<StorybookIndexEntry[]> {
   const entries = await getStorybookIndex()
@@ -1514,10 +1538,14 @@ async function buildHighlighterPanel() {
       // not the snapshot captured when this inspector was rendered.
       const latest =
         fetchRegistry().find((i) => i.id === comp.id) ?? comp
+      const requestedName = storyNameInput.value.trim()
       await rpcCall('component-highlighter:create-story', {
         meta: latest.meta,
         serializedProps: latest.serializedProps,
-        storyName: storyNameInput.value.trim() || undefined,
+        storyName: requestedName || undefined,
+        // Stay on this view: the new story appears in the list below
+        // instead of the panel jumping to the Storybook tab.
+        skipNavigation: true,
       })
       // Bust the storybook index cache and retry until the new story appears
       const refreshAfterCreate = async () => {
@@ -1531,7 +1559,8 @@ async function buildHighlighterPanel() {
             comp.meta.componentName,
           )
           if (stories.length > 0) {
-            buildHighlighterPanel()
+            await buildHighlighterPanel()
+            scrollToStoryCard(requestedName)
             return
           }
           await new Promise(r => setTimeout(r, 1000))
