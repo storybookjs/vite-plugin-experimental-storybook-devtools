@@ -171,9 +171,6 @@ export function createComponentHighlighterPlugin(
     devtoolsTerminals: null,
     storybookSession: null,
     terminalLogs: [],
-    registryState: null,
-    pendingVisitState: null,
-    pendingTabState: null,
   }
 
   const host: ComponentHighlighterUnpluginHost = {

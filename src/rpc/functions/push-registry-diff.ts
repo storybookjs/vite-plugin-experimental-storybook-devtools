@@ -3,18 +3,20 @@ import type {
   RegistryDiff,
   SerializedRegistryInstance,
 } from '../../shared-types'
-import { getStorybookDevframeContext } from '../../context'
-
-// Client pushes incremental diffs; server applies them to shared state
+// Client pushes incremental diffs; server applies them to shared state.
+// The store is resolved from the handling context on every call — a host
+// may run setup() in more than one context (e.g. Nuxt's client + SSR Vite),
+// and only the context that owns this call's transport reaches the clients.
 export const pushRegistryDiff = defineRpcFunction({
   name: 'push-registry-diff',
   type: 'action',
   setup: (ctx) => {
-    const { state } = getStorybookDevframeContext(ctx)
     return {
-      handler: (diff: RegistryDiff) => {
-        if (!state.registryState) return
-        state.registryState.mutate((draft: SerializedRegistryInstance[]) => {
+      handler: async (diff: RegistryDiff) => {
+        const store = await ctx.rpc.sharedState.get(
+          'component-highlighter:registry',
+        )
+        store.mutate((draft: SerializedRegistryInstance[]) => {
           // Full sync: replace the entire registry
           if (diff.fullSync) {
             draft.length = 0

@@ -199,9 +199,6 @@ function getGlobalState(): StorybookDevtoolsNextGlobalState {
         devtoolsTerminals: null,
         storybookSession: null,
         terminalLogs: [],
-        registryState: null,
-        pendingVisitState: null,
-        pendingTabState: null,
       },
       diagnostics: null,
     }

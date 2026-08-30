@@ -6,8 +6,10 @@ import type { NotificationService } from './notifications'
 /**
  * Mutable state shared between the transform plugin and the RPC handlers.
  * Fields not yet known at devframe `setup()` time (terminals, the DevTools
- * notification service, shared-state handles) are populated later by
- * `kitSetup` in `create-component-highlighter-plugin.ts`.
+ * notification service) are populated later by the host's kit/hub setup.
+ * Shared-state stores are NOT cached here — `setup()` may run in more than
+ * one context (e.g. Nuxt's client + SSR Vite), so handlers resolve stores
+ * from their own `ctx.rpc.sharedState` per call.
  */
 export interface StorybookDevframeState {
   server: ViteDevServer | undefined
@@ -18,12 +20,6 @@ export interface StorybookDevframeState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   storybookSession: any
   terminalLogs: string[]
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registryState: any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pendingVisitState: any
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pendingTabState: any
 }
 
 export interface CreateStorybookDevframeDeps {
