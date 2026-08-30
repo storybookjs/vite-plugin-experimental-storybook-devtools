@@ -4,6 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Storybook DevTools</title>
+  <script>
+    // Assets are relative to the mount base ('./'), so a URL without the
+    // trailing slash resolves them against the parent path and 404s
+    // (e.g. behind hosts that rewrite or strip trailing slashes).
+    if (!location.pathname.endsWith('/') && !location.pathname.endsWith('.html')) {
+      location.replace(location.pathname + '/' + location.search + location.hash)
+    }
+  </script>
   <link rel="stylesheet" href="./panel.css">
 </head>
 <body>
