@@ -69,6 +69,20 @@ export const startStorybook = defineRpcFunction({
               }
             })
           }
+          // A dead session's stream is closed for good — drop it from the
+          // terminals host so the next start can reuse the session id.
+          const dropSession = () => {
+            const session = state.storybookSession
+            state.storybookSession = null
+            if (session) {
+              try {
+                state.devtoolsTerminals?.remove?.(session)
+              } catch {
+                /* already gone */
+              }
+            }
+          }
+
           if (cp) {
             cp.on('exit', (code: number | null) => {
               state.terminalLogs.push(`[process exited with code ${code}]`)
@@ -80,14 +94,14 @@ export const startStorybook = defineRpcFunction({
                     'see the log above for the underlying error.',
                 )
               }
-              state.storybookSession = null
+              dropSession()
             })
             cp.on('error', (err: Error) => {
               state.storybookStartFailure = { code: null }
               state.terminalLogs.push(
                 `[error] Storybook failed to start: ${err.message}`,
               )
-              state.storybookSession = null
+              dropSession()
             })
           }
 
