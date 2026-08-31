@@ -279,7 +279,7 @@ function getGlobalState(): StorybookDevtoolsNextGlobalState {
         ),
         devtoolsTerminals: null,
         storybookSession: null,
-        terminalLogs: [],
+        terminalLogSinks: [],
         storybookStartFailure: null,
       },
       diagnostics: null,

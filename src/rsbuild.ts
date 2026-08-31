@@ -155,7 +155,7 @@ export function storybookDevtoolsRsbuild(
     transformedComponents: new Map<string, string>(),
     devtoolsTerminals: null,
     storybookSession: null,
-    terminalLogs: [],
+    terminalLogSinks: [],
     storybookStartFailure: null,
   }
 

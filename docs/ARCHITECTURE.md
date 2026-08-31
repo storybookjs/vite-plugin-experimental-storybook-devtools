@@ -241,10 +241,18 @@ Panel bootstrap and Storybook process control:
 | `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` when the last start attempt's process died, so the panel can stop waiting and surface the failure |
 | `component-highlighter:storybook-index` | query | Proxy of Storybook's `index.json` |
 | `component-highlighter:start-storybook` | action | Start a Storybook dev server child process via `ctx.terminals` |
-| `component-highlighter:get-terminal-logs` | query | Tail the buffered Storybook process output (`since` offset) |
 | `component-highlighter:check-story` | query | Whether a story file exists for a given component path |
 | `component-highlighter:create-story` | action | Generate + write a story file from serialized props; broadcasts `story-created` (see below) |
 | `component-highlighter:get-coverage` | query | Compute and return coverage data |
+
+Storybook process output rides the `component-highlighter:terminal-logs`
+streaming channel (one long-lived stream, id `storybook`, 2000-line replay
+window): `start-storybook` and the launcher write lines through
+`pushTerminalLine` (`src/storybook-process.ts`), and the panel's Terminal tab
+subscribes instead of polling. On the Vite host, a `createProcessLauncher`
+dock (`id: 'storybook'`) offers a second start path that embeds the running
+Storybook UI as an iframe once the server answers; it shares the
+`storybookSession` slot with the RPC, so whichever starts first wins.
 
 `/__open-in-editor` remains available separately (Vite's own built-in endpoint, not registered by this plugin).
 

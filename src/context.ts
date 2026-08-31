@@ -19,7 +19,12 @@ export interface StorybookDevframeState {
   devtoolsTerminals: any
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   storybookSession: any
-  terminalLogs: string[]
+  /**
+   * One terminal-logs stream sink per devframe context (`setup()` may run in
+   * several — e.g. Nuxt's client + SSR Vite). Writers fan out through
+   * `pushTerminalLine` so the log reaches whichever context a panel is on.
+   */
+  terminalLogSinks: Array<{ write: (line: string) => void }>
   /**
    * Set when the last `start-storybook` child process exited before
    * Storybook became reachable; cleared on the next start attempt.

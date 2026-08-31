@@ -604,8 +604,6 @@ type TabId = 'storybook' | 'highlighter' | 'coverage' | 'terminal' | 'about'
 
 let activeTab: TabId = 'storybook'
 let coverageInterval: ReturnType<typeof setInterval> | null = null
-let terminalInterval: ReturnType<typeof setInterval> | null = null
-let terminalLogOffset = 0
 
 // Terminal badge state
 let terminalUnseenCount = 0
@@ -680,18 +678,8 @@ function switchTab(tab: TabId) {
     }
   }
 
-  // Start/stop terminal polling
   if (tab === 'terminal') {
     clearTerminalBadge()
-    pollTerminalLogs()
-    if (!terminalInterval) {
-      terminalInterval = setInterval(pollTerminalLogs, 1000)
-    }
-  } else {
-    if (terminalInterval) {
-      clearInterval(terminalInterval)
-      terminalInterval = null
-    }
   }
 }
 
@@ -2030,63 +2018,48 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
 }
 
-async function pollTerminalLogs() {
-  try {
-    const data = (await rpcCall('component-highlighter:get-terminal-logs', {
-      since: terminalLogOffset,
-    })) as { lines: string[]; total: number }
+function appendTerminalLine(line: string) {
+  const stripped = stripAnsi(line)
+  const isError = ERROR_PATTERN.test(stripped)
 
-    if (data.lines.length > 0) {
-      terminalLogOffset = data.total
-
-      // Track unseen lines and errors for the badge (when not on terminal tab)
-      if (activeTab !== 'terminal') {
-        terminalUnseenCount += data.lines.length
-        if (!terminalHasError) {
-          for (const line of data.lines) {
-            if (ERROR_PATTERN.test(stripAnsi(line))) {
-              terminalHasError = true
-              break
-            }
-          }
-        }
-        updateTerminalBadge()
-      }
-
-      const output = document.getElementById('terminal-output')
-      if (!output) return
-
-      for (const line of data.lines) {
-        const div = document.createElement('div')
-        const stripped = stripAnsi(line)
-        div.className = 'term-line'
-        if (ERROR_PATTERN.test(stripped)) {
-          div.classList.add('term-error')
-        }
-        div.textContent = stripped
-        output.appendChild(div)
-      }
-
-      // Auto-scroll to bottom
-      output.scrollTop = output.scrollHeight
-    }
-  } catch {
-    // endpoint not ready yet
+  // Track unseen lines and errors for the badge (when not on terminal tab)
+  if (activeTab !== 'terminal') {
+    terminalUnseenCount += 1
+    if (isError) terminalHasError = true
+    updateTerminalBadge()
   }
+
+  const output = document.getElementById('terminal-output')
+  if (!output) return
+
+  const div = document.createElement('div')
+  div.className = 'term-line'
+  if (isError) div.classList.add('term-error')
+  div.textContent = stripped
+  output.appendChild(div)
+
+  // Auto-scroll to bottom
+  output.scrollTop = output.scrollHeight
 }
 
-/** Background poller — runs always so terminal badge stays updated even when on other tabs */
-let bgTerminalInterval: ReturnType<typeof setInterval> | null = null
-
-function startBackgroundTerminalPoller() {
-  if (bgTerminalInterval) return
-  bgTerminalInterval = setInterval(() => {
-    // Only poll in background when we're NOT on the terminal tab
-    // (the terminal tab has its own faster poller)
-    if (activeTab !== 'terminal') {
-      pollTerminalLogs()
+/**
+ * Tail the server's terminal-logs stream. The channel's replay window feeds
+ * a (re)connecting panel the tail first, then lines arrive as they happen.
+ */
+function subscribeTerminalLogs() {
+  if (!rpcClient) return
+  const reader = (
+    rpcClient as unknown as {
+      streaming: {
+        subscribe: (channel: string, id: string) => AsyncIterable<string>
+      }
     }
-  }, 2000)
+  ).streaming.subscribe('component-highlighter:terminal-logs', 'storybook')
+  ;(async () => {
+    for await (const line of reader) appendTerminalLine(line)
+  })().catch(() => {
+    // stream ended with the connection; a reconnect re-subscribes
+  })
 }
 
 // ─── Bootstrap ──────────────────────────────────────────────────────
@@ -2226,13 +2199,11 @@ function init() {
   // pending visit/tab, registry, and highlight toggle sync.
   initRpcClient().then(() => {
     registerPanelRpcHandlers()
+    subscribeTerminalLogs()
   })
 
   // Init storybook tab
   initStorybookTab()
-
-  // Start background terminal poller for badge updates
-  startBackgroundTerminalPoller()
 
   // Clean up highlights when the panel iframe is hidden or unloaded
   document.addEventListener('visibilitychange', () => {
