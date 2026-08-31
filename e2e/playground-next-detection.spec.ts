@@ -133,11 +133,7 @@ test.describe('Next.js playground detection coverage', () => {
   })
 })
 
-registerCommonHighlighterSuite(test as any, {
-  // Next has no built-in `/__open-in-editor` dev-server endpoint (a Vite
-  // feature); the button correctly hides itself when the probe fails.
-  hasOpenInEditor: false,
-})
+registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
 registerLivePropEditSuite(test as any, {
   // The Next playground has no PropZoo; TaskCard's `task` object covers the

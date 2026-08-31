@@ -75,6 +75,11 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
     importMetaUrl: import.meta.url,
     icon: STORYBOOK_ICON,
     clientAssets: clientAssetsDir,
+    // Host-level open-in-editor / reveal-in-finder wire service, shipped as
+    // a dependency so it resolves on every host. Clients feature-detect via
+    // `rpc.services.has('@devframes/service-open')` — the panel and overlay
+    // prefer it over Vite's `/__open-in-editor`, which non-Vite hosts lack.
+    services: [{ package: '@devframes/service-open' }],
     setup(ctx) {
       setStorybookDevframeContext(ctx, deps)
       const scope = ctx.scope('component-highlighter')

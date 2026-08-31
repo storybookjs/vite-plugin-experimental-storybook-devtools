@@ -227,7 +227,7 @@ Notable differences from the Vite host:
 - **`host`** — pin the side-car server's bind address (e.g. `host: '127.0.0.1'`) to match `next dev -H 127.0.0.1`; the library default (`'localhost'`) can resolve to a loopback address the browser's explicit WebSocket target can't reach.
 - **Turbopack is unsupported** — there is no unplugin adapter for it. Running `next dev` under Turbopack prints one console warning and otherwise no-ops; the app runs normally, just without instrumentation. Run `next dev` without `--turbopack` on Next 15, or pass `--webpack` explicitly on majors where Turbopack is the default (Next 16+).
 - **RSC (`rsc` option, default `true`)** — the App Router ships Server Components by default, so only modules with a `"use client"` directive are instrumented; server components never register and are invisible to highlighting/coverage. This also means a module that is client-side only *transitively* (imported by a `"use client"` module but carrying no directive of its own) is **not** instrumented — only modules with their own `"use client"` directive are tagged.
-- **No `/__open-in-editor`** — that's a Vite dev-server feature Next doesn't have; the context menu's "Open Code" affordance hides itself when the probe fails.
+- **Open-in-editor works via the bundled `@devframes/service-open` wire service** — Next has no `/__open-in-editor` dev-server endpoint (a Vite feature), so "Open Code" and the coverage table's editor actions go through the service's RPC instead.
 - **Story generation** maps to `@storybook/nextjs`.
 - **Manual hook fallback** — when entry injection isn't viable, `getNextDevToolsHookScript()` returns the same hook script body for manual delivery, e.g. via `<Script strategy="beforeInteractive">` in the root layout.
 

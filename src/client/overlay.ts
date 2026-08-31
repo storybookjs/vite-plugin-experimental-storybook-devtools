@@ -125,9 +125,19 @@ async function checkStoryFile(
 }
 
 // Open-in-editor availability
+const OPEN_SERVICE = '@devframes/service-open'
 let openInEditorAvailable: boolean | undefined
 
+/** Whether the host advertises the open wire service (synchronous snapshot). */
+function hasOpenService(): boolean {
+  const rpc = getHostClientContext()?.rpc as unknown as
+    | { services?: { has: (pkg: string) => boolean } }
+    | undefined
+  return !!rpc?.services?.has(OPEN_SERVICE)
+}
+
 async function isOpenInEditorAvailable(): Promise<boolean> {
+  if (hasOpenService()) return true
   if (openInEditorAvailable !== undefined) return openInEditorAvailable
 
   try {
@@ -142,6 +152,21 @@ async function isOpenInEditorAvailable(): Promise<boolean> {
 }
 
 async function openInEditor(filePath: string) {
+  if (hasOpenService()) {
+    try {
+      const ctx = getHostClientContext()
+      await (ctx!.rpc.call as (m: string, ...a: unknown[]) => Promise<unknown>)(
+        'devframes:service:open:open-in-editor',
+        { path: filePath },
+      )
+      debug('Opened file via open service:', filePath)
+      return
+    } catch (e) {
+      logError('Failed to open file via open service:', e)
+      return
+    }
+  }
+
   if (!(await isOpenInEditorAvailable())) {
     warn(
       'Cannot open file in editor — the /__open-in-editor endpoint is not available.',
