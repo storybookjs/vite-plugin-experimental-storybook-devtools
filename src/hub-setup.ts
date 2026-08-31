@@ -98,11 +98,14 @@ export function registerStorybookHubSurfaces(
 
   function openPanelTab(tab: string) {
     // Store in shared state so the panel picks it up on load or via subscription
-    if (state.pendingTabState) {
-      state.pendingTabState.mutate((s: { value: string | null }) => {
-        s.value = tab
-      })
-    }
+    ctx.rpc.sharedState
+      .get('component-highlighter:pending-tab')
+      .then((store) =>
+        store.mutate((s: { value: string | null }) => {
+          s.value = tab
+        }),
+      )
+      .catch(() => {})
     // Tell the client to switch the dock to the panel (if not already open)
     ctx.rpc.broadcast({
       method: 'component-highlighter:do-open-panel-tab',
@@ -165,7 +168,9 @@ export function registerStorybookHubSurfaces(
         let storiesCreated = 0
         for (const entry of uncovered) {
           // Find a matching instance in the registry
-          const allInstances = state.registryState?.value() ?? []
+          const allInstances = (
+            await ctx.rpc.sharedState.get('component-highlighter:registry')
+          ).value()
           const instances = (
             allInstances as SerializedRegistryInstance[]
           ).filter(

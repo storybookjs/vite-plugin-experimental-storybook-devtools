@@ -5,6 +5,7 @@
  * `create-component-highlighter-plugin.ts`'s `kitSetup`.
  */
 import { createRequire } from 'module'
+import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
 import { defineDevframe } from 'devframe'
@@ -41,6 +42,29 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
     description: string
   }
 
+  // A stale dist/panel (built before the devframe mount, or missing) makes
+  // the panel dock render an empty transparent page with no error anywhere —
+  // fail loudly here instead.
+  const clientAssetsDir = path.join(packageRoot, 'dist', 'panel')
+  try {
+    const indexHtml = fs.readFileSync(
+      path.join(clientAssetsDir, 'index.html'),
+      'utf-8',
+    )
+    if (!/(?:src|href)="\.\//.test(indexHtml)) {
+      console.warn(
+        '[storybook-devtools] dist/panel is stale: its asset URLs are not ' +
+          'relative to the panel mount base, so the panel will render ' +
+          'empty. Rebuild the package (pnpm build).',
+      )
+    }
+  } catch {
+    console.warn(
+      '[storybook-devtools] dist/panel/index.html not found — build the ' +
+        'package (pnpm build) or the panel dock will render empty.',
+    )
+  }
+
   return defineDevframe({
     id: 'storybook-devtools',
     name: 'Storybook',
@@ -50,7 +74,7 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
     description: pkg.description,
     importMetaUrl: import.meta.url,
     icon: STORYBOOK_ICON,
-    clientAssets: path.join(packageRoot, 'dist', 'panel'),
+    clientAssets: clientAssetsDir,
     setup(ctx) {
       setStorybookDevframeContext(ctx, deps)
       const scope = ctx.scope('component-highlighter')
@@ -60,29 +84,17 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
       // their payload in a `{ value }` envelope; `registry` is an array and
       // stays flat.
 
-      scope.rpc
-        .sharedState('registry', {
-          initialValue: [],
-        })
-        .then((s) => {
-          deps.state.registryState = s
-        })
+      scope.rpc.sharedState('registry', {
+        initialValue: [],
+      })
 
-      scope.rpc
-        .sharedState('pending-visit', {
-          initialValue: { value: null },
-        })
-        .then((s) => {
-          deps.state.pendingVisitState = s
-        })
+      scope.rpc.sharedState('pending-visit', {
+        initialValue: { value: null },
+      })
 
-      scope.rpc
-        .sharedState('pending-tab', {
-          initialValue: { value: null },
-        })
-        .then((s) => {
-          deps.state.pendingTabState = s
-        })
+      scope.rpc.sharedState('pending-tab', {
+        initialValue: { value: null },
+      })
 
       scope.rpc.sharedState('highlight-active', {
         initialValue: { value: false },
