@@ -6,15 +6,20 @@
   "description": "Rsbuild (rspack) playground for vite-plugin-experimental-storybook-devtools",
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build"
+    "build": "rsbuild build",
+    "storybook": "storybook dev -p 6006"
   },
   "devDependencies": {
     "@rsbuild/core": "^2.1.13",
     "@rsbuild/plugin-react": "^2.1.0",
+    "@storybook/addon-docs": "10.3.3",
+    "@storybook/react-vite": "10.3.3",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "typescript": "^5.9.3"
+    "storybook": "10.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.0"
   }
 }
