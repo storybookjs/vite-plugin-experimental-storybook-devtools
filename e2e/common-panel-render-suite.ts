@@ -14,7 +14,13 @@ export function registerPanelRenderSuite(
     test('panel renders and coverage lists a component from the page', async ({
       page,
     }) => {
+      test.setTimeout(120_000)
       await page.goto('/')
+      // Compile-on-demand hosts (next dev) build the hub route on first
+      // hit — warm it so the dock's embedded script can connect promptly.
+      await page
+        .request.get('/__devframes/__connection.json')
+        .catch(() => {})
 
       // Playwright CSS locators pierce the dock's open shadow root.
       // The collapsed dock expands on hover and its container intercepts
@@ -22,7 +28,8 @@ export function registerPanelRenderSuite(
       const dockBtn = page.locator(
         'devframes-dock-embedded button[aria-label="Storybook"]',
       )
-      await dockBtn.waitFor({ state: 'attached', timeout: 20_000 })
+      // next's dev server compiles routes lazily on first hit — allow for it.
+      await dockBtn.waitFor({ state: 'attached', timeout: 90_000 })
       await dockBtn.dispatchEvent('click')
 
       const panel = page.frameLocator('devframes-dock-embedded iframe')
