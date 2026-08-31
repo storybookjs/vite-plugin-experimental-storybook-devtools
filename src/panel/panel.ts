@@ -114,16 +114,26 @@ async function initRpcClient() {
       'component-highlighter:selected-component',
     )
     selState.on('updated', (val: any) => {
+      const unchanged = isSameSelection(val)
       selectedComponent = val
       // Only rebuild if already on the highlighter tab — don't auto-switch
       // when the user is on another tab (context menu handles interaction there).
-      if (activeTab === 'highlighter') {
+      if (!unchanged && activeTab === 'highlighter') {
         buildHighlighterPanel()
       }
     })
   } catch {
     // RPC client not available (e.g. during build or test)
   }
+}
+
+/**
+ * Re-selecting the already-shown component (same instance, same payload)
+ * must not rebuild the inspector — a rebuild reloads every story preview
+ * iframe, which reads as a flash.
+ */
+function isSameSelection(next: RegistryInstance | null | undefined): boolean {
+  return JSON.stringify(next ?? null) === JSON.stringify(selectedComponent ?? null)
 }
 
 /** Convenience wrapper for server RPC calls */
@@ -532,8 +542,9 @@ function registerPanelRpcHandlers() {
       name: 'component-highlighter:do-select-component',
       type: 'action',
       handler: (data: RegistryInstance | null) => {
+        const unchanged = isSameSelection(data)
         selectedComponent = data
-        if (activeTab === 'highlighter') {
+        if (!unchanged && activeTab === 'highlighter') {
           buildHighlighterPanel()
         }
       },
