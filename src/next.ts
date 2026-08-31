@@ -647,6 +647,7 @@ export function createStorybookDevtoolsRoute(
         state: globalState.state,
         storiesDir,
         devtoolsDockId,
+        storybookFramework: nextFramework.storybookFramework,
         dockClientScript: {
           importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
           importName: 'default',

@@ -384,6 +384,7 @@ export function createComponentHighlighterPlugin(
       state,
       storiesDir,
       devtoolsDockId,
+      storybookFramework: framework.storybookFramework,
       dockClientScript: {
         importFrom:
           'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
