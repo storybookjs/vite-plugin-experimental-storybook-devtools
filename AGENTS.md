@@ -48,6 +48,9 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
      - `e2e/highlighter-helpers.ts`
      - `e2e/common-highlighter-suite.ts`
      - `e2e/common-listeners-replay-suite.ts` (late-loading listeners recovery)
+     - `e2e/common-ssr-suite.ts` (SSR hosts only — raw-payload markup,
+       hydration-mismatch-free boot, registry pickup of the `HydrationInfo`
+       SSR-data component; registered by the Next and Nuxt specs)
    - Keep framework-specific specs focused on true framework differences only.
 
 4. **Verify both save flows**

@@ -456,3 +456,11 @@ body {
   color: var(--color-text-muted);
   font-size: 0.75rem;
 }
+
+.hydration-info {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem 2rem 0;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}

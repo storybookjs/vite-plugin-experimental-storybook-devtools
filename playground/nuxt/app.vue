@@ -63,6 +63,10 @@ function handleLoadMore() {
   window.alert('Load more')
 }
 
+// Initialized during SSR and carried to the client in the Nuxt payload, so
+// the hydration render sees the identical value.
+const renderedAt = useState('rendered-at', () => new Date().toISOString())
+
 const inProgressCount = computed(
   () => tasks.value.filter((task) => task.status === 'in-progress').length,
 )
@@ -113,6 +117,8 @@ const completedCount = computed(
 
         <Button variant="secondary" @click="handleLoadMore">Load more</Button>
       </TaskList>
+
+      <HydrationInfo :rendered-at="renderedAt" />
     </main>
 
     <Modal

@@ -3,6 +3,7 @@ import { registerCommonHighlighterSuite } from './common-highlighter-suite'
 import { registerHighlightPanelStateSuite } from './common-highlight-panel-state-suite'
 import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 import { registerListenersReplaySuite } from './common-listeners-replay-suite'
+import { registerSsrSuite } from './common-ssr-suite'
 import { registerPanelRenderSuite } from './common-panel-render-suite'
 
 type RegistrySnapshot = {
@@ -70,6 +71,7 @@ test.describe('Next.js playground detection coverage', () => {
       'Button',
       'ClientApp',
       'Header',
+      'HydrationInfo',
       'Modal',
       'TaskCard',
       'TaskList',
@@ -162,4 +164,9 @@ registerLivePropEditSuite(test as any, {
   ],
 })
 registerListenersReplaySuite(test as any)
+registerSsrSuite(test as any, expect as any, {
+  componentName: 'HydrationInfo',
+  selector: '.hydration-info',
+  markerText: 'Server-rendered at',
+})
 registerPanelRenderSuite(test as any, expect as any, { componentName: 'TaskCard' })

@@ -126,6 +126,13 @@ Current integrations:
   `127.0.0.1` so the page and DevTools websocket use the same host in live and
   E2E runs. The Vite transform still skips SSR module transforms, so the
   browser-only runtime is imported only by the hydrated client graph.
+  SSR + hydration integrity is verified by `e2e/common-ssr-suite.ts` on both
+  SSR hosts (Nuxt and Next.js) against each playground's `HydrationInfo`
+  component, which renders server-computed state (Nuxt `useState` payload
+  transfer; a Next server-component prop): the markup must be in the raw HTML
+  payload, hydration must complete without mismatch errors while
+  instrumentation is active, and the hydrated instance must appear in the
+  highlighter registry.
 
   **Known limitation (devframe 0.9 / devtools-kit 0.6):** the embedded
   DevTools **dock UI does not load under Nuxt SSR**. 0.6 serves the dock from a

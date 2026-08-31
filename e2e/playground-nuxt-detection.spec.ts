@@ -4,6 +4,7 @@ import { registerHighlightPanelStateSuite } from './common-highlight-panel-state
 import { registerLivePropEditSuite } from './common-live-prop-edit-suite'
 import { registerListenersReplaySuite } from './common-listeners-replay-suite'
 import { registerPanelRenderSuite } from './common-panel-render-suite'
+import { registerSsrSuite } from './common-ssr-suite'
 
 type RegistrySnapshot = {
   size: number
@@ -153,3 +154,8 @@ registerLivePropEditSuite(test as any, {
 })
 registerListenersReplaySuite(test as any)
 registerPanelRenderSuite(test as any, expect as any, { componentName: 'TaskCard' })
+registerSsrSuite(test as any, expect as any, {
+  componentName: 'HydrationInfo',
+  selector: '.hydration-info',
+  markerText: 'Server-rendered at',
+})
