@@ -190,7 +190,7 @@ const GLOBAL_STATE_KEY = '__storybookDevtoolsNextGlobalState__'
  * boundary. Persist through a manifest under `.next/cache`: the writer
  * flushes debounced on set, readers re-hydrate when the file changes.
  */
-class PersistedComponentMap extends Map<string, string> {
+export class PersistedComponentMap extends Map<string, string> {
   private file: string
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private lastLoadedMtime = 0
@@ -206,6 +206,11 @@ class PersistedComponentMap extends Map<string, string> {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null
         try {
+          // Merge the persisted entries first: on a warm webpack cache only
+          // edited modules re-transform, so the in-memory map is a subset of
+          // what the manifest already knows — writing it out unmerged would
+          // shrink coverage to just the edited components.
+          this.hydrate()
           fs.mkdirSync(path.dirname(this.file), { recursive: true })
           fs.writeFileSync(this.file, JSON.stringify([...super.entries()]))
         } catch {

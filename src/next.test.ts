@@ -183,3 +183,39 @@ describe('withStorybookDevtools', () => {
     warnSpy.mockRestore()
   })
 })
+
+describe('PersistedComponentMap', () => {
+  it('merges the persisted manifest into a warm-boot flush instead of clobbering it', async () => {
+    const { PersistedComponentMap } = await import('./next')
+    const fs = await import('fs')
+    const os = await import('os')
+    const path = await import('path')
+    const file = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'ch-manifest-')),
+      'coverage-manifest.json',
+    )
+    const flush = () => new Promise((r) => setTimeout(r, 300))
+
+    // Cold boot: every component transforms.
+    const cold = new PersistedComponentMap(file)
+    cold.set('Button', '/app/Button.tsx')
+    cold.set('Header', '/app/Header.tsx')
+    await flush()
+
+    // Warm boot (fresh process, warm webpack cache): only the edited
+    // component re-transforms.
+    const warm = new PersistedComponentMap(file)
+    warm.set('HydrationInfo', '/app/HydrationInfo.tsx')
+    await flush()
+
+    const persisted = new Map(
+      JSON.parse(fs.readFileSync(file, 'utf-8')) as [string, string][],
+    )
+    expect(persisted.get('Button')).toBe('/app/Button.tsx')
+    expect(persisted.get('Header')).toBe('/app/Header.tsx')
+    expect(persisted.get('HydrationInfo')).toBe('/app/HydrationInfo.tsx')
+
+    // Readers see the merged view too.
+    expect(new Map(warm).size).toBe(3)
+  })
+})
