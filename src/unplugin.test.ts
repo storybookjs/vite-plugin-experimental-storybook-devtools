@@ -127,6 +127,30 @@ describe('createComponentHighlighterUnplugin', () => {
     })
   })
 
+  describe('load: dev-source gating', () => {
+    it('serves the built dist file, not raw source, when the host has no loadDevSource', async () => {
+      const plugin = createComponentHighlighterUnplugin(
+        reactFramework,
+        {},
+        buildHost({ isServe: () => true }),
+      ).vite() as Plugin
+      const resolveId = asFn(plugin.resolveId)
+      const load = asFn(plugin.load)
+
+      const resolved = resolveId(
+        'virtual:component-highlighter/runtime-helpers',
+        undefined,
+        { isEntry: false },
+      )
+      const loaded = (await load(resolved as string)) as string
+
+      // `interface LivePropEditor` is a TypeScript-only construct present in
+      // src/runtime-helpers.ts but stripped from the built dist output —
+      // its absence confirms the dist file was served, not the raw source.
+      expect(loaded).not.toContain('interface LivePropEditor')
+    })
+  })
+
   describe('devtools-hook virtual module', () => {
     it('resolves and loads the framework hook script', async () => {
       const plugin = buildPlugin({ hookInjection: 'entry', entry: '**/main.tsx' })

@@ -11,7 +11,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
-import { createFilter } from 'vite'
+import { createFilter } from 'unplugin-utils'
 import { createUnplugin } from 'unplugin'
 import type { UnpluginOptions } from 'unplugin'
 import type { FrameworkConfig } from './frameworks'
@@ -42,8 +42,11 @@ export interface ComponentHighlighterUnpluginHost {
   isServe: () => boolean
   /**
    * Read a file's transformed dev-source through a running dev server.
-   * Returns `null` (or is omitted) to fall back to reading the file straight
-   * off disk. Vite-only: backed by `server.transformRequest`.
+   * Returns `null` to fall back to reading the file straight off disk.
+   * Vite-only: backed by `server.transformRequest`. When absent, the
+   * built dist files are served instead of dev source, regardless of
+   * `isServe()` — a host without a transforming dev server has no way to
+   * turn raw TypeScript/JSX source into something the browser can run.
    */
   loadDevSource?: (absPath: string) => Promise<string | null>
   /** Component name → file path, shared with the coverage dashboard. */
@@ -261,7 +264,9 @@ function buildComponentHighlighterUnpluginOptions(
     async load(id: string) {
       if (id === paths.resolvedRuntimeHelperVirtualId) {
         const shouldUseSource =
-          host.isServe() && fs.existsSync(paths.runtimeHelperSourcePath)
+          host.isServe() &&
+          !!host.loadDevSource &&
+          fs.existsSync(paths.runtimeHelperSourcePath)
 
         if (shouldUseSource) {
           const devSource = await host.loadDevSource?.(
@@ -282,7 +287,9 @@ function buildComponentHighlighterUnpluginOptions(
       }
       if (id === paths.resolvedFrameworkVirtualModuleId) {
         const shouldUseSource =
-          host.isServe() && fs.existsSync(paths.runtimeModuleSourcePath)
+          host.isServe() &&
+          !!host.loadDevSource &&
+          fs.existsSync(paths.runtimeModuleSourcePath)
 
         // Replace the loader-injected build constants declared by the runtime
         // modules (`declare const __COMPONENT_HIGHLIGHTER_*__`). The project

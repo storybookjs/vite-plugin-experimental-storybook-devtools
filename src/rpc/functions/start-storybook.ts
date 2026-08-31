@@ -18,6 +18,8 @@ export const startStorybook = defineRpcFunction({
           return { started: false, error: 'Terminals API not available' }
         }
 
+        state.storybookStartFailure = null
+
         try {
           state.storybookSession =
             await state.devtoolsTerminals.startChildProcess(
@@ -31,6 +33,13 @@ export const startStorybook = defineRpcFunction({
                   '--no-open',
                 ],
                 cwd: ctx.cwd,
+                // Same env the playgrounds' own `storybook` scripts set: app
+                // bundler configs use it to keep this plugin out of
+                // Storybook's builder (which loads the same config file).
+                env: { ...process.env, STORYBOOK: 'true' } as Record<
+                  string,
+                  string
+                >,
               },
               {
                 id: 'storybook-dev',
@@ -67,16 +76,46 @@ export const startStorybook = defineRpcFunction({
               }
             })
           }
+          // A dead session's stream is closed for good — drop it from the
+          // terminals host so the next start can reuse the session id.
+          const dropSession = () => {
+            const session = state.storybookSession
+            state.storybookSession = null
+            if (session) {
+              try {
+                state.devtoolsTerminals?.remove?.(session)
+              } catch {
+                /* already gone */
+              }
+            }
+          }
+
           if (cp) {
             cp.on('exit', (code: number | null) => {
               state.terminalLogs.push(`[process exited with code ${code}]`)
-              state.storybookSession = null
+              if (code !== 0) {
+                state.storybookStartFailure = { code }
+                state.terminalLogs.push(
+                  `[error] Storybook failed to start (exit code ${code}). ` +
+                    'Check that Storybook is installed in this project — ' +
+                    'see the log above for the underlying error.',
+                )
+              }
+              dropSession()
+            })
+            cp.on('error', (err: Error) => {
+              state.storybookStartFailure = { code: null }
+              state.terminalLogs.push(
+                `[error] Storybook failed to start: ${err.message}`,
+              )
+              dropSession()
             })
           }
 
           return { started: true }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          state.storybookStartFailure = { code: null }
           state.terminalLogs.push(`[error] Failed to start Storybook: ${msg}`)
           return { started: false, error: msg }
         }

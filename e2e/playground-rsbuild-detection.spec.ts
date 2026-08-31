@@ -7,8 +7,11 @@ import { registerListenersReplaySuite } from './common-listeners-replay-suite'
 import { registerPanelRenderSuite } from './common-panel-render-suite'
 
 registerReactDetectionSuite(test as any, {
-  suiteTitle: 'React playground detection coverage',
-  taskListFilePath: '/playground/react/src/components/TaskList.tsx',
+  suiteTitle: 'Rsbuild playground detection coverage',
+  // playground/rsbuild/src is a symlink to the canonical playground/react/src;
+  // rspack resolves it to the real path, so assert the component file itself
+  // rather than a playground-specific prefix.
+  taskListFilePath: '/src/components/TaskList.tsx',
 })
 registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)

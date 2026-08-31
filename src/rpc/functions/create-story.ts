@@ -64,8 +64,11 @@ export const createStory = defineRpcFunction({
             // coverage "Generate all" and the command palette. Without
             // this they'd be replaced with a "not exported" div.
             try {
-              const all = (state.registryState?.value() ??
-                []) as SerializedRegistryInstance[]
+              const all = (
+                await ctx.rpc.sharedState.get(
+                  'component-highlighter:registry',
+                )
+              ).value() as SerializedRegistryInstance[]
               for (const inst of all) {
                 const n = inst?.meta?.componentName
                 const fp = inst?.meta?.filePath

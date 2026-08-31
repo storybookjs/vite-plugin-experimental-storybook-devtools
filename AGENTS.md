@@ -21,10 +21,15 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
    - If one framework playground changes, review whether the others should match.
    - `playground/react` (React 19) and `playground/react18` (React 18) share
      ONE source tree: `playground/react18/src` is a symlink to
-     `playground/react/src` (canonical). Edit components once in
-     `playground/react/src`; both playgrounds and their shared E2E suites pick
-     it up. React 18 and 19 are both required and both E2E-gated. Do not
-     replace the symlink with a copy.
+     `playground/react/src` (canonical). `playground/rsbuild` (Rsbuild host,
+     React 19) is a third symlink consumer of the same tree — same mechanics,
+     but its shared entry's `client/listeners` + `client/overlay` imports are
+     aliased to shims (`playground/rsbuild/shims/`) instead of importing the
+     package directly, since Rsbuild has no `/@id/{specifier}` resolution for
+     the client bundle. Edit components once in `playground/react/src`; all
+     three playgrounds and their shared E2E suites pick it up. React 18 and
+     19 are both required and both E2E-gated. Do not replace the symlinks
+     with copies.
    - The `rsc` option's `"use client"` transform gate is covered by unit tests
      (`src/frameworks/react/transform.test.ts` → "RSC mode"), not a playground.
      If you add runtime RSC coverage later, it needs its own playground in
@@ -44,7 +49,9 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
    - Ensure interaction recording is exercised with real form input/select actions.
 
 5. **Make CI reliable**
-   - Avoid relying on manual Vite DevTools authorization in CI.
+   - Avoid relying on manual DevTools authorization in CI (Vite's trust
+     prompt, or devframe's OTP gate on Rsbuild — disable the latter with
+     `clientAuth: false`).
    - Keep E2E activation deterministic (automation hooks + config).
 
 6. **Keep documentation up to date**

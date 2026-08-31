@@ -1,8 +1,9 @@
 # Devframe Migration — Feasibility Report & Phased Plan
 
-Status: **Phases 1–2 implemented** (Vite family: React 19 / React 18 / Vue
+Status: **Phases 1–3 implemented** (Vite family: React 19 / React 18 / Vue
 green on devframe 0.9 / devtools-kit 0.6; core re-platformed onto `unplugin`
-with zero behavior change). Phases 3–4 planned. This document records
+with zero behavior change; Rsbuild host green on the shared E2E suites).
+Phase 4 planned. This document records
 the investigation into migrating this plugin onto [devframe](https://devfra.me/)
 (the extracted core of Vite DevTools) and extending it to non-Vite hosts, the
 agreed phased plan, and the as-built Phase 1 outcome (see
@@ -297,6 +298,41 @@ closest to Vite's and there is no RSC axis.
 
 Risks: rspack loader ordering vs unplugin transform stage; no
 `server.transformRequest` equivalent (bundle the runtime instead).
+
+#### Phase 3 — as built
+
+- **`./rsbuild` entry** — `storybookDevtoolsRsbuild({ framework, clientAuth,
+  ...options })` (`src/rsbuild.ts`): instrumentation mounts via
+  `unplugin.rspack()` in `modifyRspackConfig` (the core's `\0` virtual ids
+  round-trip unchanged through rspack's virtual-filesystem encoding); the
+  devtools-hook script and the hub's embedded-dock bootstrap are injected via
+  `modifyHTMLTags`; a `@devframes/hub` (+ `@devframes/hub-ui` dock) mounts on
+  the dev server's Connect middlewares in `onBeforeStartDevServer`, riding a
+  sidecar WebSocket (`ws: { sidecar: true }` — Rsbuild's request handlers
+  never see socket upgrades). `clientAuth: false` disables devframe's OTP
+  gate for single-user localhost / E2E.
+- **Host-neutral extractions** — the hub surfaces (notifications,
+  diagnostics, terminals, action dock, Mod+K commands) moved to
+  `src/hub-setup.ts` (`registerStorybookHubSurfaces`), shared verbatim by the
+  Vite `kitSetup` and the hub's `configure` callback; React-major-mismatch
+  detection moved to `src/react-dedupe.ts`, each adapter applying the result
+  to its own bundler's `resolve.dedupe` (Rsbuild also aliases
+  `react-element-to-jsx-string`/`react-is` to this package's copies).
+- **No dev-source path** — rspack has no `server.transformRequest`
+  equivalent, so the runtime virtual modules always serve built `dist/`
+  output (`host.loadDevSource` absent, gated in `src/unplugin.ts` and
+  unit-covered). The dock's client script ships as a self-contained browser
+  bundle (`dist/client-bundled/`, `tsdown.config.ts`'s second entry) served
+  from a dedicated middleware, because rspack has no `/@id/{specifier}` URL
+  for bare-specifier client imports.
+- **Playground + E2E** — `playground/rsbuild` (React 19) is a third symlink
+  consumer of `playground/react/src`, wired into the shared detection and
+  highlighter suites as Playwright project `rsbuild-chromium` (port 5177;
+  `pnpm build` must run first). Vue is accepted by the adapter but not
+  playground-verified.
+
+Verification: `pnpm typecheck` clean, `pnpm test` 261 passing,
+`pnpm exec playwright test` green including `rsbuild-chromium`.
 
 ### Phase 4 — Next.js host (webpack, App Router)
 
