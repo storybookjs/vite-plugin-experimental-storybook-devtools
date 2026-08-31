@@ -183,6 +183,73 @@ interface StorybookDevtoolsNextGlobalState {
 
 const GLOBAL_STATE_KEY = '__storybookDevtoolsNextGlobalState__'
 
+/**
+ * `transformedComponents` is written by the webpack transform in the compiler
+ * process but read by the hub route handler, which Next may run in a separate
+ * render-worker process — a `globalThis` singleton doesn't cross that
+ * boundary. Persist through a manifest under `.next/cache`: the writer
+ * flushes debounced on set, readers re-hydrate when the file changes.
+ */
+class PersistedComponentMap extends Map<string, string> {
+  private file: string
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private lastLoadedMtime = 0
+
+  constructor(file: string) {
+    super()
+    this.file = file
+  }
+
+  override set(key: string, value: string): this {
+    super.set(key, value)
+    if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => {
+        this.flushTimer = null
+        try {
+          fs.mkdirSync(path.dirname(this.file), { recursive: true })
+          fs.writeFileSync(this.file, JSON.stringify([...super.entries()]))
+        } catch {
+          // best effort — coverage just stays partial
+        }
+      }, 250)
+      this.flushTimer.unref?.()
+    }
+    return this
+  }
+
+  private hydrate(): void {
+    try {
+      const stat = fs.statSync(this.file)
+      if (stat.mtimeMs <= this.lastLoadedMtime) return
+      this.lastLoadedMtime = stat.mtimeMs
+      const entries = JSON.parse(fs.readFileSync(this.file, 'utf-8')) as [
+        string,
+        string,
+      ][]
+      for (const [k, v] of entries) {
+        if (!super.has(k)) super.set(k, v)
+      }
+    } catch {
+      // no manifest yet
+    }
+  }
+
+  override [Symbol.iterator](): MapIterator<[string, string]> {
+    this.hydrate()
+    return super[Symbol.iterator]()
+  }
+
+  override entries(): MapIterator<[string, string]> {
+    this.hydrate()
+    return super.entries()
+  }
+
+  override get size(): number {
+    this.hydrate()
+    return super.size
+  }
+}
+
 function getGlobalState(): StorybookDevtoolsNextGlobalState {
   const g = globalThis as unknown as Record<
     string,
@@ -195,7 +262,15 @@ function getGlobalState(): StorybookDevtoolsNextGlobalState {
       state: {
         server: undefined,
         notifications: new ConsoleNotificationService(),
-        transformedComponents: new Map<string, string>(),
+        transformedComponents: new PersistedComponentMap(
+          path.join(
+            process.cwd(),
+            '.next',
+            'cache',
+            'storybook-devtools',
+            'coverage-manifest.json',
+          ),
+        ),
         devtoolsTerminals: null,
         storybookSession: null,
         terminalLogs: [],
@@ -259,6 +334,7 @@ type NextWebpackFn = (
 ) => NextWebpackConfig
 
 export interface NextConfigWebpackShape {
+  skipTrailingSlashRedirect?: boolean
   webpack?: NextWebpackFn
   serverExternalPackages?: string[]
 }
@@ -484,6 +560,11 @@ export function withStorybookDevtools(
       ...nextConfig,
       webpack: composedWebpack,
       serverExternalPackages,
+      // Next's trailing-slash normalization 308s `<base><id>/` to the
+      // slashless URL before the hub route handler runs, breaking the panel
+      // SPA's base-relative asset resolution. Skip it unless the app pinned
+      // a value; route handlers here accept both forms.
+      skipTrailingSlashRedirect: nextConfig.skipTrailingSlashRedirect ?? true,
     } as T
   }
 }
