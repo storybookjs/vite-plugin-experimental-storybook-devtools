@@ -1,5 +1,5 @@
 import '../src/style.css'
-import type { Preview } from '@storybook/react-vite'
+import type { Preview } from 'storybook-react-rsbuild'
 
 const preview: Preview = {
   parameters: {

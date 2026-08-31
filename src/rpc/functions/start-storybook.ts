@@ -33,6 +33,13 @@ export const startStorybook = defineRpcFunction({
                   '--no-open',
                 ],
                 cwd: ctx.cwd,
+                // Same env the playgrounds' own `storybook` scripts set: app
+                // bundler configs use it to keep this plugin out of
+                // Storybook's builder (which loads the same config file).
+                env: { ...process.env, STORYBOOK: 'true' } as Record<
+                  string,
+                  string
+                >,
               },
               {
                 id: 'storybook-dev',
