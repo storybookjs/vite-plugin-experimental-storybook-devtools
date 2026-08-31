@@ -5,6 +5,7 @@ dist
 *.log
 .DS_Store
 .pnpm-store
+.next
 
 # Playwright
 /test-results/
