@@ -1,16 +1,13 @@
 /**
  * Merged Storybook + Coverage panel.
  *
- * Hosted as a standalone HTML app via `ctx.views.hostStatic`.
- * Communicates with the server plugin via RPC and fetch-based middleware endpoints.
- * All client-side DOM operations are delegated to the client via RPC broadcast
- * so that the panel works whether inline or popped out into a separate window.
+ * Served as the devframe's `clientAssets` SPA. Communicates with the server
+ * plugin entirely over devframe RPC. All client-side DOM operations are
+ * delegated to the app-page client via RPC broadcast so that the panel works
+ * whether inline or popped out into a separate window.
  */
 
-import {
-  getDevToolsRpcClient,
-  type DevToolsRpcClient,
-} from '@vitejs/devtools-kit/client'
+import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
 import {
@@ -21,15 +18,32 @@ import {
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
-let rpcClient: DevToolsRpcClient | null = null
+let rpcClient: DevframeRpcClient | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let registrySharedState: any = null
 
 async function initRpcClient() {
   try {
-    const client = await getDevToolsRpcClient()
+    const client = await connectDevframe()
     await client.ensureTrusted()
     rpcClient = client
+
+    // Boot-time config: the storybookUrl the app was launched with — an
+    // auto-derived dock URL can't carry query params, so it arrives over RPC.
+    try {
+      const config = (await (client.call as any)(
+        'component-highlighter:get-config',
+      )) as { storybookUrl?: string }
+      if (config.storybookUrl) {
+        storybookUrl = config.storybookUrl
+      }
+      // The Storybook tab renders once before this config arrives — its
+      // status banner may show the default URL and a stale "not running";
+      // re-check now that the URL and the RPC client are real.
+      initStorybookTab()
+    } catch {
+      // Keep the default storybookUrl
+    }
 
     // Subscribe to shared state
     const regState = await client.sharedState.get(
@@ -47,30 +61,33 @@ async function initRpcClient() {
     const visitState = await client.sharedState.get(
       'component-highlighter:pending-visit',
     )
-    // React to pending visit changes in real time. Shared state values are
-    // `{ value }` envelopes (devframe 0.9 requires object states).
-    const consumeVisit = (visit: any) => {
-      if (!visit) return
-      visitState.mutate((s: any) => {
-        s.value = null
-      }) // consume
-      visitStory(visit.relativeFilePath, visit.preferredStoryName)
+    // React to pending visit changes in real time
+    const currentVisit = visitState.value()
+    if (currentVisit) {
+      visitState.mutate(() => null) // consume
+      visitStory(currentVisit.relativeFilePath, currentVisit.preferredStoryName)
     }
-    consumeVisit(visitState.value()?.value)
-    visitState.on('updated', (val: any) => consumeVisit(val?.value))
+    visitState.on('updated', (val: any) => {
+      if (val) {
+        visitState.mutate(() => null) // consume
+        visitStory(val.relativeFilePath, val.preferredStoryName)
+      }
+    })
 
     const tabState = await client.sharedState.get(
       'component-highlighter:pending-tab',
     )
-    const consumeTab = (tab: any) => {
-      if (!tab) return
-      tabState.mutate((s: any) => {
-        s.value = null
-      }) // consume
-      switchTab(tab as TabId)
+    const currentTab = tabState.value()
+    if (currentTab) {
+      tabState.mutate(() => null) // consume
+      switchTab(currentTab as TabId)
     }
-    consumeTab(tabState.value()?.value)
-    tabState.on('updated', (val: any) => consumeTab(val?.value))
+    tabState.on('updated', (val: any) => {
+      if (val) {
+        tabState.mutate(() => null) // consume
+        switchTab(val as TabId)
+      }
+    })
 
     // Sync highlight toggle button state
     const hlState = await client.sharedState.get(
@@ -89,24 +106,34 @@ async function initRpcClient() {
       highlightEnabled = shouldBeActive
       syncHighlighterTabState(shouldBeActive)
     }
-    enforceHighlightForTab(hlState.value()?.value ?? false)
-    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val?.value))
+    enforceHighlightForTab(hlState.value() ?? false)
+    hlState.on('updated', (val: any) => enforceHighlightForTab(!!val))
 
     // Subscribe to selected-component shared state
     const selState = await client.sharedState.get(
       'component-highlighter:selected-component',
     )
     selState.on('updated', (val: any) => {
-      selectedComponent = val?.value
+      const unchanged = isSameSelection(val)
+      selectedComponent = val
       // Only rebuild if already on the highlighter tab — don't auto-switch
       // when the user is on another tab (context menu handles interaction there).
-      if (activeTab === 'highlighter') {
+      if (!unchanged && activeTab === 'highlighter') {
         buildHighlighterPanel()
       }
     })
   } catch {
     // RPC client not available (e.g. during build or test)
   }
+}
+
+/**
+ * Re-selecting the already-shown component (same instance, same payload)
+ * must not rebuild the inspector — a rebuild reloads every story preview
+ * iframe, which reads as a flash.
+ */
+function isSameSelection(next: RegistryInstance | null | undefined): boolean {
+  return JSON.stringify(next ?? null) === JSON.stringify(selectedComponent ?? null)
 }
 
 /** Convenience wrapper for server RPC calls */
@@ -120,11 +147,7 @@ function syncHighlighterTabState(active: boolean) {
   if (!rpcClient) return
   rpcClient.sharedState
     ?.get('component-highlighter:highlighter-tab-active')
-    .then((state: any) =>
-      state.mutate((s: any) => {
-        s.value = active
-      }),
-    )
+    .then((state: any) => state.mutate(() => active))
     .catch(() => {})
 }
 
@@ -203,10 +226,11 @@ function openInEditor(filePath: string) {
   )
 }
 
-/** Get the storybookUrl from the query string (set by the server plugin) */
+/** The Storybook URL, fetched once via the `get-config` RPC at boot. */
+let storybookUrl = 'http://localhost:6006'
+
 function getStorybookUrl(): string {
-  const params = new URLSearchParams(window.location.search)
-  return params.get('sbUrl') || 'http://localhost:6006'
+  return storybookUrl
 }
 
 // ─── Visit Story ────────────────────────────────────────────────────
@@ -230,8 +254,9 @@ async function getStorybookIndex(): Promise<
     return storybookIndexCache
   }
   try {
-    const res = await fetch('/__component-highlighter/storybook-index')
-    const data = await res.json()
+    const data = (await rpcCall('component-highlighter:storybook-index')) as {
+      entries?: Record<string, StorybookIndexEntry>
+    }
     storybookIndexCache = data.entries || {}
     storybookIndexFetchedAt = Date.now()
     return storybookIndexCache!
@@ -325,7 +350,7 @@ async function visitStory(
   // Start Storybook, show terminal, then navigate once ready
   renderStorybookState('starting')
   try {
-    await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+    await rpcCall('component-highlighter:start-storybook')
   } catch {
     // Server may not support terminal start
   }
@@ -383,6 +408,24 @@ function getActionPopover(): HTMLDivElement {
   return _actionPopover
 }
 
+/**
+ * Open the popover right-aligned to the anchor, below it — or above when a
+ * row near the viewport bottom would push items off-screen; clamp when
+ * neither side fully fits.
+ */
+function positionPopover(popover: HTMLDivElement, anchor: HTMLElement) {
+  const rect = anchor.getBoundingClientRect()
+  popover.style.left = `${rect.right}px`
+  popover.style.transform = 'translateX(-100%)'
+  popover.style.top = `${rect.bottom + 4}px`
+  popover.hidden = false
+  const height = popover.offsetHeight
+  if (rect.bottom + 4 + height > window.innerHeight) {
+    const above = rect.top - 4 - height
+    popover.style.top = `${above >= 0 ? above : Math.max(4, window.innerHeight - height - 4)}px`
+  }
+}
+
 function makePopoverItem(
   icon: string,
   label: string,
@@ -437,11 +480,7 @@ function showActionPopover(anchor: HTMLElement, entry: CoverageEntry) {
     )
   }
 
-  const rect = anchor.getBoundingClientRect()
-  popover.style.top = `${rect.bottom + 4}px`
-  popover.style.left = `${rect.right}px`
-  popover.style.transform = 'translateX(-100%)'
-  popover.hidden = false
+  positionPopover(popover, anchor)
 }
 
 /**
@@ -503,8 +542,9 @@ function registerPanelRpcHandlers() {
       name: 'component-highlighter:do-select-component',
       type: 'action',
       handler: (data: RegistryInstance | null) => {
+        const unchanged = isSameSelection(data)
         selectedComponent = data
-        if (activeTab === 'highlighter') {
+        if (!unchanged && activeTab === 'highlighter') {
           buildHighlighterPanel()
         }
       },
@@ -664,8 +704,9 @@ function renderStorybookState(state: SbState) {
 
 async function checkStorybook(): Promise<boolean> {
   try {
-    const res = await fetch('/__component-highlighter/storybook-status')
-    const data = await res.json()
+    const data = (await rpcCall('component-highlighter:storybook-status')) as {
+      running?: boolean
+    }
     return data.running === true
   } catch {
     return false
@@ -682,7 +723,7 @@ async function startStorybook() {
   renderStorybookState('starting')
 
   try {
-    await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+    await rpcCall('component-highlighter:start-storybook')
   } catch {
     // Server may not support terminal start; fall through to polling
   }
@@ -827,8 +868,9 @@ let lastVisibilityKey = ''
 
 async function fetchCoverage(): Promise<CoverageData | null> {
   try {
-    const res = await fetch('/__component-highlighter/coverage')
-    return await res.json()
+    return (await rpcCall(
+      'component-highlighter:get-coverage',
+    )) as CoverageData
   } catch {
     return null
   }
@@ -1175,6 +1217,146 @@ async function buildCoveragePanel(coverage: CoverageData) {
 /** Currently selected component data (set via shared state from client) */
 let selectedComponent: RegistryInstance | null = null
 
+/**
+ * Scroll a story card into view after creation — match the requested name
+ * loosely (the index title-cases it); fall back to the newest card.
+ */
+function scrollToStoryCard(name?: string) {
+  const cards = document.querySelectorAll<HTMLElement>('.hl-story-card')
+  if (cards.length === 0) return
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  let target: HTMLElement | undefined
+  if (name) {
+    target = Array.from(cards).find(
+      (c) =>
+        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
+        norm(name),
+    )
+  }
+  const card = target ?? cards[cards.length - 1]
+  if (!card) return
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  // The cards' lazy preview iframes grow the list after the first scroll —
+  // re-assert once the layout has settled.
+  setTimeout(() => card.scrollIntoView({ block: 'nearest' }), 700)
+}
+
+function createStoryCard(
+  story: StorybookIndexEntry,
+  relPath: string,
+  sbUrl: string,
+): HTMLElement {
+  const storyCard = document.createElement('div')
+  storyCard.className = 'hl-story-card'
+  storyCard.dataset['storyId'] = story.id
+
+  const iframe = document.createElement('iframe')
+  iframe.className = 'hl-story-iframe'
+  iframe.src = `${sbUrl}/iframe.html?id=${encodeURIComponent(story.id)}&viewMode=story&shortcuts=false&singleStory=true`
+  iframe.title = story.name
+  iframe.setAttribute('loading', 'lazy')
+  storyCard.appendChild(iframe)
+
+  const storyLabel = document.createElement('div')
+  storyLabel.className = 'hl-story-label'
+  storyLabel.textContent = story.name
+  storyCard.appendChild(storyLabel)
+
+  // Click to navigate in the Storybook tab
+  storyCard.addEventListener('click', () => {
+    visitStory(relPath, story.name)
+    switchTab('storybook')
+  })
+
+  return storyCard
+}
+
+/**
+ * After a story is created, update the stories list in place — appending
+ * only the new card keeps every existing preview iframe alive (a full pane
+ * rebuild reloads them all, which reads as a flash) and gives the new card
+ * its final fixed-height layout immediately, so scrolling to it is reliable.
+ * Returns false when the list isn't updatable in place (pane gone, or no
+ * stories resolvable yet) so the caller can fall back to a full rebuild.
+ */
+async function refreshStoriesAfterCreate(
+  relPath: string,
+  componentName: string | undefined,
+  requestedName: string,
+): Promise<boolean> {
+  const pane = document.getElementById('pane-highlighter')
+  const body = pane?.querySelector('.hl-stories-body')
+  if (!pane || !body) return false
+
+  const stories = await findMatchingStories(relPath, componentName)
+  if (stories.length === 0) return false
+
+  let list = body.querySelector('.hl-stories-list')
+  if (!list) {
+    // First story: replace the empty-state / not-running card with a list
+    body.innerHTML = ''
+    list = document.createElement('div')
+    list.className = 'hl-stories-list'
+    body.appendChild(list)
+  }
+
+  const sbUrl = getStorybookUrl()
+  const existing = new Set(
+    Array.from(list.querySelectorAll<HTMLElement>('.hl-story-card')).map(
+      (c) => c.dataset['storyId'],
+    ),
+  )
+  let appended: HTMLElement | null = null
+  for (const story of stories) {
+    if (existing.has(story.id)) continue
+    appended = createStoryCard(story, relPath, sbUrl)
+    list.appendChild(appended)
+  }
+
+  const hdr = pane.querySelector('.hl-stories-section .hl-section-hdr')
+  if (hdr) {
+    hdr.innerHTML = `<span class="hl-section-title">Stories <span class="cov-section-count">${stories.length}</span></span>`
+  }
+
+  const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const target =
+    Array.from(list.querySelectorAll<HTMLElement>('.hl-story-card')).find(
+      (c) =>
+        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
+        norm(requestedName),
+    ) ??
+    appended ??
+    list.lastElementChild
+  if (target) {
+    scrollCardIntoView(target as HTMLElement, body as HTMLElement)
+  }
+  return true
+}
+
+/**
+ * Scroll a story card into view and verify it landed. A single
+ * scrollIntoView is unreliable here: the panel iframe is 0x0 whenever the
+ * dock is closed (scrolls silently no-op), smooth scrolls get cancelled by
+ * layout shifts, and late rebuilds reset scrollTop. Retry with instant
+ * scrolls until the card is actually within the scroller, or give up.
+ */
+function scrollCardIntoView(card: HTMLElement, scroller: HTMLElement) {
+  let attempts = 0
+  const tick = () => {
+    if (!card.isConnected) return
+    const cr = card.getBoundingClientRect()
+    const sr = scroller.getBoundingClientRect()
+    const visibleViewport = sr.height > 0
+    const inView =
+      visibleViewport && cr.top >= sr.top - 2 && cr.bottom <= sr.bottom + 2
+    if (inView) return
+    if (visibleViewport) card.scrollIntoView({ block: 'nearest' })
+    attempts++
+    if (attempts < 40) setTimeout(tick, 250)
+  }
+  tick()
+}
+
 /** Find stories matching a component by file path or title */
 async function findMatchingStories(relativeFilePath: string, componentName?: string): Promise<StorybookIndexEntry[]> {
   const entries = await getStorybookIndex()
@@ -1486,29 +1668,63 @@ async function buildHighlighterPanel() {
       // not the snapshot captured when this inspector was rendered.
       const latest =
         fetchRegistry().find((i) => i.id === comp.id) ?? comp
-      await rpcCall('component-highlighter:create-story', {
-        meta: latest.meta,
-        serializedProps: latest.serializedProps,
-        storyName: storyNameInput.value.trim() || undefined,
-      })
-      // Bust the storybook index cache and retry until the new story appears
-      const refreshAfterCreate = async () => {
-        lastCoverageJson = ''
-        refreshCoverage()
-        // Retry with cache busting so the newly created story is found
-        for (let i = 0; i < 10; i++) {
-          storybookIndexCache = null
-          const stories = await findMatchingStories(
+      const requestedName = storyNameInput.value.trim()
+      const preIds = new Set(
+        (
+          await findMatchingStories(
             comp.meta.relativeFilePath || comp.meta.filePath,
             comp.meta.componentName,
           )
-          if (stories.length > 0) {
-            buildHighlighterPanel()
-            return
+        ).map((st) => st.id),
+      )
+      await rpcCall('component-highlighter:create-story', {
+        meta: latest.meta,
+        serializedProps: latest.serializedProps,
+        storyName: requestedName || undefined,
+        // Stay on this view: the new story appears in the list below
+        // instead of the panel jumping to the Storybook tab.
+        skipNavigation: true,
+      })
+      // Bust the storybook index cache and retry until the new story appears
+      const refreshAfterCreate = async () => {
+        try {
+          lastCoverageJson = ''
+          refreshCoverage()
+          // Retry with cache busting until the index contains the NEW story —
+          // a non-empty list isn't enough, pre-existing stories satisfy that
+          // immediately while the indexer is still catching up.
+          const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+          for (let i = 0; i < 20; i++) {
+            storybookIndexCache = null
+            const stories = await findMatchingStories(
+              comp.meta.relativeFilePath || comp.meta.filePath,
+              comp.meta.componentName,
+            )
+            const fresh = stories.some(
+              (st) =>
+                !preIds.has(st.id) || norm(st.name) === norm(requestedName),
+            )
+            if (fresh) {
+              const updated = await refreshStoriesAfterCreate(
+                comp.meta.relativeFilePath || comp.meta.filePath,
+                comp.meta.componentName,
+                requestedName,
+              )
+              if (!updated) {
+                await buildHighlighterPanel()
+                scrollToStoryCard(requestedName)
+              }
+              return
+            }
+            await new Promise(r => setTimeout(r, 1000))
           }
-          await new Promise(r => setTimeout(r, 1000))
+          buildHighlighterPanel() // rebuild anyway after max retries
+        } finally {
+          // The in-place refresh keeps this button alive — reset it
+          // (the old full rebuild recreated it as a side effect).
+          addBtn.disabled = false
+          addBtn.textContent = 'Add'
         }
-        buildHighlighterPanel() // rebuild anyway after max retries
       }
       setTimeout(refreshAfterCreate, 1500)
     } catch {
@@ -1554,7 +1770,7 @@ async function buildHighlighterPanel() {
       showTerminalTab()
 
       try {
-        await fetch('/__component-highlighter/start-storybook', { method: 'POST' })
+        await rpcCall('component-highlighter:start-storybook')
       } catch { /* best effort */ }
 
       // Replace with loading spinner
@@ -1599,35 +1815,39 @@ async function buildHighlighterPanel() {
 
     const sbUrl = getStorybookUrl()
     for (const story of matchingStories) {
-      const storyCard = document.createElement('div')
-      storyCard.className = 'hl-story-card'
-
-      const iframe = document.createElement('iframe')
-      iframe.className = 'hl-story-iframe'
-      iframe.src = `${sbUrl}/iframe.html?id=${encodeURIComponent(story.id)}&viewMode=story&shortcuts=false&singleStory=true`
-      iframe.title = story.name
-      iframe.setAttribute('loading', 'lazy')
-      storyCard.appendChild(iframe)
-
-      const storyLabel = document.createElement('div')
-      storyLabel.className = 'hl-story-label'
-      storyLabel.textContent = story.name
-      storyCard.appendChild(storyLabel)
-
-      // Click to navigate in the Storybook tab
-      storyCard.addEventListener('click', () => {
-        visitStory(relPath, story.name)
-        switchTab('storybook')
-      })
-
-      storiesList.appendChild(storyCard)
+      storiesList.appendChild(createStoryCard(story, relPath, sbUrl))
     }
     storiesBody.appendChild(storiesList)
   }
 
   storiesSection.appendChild(storiesBody)
-  root.appendChild(storiesSection)
 
+  // Rebuilding for the component already on screen: swap only the inspector
+  // sections and keep the existing stories section's DOM — recreating (or
+  // even moving) the preview iframes reloads them, which reads as a flash.
+  const existingRoot = pane.querySelector<HTMLElement>(':scope > .hl-root')
+  const existingStories = existingRoot?.querySelector<HTMLElement>(
+    ':scope > .hl-stories-section',
+  )
+  if (
+    existingRoot &&
+    existingStories &&
+    existingRoot.dataset['component'] === comp.meta.filePath
+  ) {
+    while (
+      existingRoot.firstChild &&
+      existingRoot.firstChild !== existingStories
+    ) {
+      existingRoot.removeChild(existingRoot.firstChild)
+    }
+    while (root.firstChild) {
+      existingRoot.insertBefore(root.firstChild, existingStories)
+    }
+    return
+  }
+
+  root.dataset['component'] = comp.meta.filePath
+  root.appendChild(storiesSection)
   pane.innerHTML = ''
   pane.appendChild(root)
 }
@@ -1689,11 +1909,7 @@ function showHighlighterPopover(
     )
   }
 
-  const rect = anchor.getBoundingClientRect()
-  popover.style.top = `${rect.bottom + 4}px`
-  popover.style.left = `${rect.right}px`
-  popover.style.transform = 'translateX(-100%)'
-  popover.hidden = false
+  positionPopover(popover, anchor)
 }
 
 // ─── Terminal tab ───────────────────────────────────────────────────
@@ -1705,10 +1921,9 @@ function stripAnsi(s: string): string {
 
 async function pollTerminalLogs() {
   try {
-    const res = await fetch(
-      `/__component-highlighter/terminal-logs?since=${terminalLogOffset}`,
-    )
-    const data: { lines: string[]; total: number } = await res.json()
+    const data = (await rpcCall('component-highlighter:get-terminal-logs', {
+      since: terminalLogOffset,
+    })) as { lines: string[]; total: number }
 
     if (data.lines.length > 0) {
       terminalLogOffset = data.total

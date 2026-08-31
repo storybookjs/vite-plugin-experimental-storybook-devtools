@@ -89,19 +89,20 @@ export class ConsoleNotificationService implements NotificationService {
 // ---------------------------------------------------------------------------
 
 /**
- * Accepts any object with an `add` method matching the DevTools Logs API shape.
- * We keep this as a plain interface so the module stays independent of
- * `@vitejs/devtools-kit` — callers pass in `ctx.logs` at runtime.
+ * Accepts any object with an `add` method matching the devframe hub's
+ * `DevframeMessagesHost` shape (`ctx.messages` under `@vitejs/devtools-kit`
+ * 0.6). Kept as a plain interface so the module stays independent of
+ * `@vitejs/devtools-kit` — callers pass in `ctx.messages` at runtime.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DevToolsLogContext = any
+type DevToolsMessagesContext = any
 
 export class DevToolsNotificationService implements NotificationService {
-  private logs: DevToolsLogContext
+  private messages: DevToolsMessagesContext
   private fallback: ConsoleNotificationService
 
-  constructor(logs: DevToolsLogContext) {
-    this.logs = logs
+  constructor(messages: DevToolsMessagesContext) {
+    this.messages = messages
     this.fallback = new ConsoleNotificationService()
   }
 
@@ -117,9 +118,9 @@ export class DevToolsNotificationService implements NotificationService {
         ...(notification.category !== undefined && { category: notification.category }),
       }
 
-      const result = this.logs.add(entry)
+      const result = this.messages.add(entry)
 
-      // The DevTools add() returns a Promise<DevToolsLogHandle>.
+      // The messages host's add() returns a Promise<DevframeMessageHandle>.
       // We provide a best-effort sync wrapper.
       let resolvedHandle: { update: (p: Record<string, unknown>) => void; dismiss: () => void } | null = null
       if (result && typeof result.then === 'function') {

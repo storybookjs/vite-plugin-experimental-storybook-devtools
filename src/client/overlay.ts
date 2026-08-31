@@ -106,11 +106,12 @@ async function checkStoryFile(
   }
 
   try {
-    const response = await fetch(
-      `/__component-highlighter/check-story?componentPath=${encodeURIComponent(componentPath)}`,
-    )
-    if (response.ok) {
-      const result = await response.json()
+    const ctx = getHostClientContext()
+    if (ctx?.rpc?.call) {
+      const result = (await (ctx.rpc.call as any)(
+        'component-highlighter:check-story',
+        { componentPath },
+      )) as { hasStory: boolean; storyPath: string | null }
       storyFileCache.set(componentPath, result)
       return result
     }
@@ -562,7 +563,7 @@ export async function showContextMenu(
     async visitStory(relativeFilePath: string) {
       const ctx = getHostClientContext() as any
       if (ctx?.docks?.switchEntry) {
-        await ctx.docks.switchEntry('storybook-devtools-panel')
+        await ctx.docks.switchEntry('storybook-devtools')
       }
 
       try {
@@ -579,10 +580,11 @@ export async function showContextMenu(
       }
 
       try {
-        const res = await fetch(
-          '/__component-highlighter/storybook-index',
-        )
-        const data = await res.json()
+        const rpcCtx = getHostClientContext()
+        if (!rpcCtx?.rpc?.call) return
+        const data = (await (rpcCtx.rpc.call as any)(
+          'component-highlighter:storybook-index',
+        )) as { entries?: Record<string, any> }
         const entries = data.entries || {}
         const storyId = pickStoryId(entries, relativeFilePath)
         if (storyId) {
@@ -675,11 +677,7 @@ export function pushSelectedComponentRPC(
     if (ctx.rpc.sharedState) {
       ctx.rpc.sharedState
         .get('component-highlighter:selected-component')
-        .then((state: any) =>
-          state.mutate((s: any) => {
-            s.value = data
-          }),
-        )
+        .then((state: any) => state.mutate(() => data))
         .catch(() => {})
     }
   } catch {

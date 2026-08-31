@@ -16,6 +16,7 @@ import { debug, error as logError } from './logger'
 // Track previous subscription so we never stack duplicate listeners
 // (clientScriptSetup may be called more than once on HMR or dock reconnect)
 let unsubLogInfo: (() => void) | null = null
+let storyCreatedHandlerRegistered = false
 
 export default function clientScriptSetup(ctx: DockClientScriptContext): void {
   debug('clientScriptSetup called')
@@ -91,58 +92,67 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
     }
   })
 
-  // Listen for story creation confirmation from the server via HMR
-  if (import.meta.hot) {
-    import.meta.hot.on(
-      'component-highlighter:story-created',
-      async (data: {
-        filePath: string
-        componentName: string
-        componentPath?: string
-        relativeFilePath?: string
-        storyName?: string
-        isAppend?: boolean
-        skipNavigation?: boolean
-      }) => {
-        debug(`Story created for ${data.componentName}: ${data.filePath}`)
-        showStoryCreationFeedback('success', data.filePath, data.componentPath)
-
-        // Skip navigation for batch operations (e.g. "Create all" from coverage panel)
-        if (data.skipNavigation) return
-
-        // If Storybook is already running, tell the panel to navigate to the
-        // newly created story via RPC (works whether panel is inline or popped out)
-        const relPath = data.relativeFilePath
-        if (!relPath) return
-
-        try {
-          const statusRes = await fetch(
-            '/__component-highlighter/storybook-status',
+  // Listen for story creation confirmation, broadcast by the server via RPC.
+  if (!storyCreatedHandlerRegistered && ctx.rpc.client) {
+    storyCreatedHandlerRegistered = true
+    try {
+      ctx.rpc.client.register({
+        name: 'component-highlighter:story-created',
+        type: 'action',
+        handler: async (data: {
+          filePath: string
+          componentName: string
+          componentPath?: string
+          relativeFilePath?: string
+          storyName?: string
+          isAppend?: boolean
+          skipNavigation?: boolean
+        }) => {
+          debug(`Story created for ${data.componentName}: ${data.filePath}`)
+          showStoryCreationFeedback(
+            'success',
+            data.filePath,
+            data.componentPath,
           )
-          if (!statusRes.ok) return
-          const status = await statusRes.json()
-          if (!status.running) return
-        } catch {
-          return
-        }
 
-        // Close the context menu now that we're navigating to the story
-        hideContextMenu()
+          // Skip navigation for batch operations (e.g. "Create all" from coverage panel)
+          if (data.skipNavigation) return
 
-        // Switch to the panel dock and tell it to visit the story via RPC
-        if (ctx.docks?.switchEntry) {
-          await ctx.docks.switchEntry('storybook-devtools-panel')
-        }
+          // If Storybook is already running, tell the panel to navigate to
+          // the newly created story via RPC (works whether panel is inline
+          // or popped out)
+          const relPath = data.relativeFilePath
+          if (!relPath) return
 
-        try {
-          await (ctx.rpc.call as any)('component-highlighter:visit-story', {
-            relativeFilePath: relPath,
-            preferredStoryName: data.storyName,
-          })
-        } catch {
-          // Panel may not have registered its handler yet; best effort
-        }
-      },
-    )
+          try {
+            const status = (await (ctx.rpc.call as any)(
+              'component-highlighter:storybook-status',
+            )) as { running: boolean }
+            if (!status.running) return
+          } catch {
+            return
+          }
+
+          // Close the context menu now that we're navigating to the story
+          hideContextMenu()
+
+          // Switch to the panel dock and tell it to visit the story via RPC
+          if (ctx.docks?.switchEntry) {
+            await ctx.docks.switchEntry('storybook-devtools')
+          }
+
+          try {
+            await (ctx.rpc.call as any)('component-highlighter:visit-story', {
+              relativeFilePath: relPath,
+              preferredStoryName: data.storyName,
+            })
+          } catch {
+            // Panel may not have registered its handler yet; best effort
+          }
+        },
+      } as any)
+    } catch {
+      // Client RPC registration not supported
+    }
   }
 }

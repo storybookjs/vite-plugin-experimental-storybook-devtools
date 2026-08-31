@@ -14,10 +14,18 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 ## Runtime flow (end-to-end)
 
-1. **Vite plugin setup** (`src/create-component-highlighter-plugin.ts`)
-   - Registers transform hooks for the active framework
-   - Registers DevTools dock integration (panel, RPC, client script)
-   - Exposes server middleware endpoints (`/__component-highlighter/*`)
+1. **Vite plugin setup** (`src/create-component-highlighter-plugin.ts` + `src/devframe.ts`)
+   - `create-component-highlighter-plugin.ts` registers the transform hooks for
+     the active framework and returns `[transformPlugin,
+     createPluginFromDevframe(definition, { setup: kitSetup })]` — Vite
+     flattens plugin arrays
+   - `devframe.ts` builds the `storybook-devtools` devframe (`defineDevframe`):
+     registers the plugin's full RPC surface and shared state on the
+     framework-neutral `DevframeNodeContext`, and serves the panel as
+     `clientAssets`
+   - `kitSetup` (kit-only, runs after the devframe's own `setup(ctx)`) wires
+     docks, commands, terminals, messages, and diagnostics — surfaces not part
+     of the portable `DevframeNodeContext`
    - Handles story file creation via RPC
 
 2. **Framework transform** (`src/frameworks/*/transform.ts`)
@@ -63,9 +71,15 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      exposes `getNuxtDevToolsHookScript()` so `nuxt.config.ts` can inject the
      same hook into SSR HTML before hydration. It also exposes
      `getNuxtViteDevToolsInjectionScript()` because Nuxt SSR does not run the
-     Vite DevTools `transformIndexHtml` injection for the embedded dock. The
-     core transform hook skips `options.ssr`, so the browser runtime never
-     enters Nuxt's server module graph.
+     Vite DevTools `transformIndexHtml` injection for the embedded dock, and
+     `viteDevToolsBridgeModule`, a Nuxt module that clears Nuxt's
+     `_skip_transform` diversion for devtools-owned paths (`/__devtools*`,
+     `/__devframes*`, `/__storybook-devtools*`) and re-bases `/@id/*` /
+     dock-imports URLs onto Vite's build-assets base, so the DevTools HTTP
+     surface is reachable through Nuxt's dev server (the RPC WebSocket rides a
+     sidecar port and needs no bridging). The core transform hook skips
+     `options.ssr`, so the browser runtime never enters Nuxt's server module
+     graph.
    - Registers component instances in a global `Map` registry on `window`
    - Tracks props, serialized props, and DOM anchor elements
    - Emits `component-highlighter:register/unregister/update-props` custom events
@@ -77,6 +91,13 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      later (e.g. after a route change).
 
 4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
+   - `listeners.ts` and `overlay.ts` connect to the host-published app-page
+     client context via `getHostClientContext()`
+     (`src/client/utils/host-context.ts`, which reads
+     `__DEVFRAME_HUB_CLIENT_CONTEXT__` from the embedded dock host, falling
+     back to the standalone viewer's `__VITE_DEVTOOLS_CLIENT_CONTEXT__`) —
+     distinct from the panel (above), which is a separate devframe SPA
+     connecting via `connectDevframe()` (`devframe/client`)
    - `listeners.ts` dispatches `component-highlighter:listeners-ready` once its
      registry event listeners are attached (triggers the runtime replay above)
    - Renders highlight rectangles in `#component-highlighter-container`
@@ -86,6 +107,14 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
    - Interaction recorder (`src/client/interaction-recorder.ts`) captures user actions as play function steps
 
 5. **DevTools panel** (`src/panel/panel.ts`)
+   - Served as the `storybook-devtools` devframe's `clientAssets` SPA at
+     `/__storybook-devtools/` (the devframe's `id`); connects via
+     `connectDevframe()` from `devframe/client` and awaits `ensureTrusted()`
+     before subscribing to shared state. The panel's dock entry is
+     auto-derived from the devframe definition by `createPluginFromDevframe`
+     (dock id `storybook-devtools`) — distinct from the action dock that opens
+     the highlighter overlay, id `component-highlighter`, registered
+     separately via `defineDockEntry` in `kitSetup`
    - Four tabs: Storybook (embedded iframe), Coverage (dashboard), Terminal (process output), Docs
    - Coverage tab: lists all detected components, shows story status, bulk "Create all" button
    - Panel communicates via Vite DevTools RPC (works whether inline or popped out)
@@ -95,29 +124,54 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
    - Receives payload from client via DevTools RPC
    - Generates framework-specific story source (React `.stories.tsx`, Vue `.stories.ts`)
    - Writes new files or appends to existing story files
-   - Sends HMR event back to client for feedback
+   - Broadcasts the `component-highlighter:story-created` RPC event back to the client for feedback
 
-## Server middleware endpoints
+## Server RPC surface
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/__component-highlighter/check-story` | GET | Check if a story file exists for a component |
-| `/__component-highlighter/coverage` | GET | Return coverage data for all detected components |
-| `/__component-highlighter/storybook-status` | GET | Check if Storybook dev server is running |
-| `/__component-highlighter/storybook-index` | GET | Proxy Storybook's index.json for story entries |
-| `/__component-highlighter/start-storybook` | POST | Start a Storybook dev server process |
-| `/__component-highlighter/terminal-logs` | GET | Stream accumulated Storybook process output |
-| `/__open-in-editor` | GET | Open a file in the user's editor (Vite built-in, not registered by this plugin) |
+There is no HTTP middleware. Every server routine is a `devframe` RPC function,
+one file per function under `src/rpc/functions/`, collected by the
+`src/rpc/index.ts` barrel into `serverFunctions` and registered in
+`src/devframe.ts` via `ctx.scope('component-highlighter').rpc.register(fn)` —
+functions declare bare names (e.g. `create-story`) and the scope namespaces
+them to `component-highlighter:create-story` on the wire. `src/rpc/index.ts`
+also carries the `declare module 'devframe'` augmentation of
+`DevframeRpcServerFunctions` (derived from `serverFunctions` via
+`RpcDefinitionsToFunctionsWithNamespace`) / `DevframeRpcClientFunctions` /
+`DevframeRpcSharedStates` (`devframe`, not `@vitejs/devtools-kit`, owns these
+registries as of kit 0.6 — the kit re-exports the same interfaces).
+
+Panel bootstrap and Storybook process control:
+
+| RPC function | Type | Purpose |
+|---------------|------|---------|
+| `component-highlighter:get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }`. Replaces the removed `?sbUrl=` query param — an auto-derived dock URL can't carry query params |
+| `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding |
+| `component-highlighter:storybook-index` | query | Proxy of Storybook's `index.json` |
+| `component-highlighter:start-storybook` | action | Start a Storybook dev server child process via `ctx.terminals` |
+| `component-highlighter:get-terminal-logs` | query | Tail the buffered Storybook process output (`since` offset) |
+| `component-highlighter:check-story` | query | Whether a story file exists for a given component path |
+| `component-highlighter:create-story` | action | Generate + write a story file from serialized props; broadcasts `story-created` (see below) |
+| `component-highlighter:get-coverage` | query | Compute and return coverage data |
+
+`/__open-in-editor` remains available separately (Vite's own built-in endpoint, not registered by this plugin).
+
+The remaining RPC functions — registry sync, panel↔client relay, notifications
+— are covered in the "Panel↔Client communication" and "Shared state" sections
+below.
 
 ## Key modules (where to edit)
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/create-component-highlighter-plugin.ts` | Server entrypoint, RPC wiring, endpoints, virtual module serving. Registers docks via `defineDockEntry`; registers a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/create-component-highlighter-plugin.ts` | Server entrypoint: transform hooks, virtual module serving, mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) registers docks via `defineDockEntry`, commands, and a `ctx.diagnostics` catalog (`CH_TRANSFORM_FAILED`, `CH_UNSUPPORTED_PATTERN`) emitted from the transform hook |
+| `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
+| `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
+| `src/rpc/index.ts` | Barrel: `serverFunctions` array + the `declare module 'devframe'` augmentation (`DevframeRpcServerFunctions`/`DevframeRpcClientFunctions`/`DevframeRpcSharedStates`) |
+| `src/context.ts` | `WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>` — lets each RPC function's `setup(ctx)` read the deps `createStorybookDevframe` was called with |
 | `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
 | `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
 | `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |
-| `src/frameworks/nuxt/plugin.ts` | Nuxt entry point: reuses Vue instrumentation and exports SSR head-script helpers for the Vue hook and embedded Vite DevTools dock |
+| `src/frameworks/nuxt/plugin.ts` | Nuxt entry point: reuses Vue instrumentation, exports SSR head-script helpers for the Vue hook and embedded Vite DevTools dock, and the `viteDevToolsBridgeModule` Nuxt module that makes the DevTools HTTP routes reachable through Nuxt's dev server |
 | `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook; Vue: `component:added/updated/removed` hook-event reconciler) |
 | `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer, `createLivePropEditor` — the framework-agnostic live prop-edit machinery; runtimes supply only `applyOverride`) |
 | `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
@@ -179,25 +233,25 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 | `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
 | `component-highlighter:set-prop` | `do-set-prop` | Panel live-edits a prop → client calls `__componentHighlighterSetProp` |
 | `component-highlighter:reset-prop` | `do-reset-prop` | Panel resets a prop to its original → client calls `__componentHighlighterResetProp` |
+| `component-highlighter:highlight-coverage-batch` | `do-highlight-coverage-batch` | Batch-highlight coverage instances on the app page (Preview button) |
+| `component-highlighter:select-component` | `do-select-component` | Client/overlay → panel: select a component in the highlighter panel |
 | `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
 | `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |
+| — (create-story handler) | `story-created` | Server→client RPC broadcast of the story creation result (not a Vite HMR custom event); the client relays it to the panel's `visit-story` RPC when Storybook is running |
 | — (command handler) | `do-open-url` | Open a URL in a new browser tab (e.g. Storybook docs) |
 | — (command handler) | `do-open-panel-tab` | Switch the dock to the Storybook panel entry |
 | — (command handler) | `do-switch-tab` | Switch to a specific tab within the panel (registered in panel.ts) |
 
 ## Shared state (auto-synced between server and clients)
 
-> devframe 0.9 / devtools-kit 0.6 shared state is immer-backed and requires an
-> **object** value (`get<T extends object>`). Scalar/nullable states are
-> therefore wrapped in a `{ value }` envelope (the `Type` column shows the
-> envelope payload). Arrays are objects, so `registry` stays flat.
-
 | Key | Type | Purpose |
 |-----|------|---------|
 | `component-highlighter:registry` | `SerializedRegistryInstance[]` | Component instances synced from client to panel |
-| `component-highlighter:pending-visit` | `{ value: { relativeFilePath, preferredStoryName } \| null }` | Story navigation request (consumed by panel) |
-| `component-highlighter:pending-tab` | `{ value: string \| null }` | Tab switch request (consumed by panel) |
-| `component-highlighter:highlight-active` | `{ value: boolean }` | Whether highlight mode is on (syncs panel toggle button) |
+| `component-highlighter:pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request (consumed by panel) |
+| `component-highlighter:pending-tab` | `string \| null` | Tab switch request (consumed by panel) |
+| `component-highlighter:highlight-active` | `boolean` | Whether highlight mode is on (syncs panel toggle button) |
+| `component-highlighter:selected-component` | `SerializedRegistryInstance \| null` | Currently selected component (synced from client to panel) |
+| `component-highlighter:highlighter-tab-active` | `boolean` | Whether the panel's highlighter tab is active (drives whether client clicks go to the panel or show the context menu) |
 
 ## DevTools commands (Mod+K palette)
 
@@ -367,7 +421,7 @@ When you change any of the following, update this file in the same PR:
 
 - module responsibilities
 - story creation flow
-- server middleware endpoints
+- server RPC surface
 - runtime registration model
 - context menu structure or IDs
 - panel tabs or features

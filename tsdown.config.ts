@@ -18,6 +18,11 @@ export default defineConfig({
   external: [
     'vite',
     '@vitejs/devtools-kit',
+    '@vitejs/devtools-kit/node',
+    '@vitejs/devtools-kit/client',
+    '@vitejs/devtools-kit/constants',
+    'devframe',
+    'devframe/client',
     '@babel/parser',
     '@babel/traverse',
     '@babel/generator',

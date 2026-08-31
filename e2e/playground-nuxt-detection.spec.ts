@@ -52,9 +52,6 @@ test.describe('Nuxt SSR playground detection coverage', () => {
     const html = await response.text()
     expect(html).toContain('TaskFlow Nuxt SSR')
     expect(html).toContain('Review component highlighter PR')
-    // devframe 0.9 / devtools-kit 0.6: the dock is bootstrapped by a runtime
-    // module script that loads the hub-ui embedded bundle at
-    // `/__devtools/embedded.js` (was the old `virtual:vite-devtools-injection`).
     expect(html).toContain('/__devtools/embedded.js')
   })
 
