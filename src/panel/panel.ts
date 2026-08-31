@@ -37,6 +37,10 @@ async function initRpcClient() {
       if (config.storybookUrl) {
         storybookUrl = config.storybookUrl
       }
+      // The Storybook tab renders once before this config arrives — its
+      // status banner may show the default URL and a stale "not running";
+      // re-check now that the URL and the RPC client are real.
+      initStorybookTab()
     } catch {
       // Keep the default storybookUrl
     }
@@ -1226,6 +1230,122 @@ function scrollToStoryCard(name?: string) {
   setTimeout(() => card.scrollIntoView({ block: 'nearest' }), 700)
 }
 
+function createStoryCard(
+  story: StorybookIndexEntry,
+  relPath: string,
+  sbUrl: string,
+): HTMLElement {
+  const storyCard = document.createElement('div')
+  storyCard.className = 'hl-story-card'
+  storyCard.dataset['storyId'] = story.id
+
+  const iframe = document.createElement('iframe')
+  iframe.className = 'hl-story-iframe'
+  iframe.src = `${sbUrl}/iframe.html?id=${encodeURIComponent(story.id)}&viewMode=story&shortcuts=false&singleStory=true`
+  iframe.title = story.name
+  iframe.setAttribute('loading', 'lazy')
+  storyCard.appendChild(iframe)
+
+  const storyLabel = document.createElement('div')
+  storyLabel.className = 'hl-story-label'
+  storyLabel.textContent = story.name
+  storyCard.appendChild(storyLabel)
+
+  // Click to navigate in the Storybook tab
+  storyCard.addEventListener('click', () => {
+    visitStory(relPath, story.name)
+    switchTab('storybook')
+  })
+
+  return storyCard
+}
+
+/**
+ * After a story is created, update the stories list in place — appending
+ * only the new card keeps every existing preview iframe alive (a full pane
+ * rebuild reloads them all, which reads as a flash) and gives the new card
+ * its final fixed-height layout immediately, so scrolling to it is reliable.
+ * Returns false when the list isn't updatable in place (pane gone, or no
+ * stories resolvable yet) so the caller can fall back to a full rebuild.
+ */
+async function refreshStoriesAfterCreate(
+  relPath: string,
+  componentName: string | undefined,
+  requestedName: string,
+): Promise<boolean> {
+  const pane = document.getElementById('pane-highlighter')
+  const body = pane?.querySelector('.hl-stories-body')
+  if (!pane || !body) return false
+
+  const stories = await findMatchingStories(relPath, componentName)
+  if (stories.length === 0) return false
+
+  let list = body.querySelector('.hl-stories-list')
+  if (!list) {
+    // First story: replace the empty-state / not-running card with a list
+    body.innerHTML = ''
+    list = document.createElement('div')
+    list.className = 'hl-stories-list'
+    body.appendChild(list)
+  }
+
+  const sbUrl = getStorybookUrl()
+  const existing = new Set(
+    Array.from(list.querySelectorAll<HTMLElement>('.hl-story-card')).map(
+      (c) => c.dataset['storyId'],
+    ),
+  )
+  let appended: HTMLElement | null = null
+  for (const story of stories) {
+    if (existing.has(story.id)) continue
+    appended = createStoryCard(story, relPath, sbUrl)
+    list.appendChild(appended)
+  }
+
+  const hdr = pane.querySelector('.hl-stories-section .hl-section-hdr')
+  if (hdr) {
+    hdr.innerHTML = `<span class="hl-section-title">Stories <span class="cov-section-count">${stories.length}</span></span>`
+  }
+
+  const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const target =
+    Array.from(list.querySelectorAll<HTMLElement>('.hl-story-card')).find(
+      (c) =>
+        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
+        norm(requestedName),
+    ) ??
+    appended ??
+    list.lastElementChild
+  if (target) {
+    scrollCardIntoView(target as HTMLElement, body as HTMLElement)
+  }
+  return true
+}
+
+/**
+ * Scroll a story card into view and verify it landed. A single
+ * scrollIntoView is unreliable here: the panel iframe is 0x0 whenever the
+ * dock is closed (scrolls silently no-op), smooth scrolls get cancelled by
+ * layout shifts, and late rebuilds reset scrollTop. Retry with instant
+ * scrolls until the card is actually within the scroller, or give up.
+ */
+function scrollCardIntoView(card: HTMLElement, scroller: HTMLElement) {
+  let attempts = 0
+  const tick = () => {
+    if (!card.isConnected) return
+    const cr = card.getBoundingClientRect()
+    const sr = scroller.getBoundingClientRect()
+    const visibleViewport = sr.height > 0
+    const inView =
+      visibleViewport && cr.top >= sr.top - 2 && cr.bottom <= sr.bottom + 2
+    if (inView) return
+    if (visibleViewport) card.scrollIntoView({ block: 'nearest' })
+    attempts++
+    if (attempts < 40) setTimeout(tick, 250)
+  }
+  tick()
+}
+
 /** Find stories matching a component by file path or title */
 async function findMatchingStories(relativeFilePath: string, componentName?: string): Promise<StorybookIndexEntry[]> {
   const entries = await getStorybookIndex()
@@ -1538,6 +1658,14 @@ async function buildHighlighterPanel() {
       const latest =
         fetchRegistry().find((i) => i.id === comp.id) ?? comp
       const requestedName = storyNameInput.value.trim()
+      const preIds = new Set(
+        (
+          await findMatchingStories(
+            comp.meta.relativeFilePath || comp.meta.filePath,
+            comp.meta.componentName,
+          )
+        ).map((st) => st.id),
+      )
       await rpcCall('component-highlighter:create-story', {
         meta: latest.meta,
         serializedProps: latest.serializedProps,
@@ -1548,23 +1676,44 @@ async function buildHighlighterPanel() {
       })
       // Bust the storybook index cache and retry until the new story appears
       const refreshAfterCreate = async () => {
-        lastCoverageJson = ''
-        refreshCoverage()
-        // Retry with cache busting so the newly created story is found
-        for (let i = 0; i < 10; i++) {
-          storybookIndexCache = null
-          const stories = await findMatchingStories(
-            comp.meta.relativeFilePath || comp.meta.filePath,
-            comp.meta.componentName,
-          )
-          if (stories.length > 0) {
-            await buildHighlighterPanel()
-            scrollToStoryCard(requestedName)
-            return
+        try {
+          lastCoverageJson = ''
+          refreshCoverage()
+          // Retry with cache busting until the index contains the NEW story —
+          // a non-empty list isn't enough, pre-existing stories satisfy that
+          // immediately while the indexer is still catching up.
+          const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+          for (let i = 0; i < 20; i++) {
+            storybookIndexCache = null
+            const stories = await findMatchingStories(
+              comp.meta.relativeFilePath || comp.meta.filePath,
+              comp.meta.componentName,
+            )
+            const fresh = stories.some(
+              (st) =>
+                !preIds.has(st.id) || norm(st.name) === norm(requestedName),
+            )
+            if (fresh) {
+              const updated = await refreshStoriesAfterCreate(
+                comp.meta.relativeFilePath || comp.meta.filePath,
+                comp.meta.componentName,
+                requestedName,
+              )
+              if (!updated) {
+                await buildHighlighterPanel()
+                scrollToStoryCard(requestedName)
+              }
+              return
+            }
+            await new Promise(r => setTimeout(r, 1000))
           }
-          await new Promise(r => setTimeout(r, 1000))
+          buildHighlighterPanel() // rebuild anyway after max retries
+        } finally {
+          // The in-place refresh keeps this button alive — reset it
+          // (the old full rebuild recreated it as a side effect).
+          addBtn.disabled = false
+          addBtn.textContent = 'Add'
         }
-        buildHighlighterPanel() // rebuild anyway after max retries
       }
       setTimeout(refreshAfterCreate, 1500)
     } catch {
@@ -1655,28 +1804,7 @@ async function buildHighlighterPanel() {
 
     const sbUrl = getStorybookUrl()
     for (const story of matchingStories) {
-      const storyCard = document.createElement('div')
-      storyCard.className = 'hl-story-card'
-
-      const iframe = document.createElement('iframe')
-      iframe.className = 'hl-story-iframe'
-      iframe.src = `${sbUrl}/iframe.html?id=${encodeURIComponent(story.id)}&viewMode=story&shortcuts=false&singleStory=true`
-      iframe.title = story.name
-      iframe.setAttribute('loading', 'lazy')
-      storyCard.appendChild(iframe)
-
-      const storyLabel = document.createElement('div')
-      storyLabel.className = 'hl-story-label'
-      storyLabel.textContent = story.name
-      storyCard.appendChild(storyLabel)
-
-      // Click to navigate in the Storybook tab
-      storyCard.addEventListener('click', () => {
-        visitStory(relPath, story.name)
-        switchTab('storybook')
-      })
-
-      storiesList.appendChild(storyCard)
+      storiesList.appendChild(createStoryCard(story, relPath, sbUrl))
     }
     storiesBody.appendChild(storiesList)
   }
