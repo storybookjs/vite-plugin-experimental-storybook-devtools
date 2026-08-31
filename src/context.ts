@@ -20,6 +20,11 @@ export interface StorybookDevframeState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   storybookSession: any
   terminalLogs: string[]
+  /**
+   * Set when the last `start-storybook` child process exited before
+   * Storybook became reachable; cleared on the next start attempt.
+   */
+  storybookStartFailure: { code: number | null } | null
 }
 
 export interface CreateStorybookDevframeDeps {

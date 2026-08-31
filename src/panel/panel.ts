@@ -364,8 +364,13 @@ async function visitStory(
   let attempts = 0
   const poll = setInterval(async () => {
     attempts++
-    const isRunning = await checkStorybook()
-    if (isRunning) {
+    const status = await getStorybookStatus()
+    if (status.startFailure) {
+      clearInterval(poll)
+      markStorybookStartFailed(status.startFailure)
+      return
+    }
+    if (status.running) {
       clearInterval(poll)
       renderStorybookState('running')
       switchTab('storybook')
@@ -662,9 +667,14 @@ function switchTab(tab: TabId) {
 
 // ─── Storybook tab ──────────────────────────────────────────────────
 
-type SbState = 'checking' | 'not-running' | 'starting' | 'running'
+type SbState = 'checking' | 'not-running' | 'starting' | 'running' | 'failed'
+type SbStartFailure = { code: number | null }
+type SbStatus = {
+  running: boolean
+  startFailure?: SbStartFailure | null | undefined
+}
 
-function renderStorybookState(state: SbState) {
+function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
   const pane = document.getElementById('pane-storybook')
   if (!pane) return
 
@@ -701,18 +711,60 @@ function renderStorybookState(state: SbState) {
     case 'running':
       pane.innerHTML = `<iframe class="sb-iframe" src="${esc(sbUrl)}"></iframe>`
       break
+
+    case 'failed':
+      pane.innerHTML = `
+        <div class="sb-state">
+          <div class="msg">Storybook failed to start${
+            failure?.code != null ? ` (exit code ${failure.code})` : ''
+          }</div>
+          <div class="btn-row">
+            <button class="start-btn" id="sb-error-btn">Show error log</button>
+            <button class="start-btn" id="sb-retry-btn">Try again</button>
+          </div>
+        </div>`
+      document.getElementById('sb-error-btn')?.addEventListener('click', () => {
+        showTerminalTab()
+        switchTab('terminal')
+      })
+      document
+        .getElementById('sb-retry-btn')
+        ?.addEventListener('click', startStorybook)
+      break
+  }
+}
+
+/**
+ * Put the Storybook pane into its failed state and flag the terminal's
+ * error badge — the failure detail lives in the terminal log.
+ */
+function markStorybookStartFailed(failure: SbStartFailure | null | undefined) {
+  renderStorybookState('failed', failure)
+  switchTab('storybook')
+  showTerminalTab()
+  flagTerminalError()
+}
+
+/** Mark the terminal rail button with an error badge. */
+function flagTerminalError() {
+  terminalHasError = true
+  if (terminalUnseenCount === 0) terminalUnseenCount = 1
+  updateTerminalBadge()
+}
+
+async function getStorybookStatus(): Promise<SbStatus> {
+  try {
+    const data = (await rpcCall(
+      'component-highlighter:storybook-status',
+    )) as SbStatus
+    return { running: data.running === true, startFailure: data.startFailure }
+  } catch {
+    return { running: false }
   }
 }
 
 async function checkStorybook(): Promise<boolean> {
-  try {
-    const data = (await rpcCall('component-highlighter:storybook-status')) as {
-      running?: boolean
-    }
-    return data.running === true
-  } catch {
-    return false
-  }
+  return (await getStorybookStatus()).running
 }
 
 async function initStorybookTab() {
@@ -738,8 +790,11 @@ async function startStorybook() {
   let attempts = 0
   const poll = setInterval(async () => {
     attempts++
-    const running = await checkStorybook()
-    if (running) {
+    const status = await getStorybookStatus()
+    if (status.startFailure) {
+      clearInterval(poll)
+      markStorybookStartFailed(status.startFailure)
+    } else if (status.running) {
       clearInterval(poll)
       renderStorybookState('running')
       // Auto-switch back to the Storybook tab once it's up
@@ -1786,8 +1841,25 @@ async function buildHighlighterPanel() {
       let attempts = 0
       const poll = setInterval(async () => {
         attempts++
-        const running = await checkStorybook()
-        if (running) {
+        const status = await getStorybookStatus()
+        if (status.startFailure) {
+          clearInterval(poll)
+          // Mirror the failure on the Storybook tab, but keep the user here.
+          renderStorybookState('failed', status.startFailure)
+          flagTerminalError()
+          notRunning.innerHTML = `
+            <div class="hl-sb-status-msg">Storybook failed to start</div>
+            <div class="hl-sb-status-sub">See the terminal log for the error.</div>
+          `
+          const errBtn = document.createElement('button')
+          errBtn.className = 'start-btn'
+          errBtn.textContent = 'Show error log'
+          errBtn.addEventListener('click', () => {
+            showTerminalTab()
+            switchTab('terminal')
+          })
+          notRunning.appendChild(errBtn)
+        } else if (status.running) {
           clearInterval(poll)
           // Also refresh the Storybook tab iframe in the background
           renderStorybookState('running')

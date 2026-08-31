@@ -156,6 +156,7 @@ export function storybookDevtoolsRsbuild(
     devtoolsTerminals: null,
     storybookSession: null,
     terminalLogs: [],
+    storybookStartFailure: null,
   }
 
   // No `loadDevSource`: the rspack host has no equivalent of Vite's

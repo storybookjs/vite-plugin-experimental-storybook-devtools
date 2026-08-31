@@ -18,6 +18,8 @@ export const startStorybook = defineRpcFunction({
           return { started: false, error: 'Terminals API not available' }
         }
 
+        state.storybookStartFailure = null
+
         try {
           state.storybookSession =
             await state.devtoolsTerminals.startChildProcess(
@@ -70,6 +72,21 @@ export const startStorybook = defineRpcFunction({
           if (cp) {
             cp.on('exit', (code: number | null) => {
               state.terminalLogs.push(`[process exited with code ${code}]`)
+              if (code !== 0) {
+                state.storybookStartFailure = { code }
+                state.terminalLogs.push(
+                  `[error] Storybook failed to start (exit code ${code}). ` +
+                    'Check that Storybook is installed in this project — ' +
+                    'see the log above for the underlying error.',
+                )
+              }
+              state.storybookSession = null
+            })
+            cp.on('error', (err: Error) => {
+              state.storybookStartFailure = { code: null }
+              state.terminalLogs.push(
+                `[error] Storybook failed to start: ${err.message}`,
+              )
               state.storybookSession = null
             })
           }
@@ -77,6 +94,7 @@ export const startStorybook = defineRpcFunction({
           return { started: true }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          state.storybookStartFailure = { code: null }
           state.terminalLogs.push(`[error] Failed to start Storybook: ${msg}`)
           return { started: false, error: msg }
         }

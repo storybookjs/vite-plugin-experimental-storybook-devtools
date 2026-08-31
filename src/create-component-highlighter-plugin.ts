@@ -171,6 +171,7 @@ export function createComponentHighlighterPlugin(
     devtoolsTerminals: null,
     storybookSession: null,
     terminalLogs: [],
+    storybookStartFailure: null,
   }
 
   const host: ComponentHighlighterUnpluginHost = {
