@@ -1821,8 +1821,33 @@ async function buildHighlighterPanel() {
   }
 
   storiesSection.appendChild(storiesBody)
-  root.appendChild(storiesSection)
 
+  // Rebuilding for the component already on screen: swap only the inspector
+  // sections and keep the existing stories section's DOM — recreating (or
+  // even moving) the preview iframes reloads them, which reads as a flash.
+  const existingRoot = pane.querySelector<HTMLElement>(':scope > .hl-root')
+  const existingStories = existingRoot?.querySelector<HTMLElement>(
+    ':scope > .hl-stories-section',
+  )
+  if (
+    existingRoot &&
+    existingStories &&
+    existingRoot.dataset['component'] === comp.meta.filePath
+  ) {
+    while (
+      existingRoot.firstChild &&
+      existingRoot.firstChild !== existingStories
+    ) {
+      existingRoot.removeChild(existingRoot.firstChild)
+    }
+    while (root.firstChild) {
+      existingRoot.insertBefore(root.firstChild, existingStories)
+    }
+    return
+  }
+
+  root.dataset['component'] = comp.meta.filePath
+  root.appendChild(storiesSection)
   pane.innerHTML = ''
   pane.appendChild(root)
 }
