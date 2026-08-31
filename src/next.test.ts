@@ -1,8 +1,12 @@
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   composeNextHookScript,
   getNextDevToolsHookScript,
   nextFramework,
+  PersistedComponentMap,
   resolveNextOptions,
   withStorybookDevtools,
   type NextConfigWebpackShape,
@@ -186,10 +190,6 @@ describe('withStorybookDevtools', () => {
 
 describe('PersistedComponentMap', () => {
   it('merges the persisted manifest into a warm-boot flush instead of clobbering it', async () => {
-    const { PersistedComponentMap } = await import('./next')
-    const fs = await import('fs')
-    const os = await import('os')
-    const path = await import('path')
     const file = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), 'ch-manifest-')),
       'coverage-manifest.json',

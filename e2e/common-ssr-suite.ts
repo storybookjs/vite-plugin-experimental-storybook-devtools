@@ -35,7 +35,9 @@ export function registerSsrSuite(
       expect(response.ok()).toBe(true)
 
       const html = await response.text()
-      expect(html).toContain(selector.replace(/^\./, ''))
+      // The rendered attribute form — a bare class-name substring would also
+      // match Next's inline RSC flight payload, which is not rendered markup.
+      expect(html).toContain(`class="${selector.replace(/^\./, '')}"`)
       expect(html).toContain(markerText)
     })
 

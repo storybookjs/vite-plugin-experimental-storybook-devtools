@@ -189,6 +189,7 @@ const GLOBAL_STATE_KEY = '__storybookDevtoolsNextGlobalState__'
  * render-worker process — a `globalThis` singleton doesn't cross that
  * boundary. Persist through a manifest under `.next/cache`: the writer
  * flushes debounced on set, readers re-hydrate when the file changes.
+ * Exported for tests.
  */
 export class PersistedComponentMap extends Map<string, string> {
   private file: string
