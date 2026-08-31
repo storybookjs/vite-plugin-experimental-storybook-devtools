@@ -8,16 +8,12 @@ const r = (filepath: string) => fileURLToPath(new URL(filepath, import.meta.url)
 export default defineConfig({
   plugins: [
     pluginReact(),
-    // Storybook's rsbuild builder loads this config too — the devtools
-    // plugin must not mount inside Storybook's own dev server.
-    process.env.STORYBOOK
-      ? null
-      : storybookDevtoolsRsbuild({
-          framework: 'react',
-          debugMode: true,
-          clientAuth: false,
-        }),
-  ].filter(Boolean),
+    storybookDevtoolsRsbuild({
+      framework: 'react',
+      debugMode: true,
+      clientAuth: false,
+    }),
+  ],
   source: { entry: { index: './src/index.tsx' } },
   html: { mountId: 'app' },
   server: { host: '127.0.0.1', port: 5177 },

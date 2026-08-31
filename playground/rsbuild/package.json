@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "rsbuild dev",
     "build": "rsbuild build",
-    "storybook": "STORYBOOK=true storybook dev -p 6006"
+    "storybook": "storybook dev -p 6006"
   },
   "devDependencies": {
     "@rsbuild/core": "^2.1.13",
