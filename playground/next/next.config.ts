@@ -38,6 +38,18 @@ const nextConfig: NextConfig = {
         './shims/empty.ts',
       ),
     }
+    // The shim's top-level await compiles to async/await, and Next's webpack
+    // output environment doesn't declare async-function support even though
+    // every browser Next 15 targets has it — declare it so webpack stops
+    // warning "your target environment does not appear to support
+    // 'async/await'" on each compile.
+    config.output = {
+      ...config.output,
+      environment: {
+        ...(config.output as { environment?: object } | undefined)?.environment,
+        asyncFunction: true,
+      },
+    }
     return config
   },
 }
