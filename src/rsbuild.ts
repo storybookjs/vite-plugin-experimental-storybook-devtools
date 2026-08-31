@@ -213,7 +213,7 @@ export function storybookDevtoolsRsbuild(
         return { headTags, bodyTags }
       })
 
-      api.onBeforeStartDevServer(({ server }) => {
+      api.onBeforeStartDevServer(async ({ server }) => {
         const definition = createStorybookDevframe({
           framework,
           storybookUrl,
@@ -228,6 +228,10 @@ export function storybookDevtoolsRsbuild(
           devframes: [definition],
           ui: createUi(),
           ws: { sidecar: true },
+          // Node's 'localhost' can bind IPv6-only ([::1]) while browsers on a
+          // 127.0.0.1 page dial the sidecar over IPv4 — pin the v4 loopback
+          // (same reason the nuxt playground pins vite.server.host).
+          host: '127.0.0.1',
           cwd: api.context.rootPath,
           auth: clientAuth,
           configure(ctx) {
@@ -247,9 +251,16 @@ export function storybookDevtoolsRsbuild(
         server.middlewares.use(hub.nodeMiddleware)
         server.middlewares.use(createClientBundleMiddleware(packageRoot))
 
-        return async () => {
+        // The sidecar WebSocket binds asynchronously — surface bind failures
+        // here instead of serving connection meta for a port nothing owns.
+        await hub.ready
+
+        // A function returned from this hook is a POST-SETUP callback that
+        // Rsbuild invokes right after applying middlewares — not a disposer.
+        // Shutdown belongs to onCloseDevServer.
+        api.onCloseDevServer(async () => {
           await hub.close()
-        }
+        })
       })
 
       if (framework.name === 'react') {
