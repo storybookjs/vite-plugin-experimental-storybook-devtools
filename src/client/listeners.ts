@@ -253,8 +253,8 @@ function autoInitRpc() {
                 actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
               }
             }
-            handleTabChange(!!state.value())
-            state.on('updated', (val: any) => handleTabChange(!!val))
+            handleTabChange(!!state.value()?.value)
+            state.on('updated', (val: any) => handleTabChange(!!val?.value))
           })
           .catch(() => {})
       }
@@ -410,7 +410,11 @@ function syncHighlightState(active: boolean) {
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlight-active')
-    .then((state: any) => state.mutate(() => active))
+    .then((state: any) =>
+      state.mutate((s: any) => {
+        s.value = active
+      }),
+    )
     .catch(() => {})
 }
 
@@ -420,7 +424,11 @@ function syncHighlighterTabActive(active: boolean) {
   if (!ctx?.rpc?.sharedState) return
   ctx.rpc.sharedState
     .get('component-highlighter:highlighter-tab-active')
-    .then((state: any) => state.mutate(() => active))
+    .then((state: any) =>
+      state.mutate((s: any) => {
+        s.value = active
+      }),
+    )
     .catch(() => {})
 }
 

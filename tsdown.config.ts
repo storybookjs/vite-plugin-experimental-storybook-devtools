@@ -3,6 +3,10 @@ import { defineConfig } from 'tsdown'
 export default defineConfig({
   entry: [
     'src/index.ts',
+    'src/vite.ts',
+    'src/devframe-export.ts',
+    'src/rsbuild.ts',
+    'src/next.ts',
     'src/frameworks/react/plugin.ts',
     'src/frameworks/vue/plugin.ts',
     'src/frameworks/nuxt/plugin.ts',
@@ -17,6 +21,7 @@ export default defineConfig({
   dts: true,
   external: [
     'vite',
+    'unplugin',
     '@vitejs/devtools-kit',
     '@vitejs/devtools-kit/node',
     '@vitejs/devtools-kit/client',

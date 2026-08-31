@@ -13,7 +13,6 @@ import {
   type CreateStorybookDevframeDeps,
 } from './context'
 import { serverFunctions } from './rpc'
-import type { SerializedRegistryInstance } from './shared-types'
 
 // Downstream hosts and the public `./devframe` entry import these from here.
 export type {
@@ -56,12 +55,13 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
       setStorybookDevframeContext(ctx, deps)
       const scope = ctx.scope('component-highlighter')
 
-      // `sharedState`'s value type is constrained to `T extends object`;
-      // `<any>` opts the scalar/nullable states below out of that until
-      // they move to envelopes.
+      // devframe shared state is immer-backed and object-only
+      // (`sharedState<T extends object>`): scalar/nullable states carry
+      // their payload in a `{ value }` envelope; `registry` is an array and
+      // stays flat.
 
       scope.rpc
-        .sharedState<SerializedRegistryInstance[]>('registry', {
+        .sharedState('registry', {
           initialValue: [],
         })
         .then((s) => {
@@ -69,43 +69,31 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
         })
 
       scope.rpc
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .sharedState<any>('pending-visit', {
-          initialValue: null as {
-            relativeFilePath: string
-            preferredStoryName?: string
-          } | null,
+        .sharedState('pending-visit', {
+          initialValue: { value: null },
         })
         .then((s) => {
           deps.state.pendingVisitState = s
         })
 
       scope.rpc
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .sharedState<any>('pending-tab', {
-          initialValue: null as string | null,
+        .sharedState('pending-tab', {
+          initialValue: { value: null },
         })
         .then((s) => {
           deps.state.pendingTabState = s
         })
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scope.rpc.sharedState<any>('highlight-active', {
-        initialValue: false,
+      scope.rpc.sharedState('highlight-active', {
+        initialValue: { value: false },
       })
 
-      scope.rpc.sharedState<
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        any
-      >('selected-component', {
-        initialValue: null as SerializedRegistryInstance | null,
+      scope.rpc.sharedState('selected-component', {
+        initialValue: { value: null },
       })
 
-      scope.rpc.sharedState<
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        any
-      >('highlighter-tab-active', {
-        initialValue: false,
+      scope.rpc.sharedState('highlighter-tab-active', {
+        initialValue: { value: false },
       })
 
       for (const fn of serverFunctions) {

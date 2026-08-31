@@ -19,6 +19,14 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
+    "./vite": {
+      "types": "./dist/vite.d.mts",
+      "default": "./dist/vite.mjs"
+    },
+    "./devframe": {
+      "types": "./dist/devframe-export.d.mts",
+      "default": "./dist/devframe-export.mjs"
+    },
     "./react": {
       "types": "./dist/frameworks/react/plugin.d.mts",
       "default": "./dist/frameworks/react/plugin.mjs"
@@ -30,6 +38,14 @@
     "./nuxt": {
       "types": "./dist/frameworks/nuxt/plugin.d.mts",
       "default": "./dist/frameworks/nuxt/plugin.mjs"
+    },
+    "./rsbuild": {
+      "types": "./dist/rsbuild.d.mts",
+      "default": "./dist/rsbuild.mjs"
+    },
+    "./next": {
+      "types": "./dist/next.d.mts",
+      "default": "./dist/next.mjs"
     },
     "./package.json": "./package.json",
     "./client/overlay": "./dist/client/overlay.mjs",
@@ -88,6 +104,7 @@
     "dom-accessibility-api": "^0.6.3",
     "nanoevents": "^9.0.0",
     "react-element-to-jsx-string": "^15.0.0",
+    "unplugin": "^3.3.0",
     "xstate": "^5.3.0"
   }
 }

@@ -677,7 +677,11 @@ export function pushSelectedComponentRPC(
     if (ctx.rpc.sharedState) {
       ctx.rpc.sharedState
         .get('component-highlighter:selected-component')
-        .then((state: any) => state.mutate(() => data))
+        .then((state: any) =>
+          state.mutate((s: any) => {
+            s.value = data
+          }),
+        )
         .catch(() => {})
     }
   } catch {
