@@ -207,7 +207,7 @@ Panel bootstrap and Storybook process control:
 | RPC function | Type | Purpose |
 |---------------|------|---------|
 | `component-highlighter:get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }`. Replaces the removed `?sbUrl=` query param — an auto-derived dock URL can't carry query params |
-| `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding |
+| `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` when the last start attempt's process died, so the panel can stop waiting and surface the failure |
 | `component-highlighter:storybook-index` | query | Proxy of Storybook's `index.json` |
 | `component-highlighter:start-storybook` | action | Start a Storybook dev server child process via `ctx.terminals` |
 | `component-highlighter:get-terminal-logs` | query | Tail the buffered Storybook process output (`since` offset) |
