@@ -48,6 +48,29 @@ describe('generateStory', () => {
 
       expect(result.content).toContain("import { Button } from './Button'")
     })
+
+    it('should use the provided storybookFramework for the Meta/StoryObj import', () => {
+      const result = generateStory({
+        meta: baseMeta,
+        props: { label: 'Test' },
+        storybookFramework: '@storybook/nextjs',
+      })
+
+      expect(result.content).toContain(
+        "import type { Meta, StoryObj } from '@storybook/nextjs';",
+      )
+    })
+
+    it('should default to @storybook/react-vite when storybookFramework is not provided', () => {
+      const result = generateStory({
+        meta: baseMeta,
+        props: { label: 'Test' },
+      })
+
+      expect(result.content).toContain(
+        "import type { Meta, StoryObj } from '@storybook/react-vite';",
+      )
+    })
   })
 
   describe('story naming', () => {

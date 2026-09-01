@@ -133,6 +133,7 @@ export const createStory = defineRpcFunction({
               },
               props: data.serializedProps,
               componentRegistry: registryMap,
+              storybookFramework: framework.storybookFramework,
               ...(data.storyName ? { storyName: data.storyName } : {}),
               ...(existingContent ? { existingContent } : {}),
               ...(data.playFunction

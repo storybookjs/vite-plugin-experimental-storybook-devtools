@@ -6,7 +6,7 @@ Short, high-signal reference for contributors and coding agents.
 
 ## What this plugin does
 
-`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration, mounted on either of two bundler hosts: Vite (`./react`, `./vue`, `./vite`; Nuxt rides this) or Rsbuild/rspack (`./rsbuild`).
+`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration, mounted on one of three bundler hosts: Vite (`./react`, `./vue`, `./vite`; Nuxt rides this), Rsbuild/rspack (`./rsbuild`), or Next.js/webpack (`./next`, React only).
 
 ## Supported frameworks
 
@@ -62,10 +62,41 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
      (`react-element-to-jsx-string`/`react-is` → this package's copies,
      `resolve.dedupe` via `react-dedupe.ts`) is applied in
      `modifyRsbuildConfig`.
+   - `next.ts` is the Next.js/webpack adapter: `withStorybookDevtools()`
+     mounts instrumentation via `unplugin.webpack()` in `next.config.ts`'s
+     `webpack()` composer, restricted to the dev client compilation
+     (`context.dev && !context.isServer && context.nextRuntime !== 'edge'`).
+     Hook delivery is always `hookInjection: 'entry'` — Next has no
+     HTML-transform hook — targeting Next's client bootstrap modules
+     (`@next/react-refresh-utils/dist/runtime.js`,
+     `next/dist/client/app-next-dev.js`, and related entries). webpack5
+     treats the portable core's `virtual:...` module ids as an unhandled URI
+     scheme (bypassing the resolver hook unplugin's webpack adapter taps), so
+     a second plugin (`createVirtualSchemeWebpackPlugin`) relays
+     `resolveForScheme.for('virtual')` requests through the same
+     `resolveId`/`load` hook pair the Vite adapter uses, writing the result
+     to a real path via `webpack-virtual-modules`. Because `next.config.ts`
+     (build-time) and the compiled route handlers (request-time) are two
+     independently-loaded module instances, `withStorybookDevtools` and
+     `createStorybookDevtoolsRoute` share `transformedComponents` and
+     diagnostics through a `globalThis` singleton. Two route handlers a
+     consuming app creates complete the host:
+     `createStorybookDevtoolsRoute()` mounts the `@devframes/hub` on a
+     sidecar WebSocket (Next routes can't accept upgrades), and
+     `createStorybookDevtoolsClientBundleRoute()` serves the dock's
+     self-contained client bundle at the same
+     `/__storybook-devtools-client/vite-devtools.mjs` convention the Rsbuild
+     host uses. Because the App Router treats leading-underscore path
+     segments as private, both routes live at non-underscore paths and rely
+     on the consuming app's `next.config.ts` `rewrites()` to expose them at
+     `/__devframes/*` and `/__storybook-devtools-client/*`. Turbopack has no
+     unplugin adapter, so `withStorybookDevtools` prints one warning and
+     no-ops under `process.env.TURBOPACK` rather than crashing.
    - `hub-setup.ts` (`registerStorybookHubSurfaces`) holds the host-neutral
      hub surfaces — notifications, diagnostics catalog, terminals ref, the
-     action dock, Mod+K commands — shared by the Vite adapter's `kitSetup`
-     and the Rsbuild adapter, since a kit's `KitNodeContext` is a
+     action dock, Mod+K commands — shared by the Vite adapter's `kitSetup`,
+     the Rsbuild adapter, and the Next.js adapter's
+     `createStorybookDevtoolsRoute`, since a kit's `KitNodeContext` is a
      `DevframeHubContext` (from `@devframes/hub`) plus Vite-only extras. Only
      the Vite-only `clientModuleResolution` pre-seed stays out of it.
    - `react-dedupe.ts` (`resolveReactDedupe`) is the shared React-major-
@@ -228,7 +259,8 @@ below.
 | `src/unplugin.ts` | Portable instrumentation core, built on `unplugin`: `createComponentHighlighterUnplugin(framework, options, host)`. Owns the transform pipeline (filter → `framework.detect` → `framework.transform`, coverage tracking, diagnostics dedupe), `resolveId`/`load` for the runtime-helpers and framework virtual modules plus the `virtual:component-highlighter/devtools-hook` module, and the `'entry'` hook-injection strategy. Bundler-specific needs (reading dev-source through a running server) come from the `ComponentHighlighterUnpluginHost` the caller supplies |
 | `src/create-component-highlighter-plugin.ts` | Vite adapter: entrypoint `createComponentHighlighterPlugin(framework, options)`. Calls `createComponentHighlighterUnplugin(...).vite()` and extends the result with the Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`), mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) pre-seeds the Vite `clientModuleResolution` template, then delegates docks/commands/diagnostics registration to `registerStorybookHubSurfaces` (`hub-setup.ts`) |
 | `src/rsbuild.ts` | `./rsbuild` entry: `storybookDevtoolsRsbuild({ framework, clientAuth, ...options })`. Mounts instrumentation via `unplugin.rspack()`, delivers the devtools-hook script and hub dock bootstrap via `modifyHTMLTags`, mounts a `@devframes/hub` on the dev server's middlewares (sidecar WebSocket), serves the highlighter dock's self-contained client bundle from `dist/client-bundled/` by URL, and applies the React alias/dedupe config for rspack |
-| `src/hub-setup.ts` | `registerStorybookHubSurfaces(ctx, options)`: host-neutral hub surfaces (notifications, diagnostics catalog, terminals ref, the `component-highlighter` action dock, Mod+K commands) against the bundler-neutral `DevframeHubContext`, shared by the Vite adapter's `kitSetup` and the Rsbuild adapter |
+| `src/next.ts` | `./next` entry: `withStorybookDevtools(options?)` composes `next.config.ts` (`unplugin.webpack()` on the dev client compilation only, `entry` hook injection into Next's client bootstrap, a `virtual:` URI-scheme relay plugin for webpack5, extended `serverExternalPackages`); `createStorybookDevtoolsRoute()` and `createStorybookDevtoolsClientBundleRoute()` build the two `app/**/route.ts` handlers a consuming app mounts for the devframes hub and the dock's client bundle. React only (`@storybook/nextjs`); RSC gate defaults to `true` |
+| `src/hub-setup.ts` | `registerStorybookHubSurfaces(ctx, options)`: host-neutral hub surfaces (notifications, diagnostics catalog, terminals ref, the `component-highlighter` action dock, Mod+K commands) against the bundler-neutral `DevframeHubContext`, shared by the Vite adapter's `kitSetup`, the Rsbuild adapter, and the Next.js adapter's `createStorybookDevtoolsRoute` |
 | `src/react-dedupe.ts` | `resolveReactDedupe(options)`: shared React-major-mismatch detection driving the `dedupeReact` option, called by both the Vite and Rsbuild adapters with their own `resolve.dedupe` mutation |
 | `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
@@ -415,6 +447,14 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
      rides along with (never clobbers) a real React DevTools extension hook —
      it only defines the global when absent, and exposes a minimal pub/sub +
      `renderers`/`rendererInterfaces` so a late-attaching backend still works.
+   - **Multi-renderer `overrideProps` capture.** More than one renderer can
+     register on the same hook — e.g. Next's App Router registers a
+     react-dom instance without `overrideProps` alongside the real client
+     one, plus `react-server-dom-webpack`'s flight renderer for RSC.
+     `handleCommit` (`runtime-module.ts`) re-checks each commit's renderer
+     until one actually exposes `overrideProps`, instead of latching onto
+     whichever renderer committed first — otherwise live prop editing
+     silently stays unavailable on hosts with more than one renderer.
    - The fiber walk is intentionally **synchronous on commit**. React batches
      a render pass into one commit, so it is one traversal per render pass
      (not per `setState`), and synchronicity preserves deterministic
@@ -449,6 +489,9 @@ pnpm exec playwright test e2e/playground-nuxt-detection.spec.ts       # Nuxt SSR
 
 # Rsbuild host detection (React 19, playground/react/src via symlink) + shared suites
 pnpm exec playwright test e2e/playground-rsbuild-detection.spec.ts   # port 5177 — run `pnpm build` first
+
+# Next.js host detection (React 19, App Router, RSC boundary) + shared suites
+pnpm exec playwright test e2e/playground-next-detection.spec.ts      # port 5178
 
 # Highlighter interaction tests (context menu, story creation)
 pnpm exec playwright test e2e/component-highlighter.spec.ts

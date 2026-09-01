@@ -18,7 +18,24 @@ type TestLike = {
 const TARGET_COMPONENT = 'TaskList'
 const INTERACTION_COMPONENT = 'TaskForm'
 
-export function registerCommonHighlighterSuite(test: TestLike) {
+export type CommonHighlighterSuiteOptions = {
+  /**
+   * Whether the host serves an `/__open-in-editor` endpoint (Vite's
+   * built-in dev-server feature). The context menu hides
+   * `#open-component-btn` entirely when it doesn't, per the
+   * unavailable-actions rule — hosts without it (e.g. Next) skip that
+   * assertion.
+   * @default true
+   */
+  hasOpenInEditor?: boolean
+}
+
+export function registerCommonHighlighterSuite(
+  test: TestLike,
+  options: CommonHighlighterSuiteOptions = {},
+) {
+  const { hasOpenInEditor = true } = options
+
   test.describe('common highlighter features', () => {
     test.beforeEach(async ({ page }) => {
       await page.goto('/')
@@ -57,7 +74,9 @@ export function registerCommonHighlighterSuite(test: TestLike) {
     test('opens context menu on highlighted component click', async ({ page }) => {
       await clickComponentHighlight(page, TARGET_COMPONENT)
 
-      await expect(page.locator('#open-component-btn')).toBeVisible()
+      if (hasOpenInEditor) {
+        await expect(page.locator('#open-component-btn')).toBeVisible()
+      }
       await expect(page.locator('#save-story-btn')).toBeVisible()
       await expect(page.locator('#story-name-input')).toBeVisible()
       await expect(page.locator('text=Properties')).toBeVisible()

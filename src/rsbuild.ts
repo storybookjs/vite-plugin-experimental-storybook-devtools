@@ -240,6 +240,7 @@ export function storybookDevtoolsRsbuild(
               state,
               storiesDir,
               devtoolsDockId,
+              storybookFramework: framework.storybookFramework,
               dockClientScript: {
                 importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
                 importName: 'default',

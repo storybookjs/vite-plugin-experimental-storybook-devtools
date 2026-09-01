@@ -1,7 +1,9 @@
+import * as fs from 'fs'
 import { describe, it, expect } from 'vitest'
 import type { Plugin } from 'vite'
 import {
   createComponentHighlighterUnplugin,
+  getComponentHighlighterRuntimePaths,
   DEVTOOLS_HOOK_VIRTUAL_ID,
   type ComponentHighlighterUnpluginHost,
 } from './unplugin'
@@ -164,6 +166,90 @@ describe('createComponentHighlighterUnplugin', () => {
 
       const loaded = await load(resolved as string)
       expect(loaded).toBe(reactFramework.htmlHeadSnippet?.())
+    })
+  })
+
+  describe('dev-source vs. built-dist read path', () => {
+    const paths = getComponentHighlighterRuntimePaths(reactFramework)
+
+    it('serves the built dist file when the host provides no loadDevSource, even though the src file exists', async () => {
+      // The src file must exist so the only thing gating the dev-source path
+      // is the absence of `loadDevSource` on the host.
+      expect(fs.existsSync(paths.runtimeHelperSourcePath)).toBe(true)
+      expect(fs.existsSync(paths.runtimeHelperFilePath)).toBe(true)
+
+      const load = (host: ComponentHighlighterUnpluginHost) => {
+        const plugin = createComponentHighlighterUnplugin(
+          reactFramework,
+          {},
+          host,
+        ).vite() as Plugin
+        return asFn(plugin.load)
+      }
+
+      const noLoadDevSourceResult = await load(buildHost())(
+        paths.resolvedRuntimeHelperVirtualId,
+      )
+      // A host with `isServe: false` never had a dev-source path to begin
+      // with, so it always served the dist file — the same result a host
+      // omitting `loadDevSource` while serving must now also produce.
+      const neverServingResult = await load(
+        buildHost({ isServe: () => false }),
+      )(paths.resolvedRuntimeHelperVirtualId)
+
+      expect(noLoadDevSourceResult).toBe(neverServingResult)
+      expect(noLoadDevSourceResult).toBe(
+        fs.readFileSync(paths.runtimeHelperFilePath, 'utf-8'),
+      )
+      expect(noLoadDevSourceResult).not.toBe(
+        fs.readFileSync(paths.runtimeHelperSourcePath, 'utf-8'),
+      )
+
+      const frameworkModuleResult = await load(buildHost())(
+        paths.resolvedFrameworkVirtualModuleId,
+      )
+      const frameworkModuleNeverServingResult = await load(
+        buildHost({ isServe: () => false }),
+      )(paths.resolvedFrameworkVirtualModuleId)
+      expect(frameworkModuleResult).toBe(frameworkModuleNeverServingResult)
+    })
+
+    it('reads the dev source when the host provides loadDevSource and the src file exists', async () => {
+      const host = buildHost({
+        loadDevSource: async (absPath) => `/* dev */ ${absPath}`,
+      })
+      const plugin = createComponentHighlighterUnplugin(
+        reactFramework,
+        {},
+        host,
+      ).vite() as Plugin
+      const load = asFn(plugin.load)
+
+      const runtimeHelpersResult = await load(
+        paths.resolvedRuntimeHelperVirtualId,
+      )
+      expect(runtimeHelpersResult).toBe(
+        `/* dev */ ${paths.runtimeHelperSourcePath}`,
+      )
+    })
+
+    it('falls back to the raw on-disk source when a provided loadDevSource returns null', async () => {
+      const host = buildHost({
+        loadDevSource: async () => null,
+      })
+      const plugin = createComponentHighlighterUnplugin(
+        reactFramework,
+        {},
+        host,
+      ).vite() as Plugin
+      const load = asFn(plugin.load)
+
+      const runtimeHelpersResult = await load(
+        paths.resolvedRuntimeHelperVirtualId,
+      )
+      expect(runtimeHelpersResult).toBe(
+        fs.readFileSync(paths.runtimeHelperSourcePath, 'utf-8'),
+      )
     })
   })
 })

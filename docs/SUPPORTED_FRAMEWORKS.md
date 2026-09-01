@@ -11,18 +11,24 @@ Keep this file up to date whenever framework integrations are added, removed, or
 
 Support is a (framework × host) matrix, not just a framework list:
 
-| | Vite | Rsbuild (rspack) |
-|---|---|---|
-| React | verified (18 + 19, `playground/react` + `playground/react18`) | verified (19, `playground/rsbuild`) |
-| Vue | verified (`playground/vue`) | accepted, not playground/E2E-verified |
-| Nuxt SSR | verified (`playground/nuxt`) — rides the Vue integration on Vite | n/a — Nuxt is a Vite framework |
+| | Vite | Rsbuild (rspack) | Next.js (webpack) |
+|---|---|---|---|
+| React | verified (18 + 19, `playground/react` + `playground/react18`) | verified (19, `playground/rsbuild`) | verified (19, `playground/next`, App Router + RSC) |
+| Vue | verified (`playground/vue`) | accepted, not playground/E2E-verified | n/a |
+| Nuxt SSR | verified (`playground/nuxt`) — rides the Vue integration on Vite | n/a — Nuxt is a Vite framework | n/a |
 
 Vite is mounted via `./react`, `./vue`, or the unified `./vite` entry, with the
 dock delivered through `@vitejs/devtools`. Rsbuild is mounted via the
 `./rsbuild` entry (`storybookDevtoolsRsbuild({ framework })`), with the dock
 delivered through a bundled `@devframes/hub` instance instead — see the
 "Rsbuild (rspack)" section in the README for setup and host-specific options
-(`clientAuth`, dev-time runtime sourcing).
+(`clientAuth`, dev-time runtime sourcing). Next.js is mounted via the `./next`
+entry (`withStorybookDevtools()` composing `next.config.ts`, plus two route
+handlers the consuming app creates — `createStorybookDevtoolsRoute()` for the
+devframes hub and `createStorybookDevtoolsClientBundleRoute()` for the dock's
+client bundle) — see the "Next.js (webpack)" section in the README for setup,
+the required `rewrites()` mapping, and host-specific options (`auth`, `host`,
+Turbopack unsupported, RSC gate).
 
 Current integrations:
 
@@ -31,7 +37,11 @@ Current integrations:
   `playground/react18` on 18; Playwright projects `react-chromium` /
   `react18-chromium`). Also verified on the Rsbuild host (`playground/rsbuild`,
   React 19, Playwright project `rsbuild-chromium`), which shares the same
-  source tree as `playground/react`. Both Vite playgrounds share ONE source tree —
+  source tree as `playground/react`, and on the Next.js host (`playground/next`,
+  React 19, App Router, Playwright project `next-chromium`), which has its own
+  source tree since it exercises the RSC gate in `rsc: true` mode (server and
+  client components mixed) rather than the `rsc: false` SPA shape the other
+  playgrounds share. Both Vite playgrounds share ONE source tree —
   `playground/react18/src` is a symlink to `playground/react/src` — so
   components are authored once and exercised on both React versions.
   Detection is non-intrusive: it reads the live fiber
@@ -51,12 +61,19 @@ Current integrations:
     mutation while React 18 apps are fixed automatically (`false` opts out
     with a warning; never silent). The `react18-chromium` spec asserts no
     degraded fallback and real JSX children source.
-  - **RSC (React Server Components):** opt-in via the `rsc: true` option for
-    Vite-based RSC frameworks (e.g. TanStack Start). It enables a `"use client"`
+  - **RSC (React Server Components):** the `rsc` option enables a `"use client"`
     transform gate so only client components are instrumented; server
-    components are left untouched. Covered by the transform unit tests
-    (`src/frameworks/react/transform.test.ts` → "RSC mode"). Next.js is not
-    Vite, so this plugin does not apply there. See
+    components are left untouched, and a module that is client-side only
+    *transitively* (imported by a `"use client"` module but carrying no
+    directive of its own) is not instrumented either. Opt-in (default `false`)
+    for Vite-based RSC frameworks (e.g. TanStack Start); on the Next.js host
+    it defaults to `true`, since the App Router ships Server Components by
+    default. The transform gate itself is covered by unit tests
+    (`src/frameworks/react/transform.test.ts` → "RSC mode"); `playground/next`
+    (App Router, mixed server + client components) provides runtime RSC
+    coverage — `e2e/playground-next-detection.spec.ts` asserts the client
+    component set registers and that a server component (`ServerInfo`) never
+    appears in the registry despite rendering server-only content. See
     [docs/REACT_PATTERNS.md](./REACT_PATTERNS.md) → "React Server Components".
 - Vue (`src/frameworks/vue`) — Vue 3 SFCs, verified on the Vite host via a
   dedicated E2E playground (`playground/vue`; Playwright project
@@ -109,6 +126,13 @@ Current integrations:
   `127.0.0.1` so the page and DevTools websocket use the same host in live and
   E2E runs. The Vite transform still skips SSR module transforms, so the
   browser-only runtime is imported only by the hydrated client graph.
+  SSR + hydration integrity is verified by `e2e/common-ssr-suite.ts` on both
+  SSR hosts (Nuxt and Next.js) against each playground's `HydrationInfo`
+  component, which renders server-computed state (Nuxt `useState` payload
+  transfer; a Next server-component prop): the markup must be in the raw HTML
+  payload, hydration must complete without mismatch errors while
+  instrumentation is active, and the hydrated instance must appear in the
+  highlighter registry.
 
   **Known limitation (devframe 0.9 / devtools-kit 0.6):** the embedded
   DevTools **dock UI does not load under Nuxt SSR**. 0.6 serves the dock from a

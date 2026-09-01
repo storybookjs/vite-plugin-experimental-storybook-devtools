@@ -152,6 +152,7 @@ export function createComponentHighlighterPlugin(
   } = options
 
   let isServe = false
+  let resolvedBase = '/'
   // Vite's standard CSP integration: when the app sets `html.cspNonce`, Vite
   // stamps its injected tags with this nonce. We mirror it onto the inline
   // DevTools-hook <script> so it survives a strict Content-Security-Policy.
@@ -183,6 +184,7 @@ export function createComponentHighlighterPlugin(
     },
     transformedComponents: state.transformedComponents,
     getDiagnostics: () => chDiagnostics,
+    getBase: () => resolvedBase,
   }
 
   // The unplugin-produced Vite plugin carries the portable hooks: transform
@@ -199,6 +201,7 @@ export function createComponentHighlighterPlugin(
     ...unpluginVitePlugin,
     configResolved(config) {
       isServe = config.command === 'serve'
+      resolvedBase = config.base || '/'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
     },
     config: (viteConfig) => {
@@ -381,6 +384,7 @@ export function createComponentHighlighterPlugin(
       state,
       storiesDir,
       devtoolsDockId,
+      storybookFramework: framework.storybookFramework,
       dockClientScript: {
         importFrom:
           'vite-plugin-experimental-storybook-devtools/client/vite-devtools',

@@ -53,6 +53,15 @@ export default defineConfig({
         baseURL: 'http://127.0.0.1:5176',
       },
     },
+    {
+      name: 'next-chromium',
+      testMatch: /playground-next-detection\.spec\.ts/,
+      fullyParallel: false,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:5178',
+      },
+    },
   ],
 
   webServer: [
@@ -86,6 +95,12 @@ export default defineConfig({
       url: 'http://127.0.0.1:5176',
       reuseExistingServer: !process.env.CI,
       timeout: 60000,
+    },
+    {
+      command: 'pnpm --dir playground/next dev -p 5178 -H 127.0.0.1',
+      url: 'http://127.0.0.1:5178',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
     },
   ],
 })

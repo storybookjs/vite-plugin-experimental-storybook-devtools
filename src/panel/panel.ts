@@ -33,9 +33,12 @@ async function initRpcClient() {
     try {
       const config = (await (client.call as any)(
         'component-highlighter:get-config',
-      )) as { storybookUrl?: string }
+      )) as { storybookUrl?: string; storybookDocsUrl?: string }
       if (config.storybookUrl) {
         storybookUrl = config.storybookUrl
+      }
+      if (config.storybookDocsUrl) {
+        storybookDocsUrl = config.storybookDocsUrl
       }
       // The Storybook tab renders once before this config arrives — its
       // status banner may show the default URL and a stale "not running";
@@ -230,6 +233,9 @@ function openInEditor(filePath: string) {
 
 /** The Storybook URL, fetched once via the `get-config` RPC at boot. */
 let storybookUrl = 'http://localhost:6006'
+
+/** Framework-specific docs page, fetched with the config; generic fallback until then. */
+let storybookDocsUrl = 'https://storybook.js.org/docs'
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 
@@ -2136,7 +2142,7 @@ function init() {
   docsBtn.innerHTML = DOCS_TAB_ICON
   docsBtn.title = 'Open Storybook docs'
   docsBtn.addEventListener('click', () => {
-    window.open('https://storybook.js.org/docs', '_blank')
+    window.open(storybookDocsUrl, '_blank')
   })
 
   // Spacer pushes help to bottom

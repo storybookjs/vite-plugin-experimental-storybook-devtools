@@ -382,3 +382,9 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.hydration-info {
+  padding: 1rem 0 0;
+  color: #6b7280;
+  font-size: 0.75rem;
+}

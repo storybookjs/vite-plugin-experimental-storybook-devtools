@@ -31,6 +31,7 @@ export function generateStory(data: StoryGenerationData): GeneratedStory {
     existingContent,
     playFunction,
     playImports,
+    storybookFramework,
   } = data
   const { componentName, filePath, isDefaultExport } = meta
 
@@ -113,6 +114,9 @@ export function generateStory(data: StoryGenerationData): GeneratedStory {
     if (playImports) {
       contentOptions.playImports = playImports
     }
+    if (storybookFramework) {
+      contentOptions.storybookFramework = storybookFramework
+    }
     content = generateStoryContent(contentOptions)
   }
 
@@ -136,6 +140,7 @@ function generateStoryContent(options: {
   componentRegistry?: Map<string, string>
   playFunction?: string[]
   playImports?: string[]
+  storybookFramework?: string
 }): string {
   const {
     componentName,
@@ -144,6 +149,7 @@ function generateStoryContent(options: {
     storyName,
     playFunction,
     playImports,
+    storybookFramework = '@storybook/react-vite',
   } = options
 
   const needsFnImport = hasAnyFunctionProps(props)
@@ -168,7 +174,7 @@ function generateStoryContent(options: {
   // Build imports
   const importStatements = [
     ...(needsReactImport ? [`import React from 'react';`] : []),
-    `import type { Meta, StoryObj } from '@storybook/react-vite';`,
+    `import type { Meta, StoryObj } from '${storybookFramework}';`,
     ...(storybookTestImport ? [storybookTestImport] : []),
     ...imports.map((imp) => `import ${imp.name} from '${imp.path}';`),
   ].join('\n')

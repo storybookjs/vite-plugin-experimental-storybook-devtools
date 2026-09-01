@@ -28,6 +28,13 @@
       "runtimeArgs": ["--filter", "playground-rsbuild", "dev"],
       "port": 5177,
       "env": {}
+    },
+    {
+      "name": "next-playground",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "playground-next", "dev", "-p", "5178", "-H", "127.0.0.1"],
+      "port": 5178,
+      "env": {}
     }
   ]
 }

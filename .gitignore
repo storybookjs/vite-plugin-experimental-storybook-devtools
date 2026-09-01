@@ -2,6 +2,8 @@ node_modules
 dist
 .nuxt
 .output
+.next
+next-env.d.ts
 *.log
 .DS_Store
 .pnpm-store
