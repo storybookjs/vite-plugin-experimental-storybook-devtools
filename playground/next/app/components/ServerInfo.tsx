@@ -7,7 +7,7 @@
 export function ServerInfo() {
   return (
     <footer className="server-info">
-      Rendered on the server — Node {process.version}, PID {process.pid}
+      Server component — Node {process.version}, PID {process.pid}
     </footer>
   )
 }
