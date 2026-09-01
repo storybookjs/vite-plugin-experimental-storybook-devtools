@@ -306,7 +306,11 @@ export function composeNextHookScript(
   const reactSnippet = getDevToolsHookScript()
   if (!opts.mountEmbeddedDock) return reactSnippet
   const embeddedSrc = `${opts.base}embedded.js`
-  return `${reactSnippet}\n(function(){\n  if (window.__storybookDevtoolsEmbeddedDockMounted) return;\n  window.__storybookDevtoolsEmbeddedDockMounted = true;\n  var s = document.createElement('script');\n  s.type = 'module';\n  s.src = ${JSON.stringify(embeddedSrc)};\n  document.head.appendChild(s);\n})();`
+  // Mount only after the window has loaded: the dock styles the <html>
+  // element (hub-ui's safe-area CSS variables), and doing that while React
+  // is still hydrating makes React 19 report a server/client attribute
+  // mismatch on the root element.
+  return `${reactSnippet}\n(function(){\n  if (window.__storybookDevtoolsEmbeddedDockMounted) return;\n  window.__storybookDevtoolsEmbeddedDockMounted = true;\n  var mount = function() {\n    var s = document.createElement('script');\n    s.type = 'module';\n    s.src = ${JSON.stringify(embeddedSrc)};\n    document.head.appendChild(s);\n  };\n  if (document.readyState === 'complete') setTimeout(mount, 0);\n  else window.addEventListener('load', function(){ setTimeout(mount, 0); });\n})();`
 }
 
 /**

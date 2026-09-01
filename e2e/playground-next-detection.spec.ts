@@ -92,7 +92,7 @@ test.describe('Next.js playground detection coverage', () => {
     const serverInfoText = await page
       .locator('.server-info')
       .textContent()
-    expect(serverInfoText).toContain('Rendered on the server')
+    expect(serverInfoText).toContain('Server component')
   })
 
   test('tracks modal subtree components after opening the task form', async ({
@@ -167,6 +167,6 @@ registerListenersReplaySuite(test as any)
 registerSsrSuite(test as any, expect as any, {
   componentName: 'HydrationInfo',
   selector: '.hydration-info',
-  markerText: 'Server-rendered at',
+  markerText: 'initially server-rendered at',
 })
 registerPanelRenderSuite(test as any, expect as any, { componentName: 'TaskCard' })

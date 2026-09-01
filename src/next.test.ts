@@ -94,6 +94,9 @@ describe('composeNextHookScript / getNextDevToolsHookScript', () => {
     expect(script).toContain('/__devframes/embedded.js')
     expect(script).toContain("document.createElement('script')")
     expect(script).toContain("document.head.appendChild(s)")
+    // Deferred past window load — mounting mid-hydration makes React 19
+    // report an attribute mismatch on <html> when the dock styles it.
+    expect(script).toContain("window.addEventListener('load'")
   })
 
   it('omits the embedded-dock mount script when disabled', () => {
