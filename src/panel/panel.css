@@ -312,6 +312,24 @@ html, body, #app {
   gap: 8px;
 }
 
+.sb-error-detail {
+  max-width: 480px;
+  max-height: 160px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  text-align: left;
+  font-family: var(--sb-font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--sb-fgcolor-negative);
+  background: var(--sb-bgcolor-negative);
+  border: 1px solid var(--sb-bordercolor-negative);
+  border-radius: var(--sb-border-radius);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .sb-iframe {
   width: 100%;
   height: 100%;
@@ -1118,93 +1136,3 @@ html, body, #app {
   white-space: nowrap;
 }
 
-/* ── Terminal tab ─────────────────── */
-.terminal-root {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
-.term-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #94a3b8;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  flex-shrink: 0;
-}
-
-.term-clear-btn {
-  height: 28px;
-  padding: 0 10px;
-  font-size: var(--sb-font-size-s1);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.term-clear-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #e2e8f0;
-}
-
-.term-output {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 8px 12px;
-  font-family: var(--sb-font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  color: #cbd5e1;
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.term-output::-webkit-scrollbar { width: 4px; }
-.term-output::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 2px; }
-
-.term-line {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.term-line.term-error {
-  color: #f87171;
-}
-
-/* ── Light mode — terminal override only ─────────────────────────────────── */
-/* All coverage/table/chrome colors are handled by --sb-* token defaults.    */
-/* Terminal intentionally stays dark regardless of system theme.              */
-@media (prefers-color-scheme: light) {
-  .terminal-root {
-    background: #0d1117;
-    color: #cbd5e1;
-  }
-  .term-header {
-    color: #94a3b8;
-    background: #0d1117;
-    border-bottom-color: rgba(255, 255, 255, 0.06);
-  }
-  .term-clear-btn {
-    color: #94a3b8;
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  .term-clear-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #e2e8f0;
-  }
-  .term-output {
-    background: rgba(0, 0, 0, 0.4);
-    color: #cbd5e1;
-  }
-  .term-output::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); }
-  .term-line.term-error { color: #f87171; }
-}

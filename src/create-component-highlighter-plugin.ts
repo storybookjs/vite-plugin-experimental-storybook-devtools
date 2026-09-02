@@ -171,7 +171,7 @@ export function createComponentHighlighterPlugin(
     transformedComponents: new Map<string, string>(),
     devtoolsTerminals: null,
     storybookSession: null,
-    terminalLogs: [],
+    devtoolsMessages: null,
     storybookStartFailure: null,
   }
 

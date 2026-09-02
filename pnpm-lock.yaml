@@ -44,7 +44,7 @@ importers:
         version: 9.1.0
       next:
         specifier: '>=15.0.0'
-        version: 15.5.24(@babel/core@7.29.7)(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 15.5.24(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react-element-to-jsx-string:
         specifier: ^15.0.0
         version: 15.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -9305,7 +9305,7 @@ snapshots:
     optionalDependencies:
       '@devframes/hub': 0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7))
       '@devframes/hub-ui': 0.9.5(@devframes/hub@0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(@devframes/json-render@0.9.5(@devframes/hub@0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7))
-      next: 15.5.24(@babel/core@7.29.7)(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      next: 15.5.24(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react: 19.2.7
     transitivePeerDependencies:
       - crossws
@@ -14419,6 +14419,31 @@ snapshots:
       - '@types/node'
       - babel-plugin-macros
 
+  next@15.5.24(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+    dependencies:
+      '@next/env': 15.5.24
+      '@swc/helpers': 0.5.15
+      caniuse-lite: 1.0.30001803
+      postcss: 8.4.31
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      styled-jsx: 5.1.6(react@19.2.7)
+    optionalDependencies:
+      '@next/swc-darwin-arm64': 15.5.24
+      '@next/swc-darwin-x64': 15.5.24
+      '@next/swc-linux-arm64-gnu': 15.5.24
+      '@next/swc-linux-arm64-musl': 15.5.24
+      '@next/swc-linux-x64-gnu': 15.5.24
+      '@next/swc-linux-x64-musl': 15.5.24
+      '@next/swc-win32-arm64-msvc': 15.5.24
+      '@next/swc-win32-x64-msvc': 15.5.24
+      '@playwright/test': 1.61.1
+      sharp: 0.35.3(@types/node@25.9.4)
+    transitivePeerDependencies:
+      - '@babel/core'
+      - '@types/node'
+      - babel-plugin-macros
+
   nitropack@2.13.4(@rspack/core@2.1.10(@swc/helpers@0.5.23))(oxc-parser@0.96.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3))(rolldown@1.1.4)(srvx@0.11.21)(vite@8.1.3)(webpack@5.110.2(esbuild@0.28.1)(lightningcss@1.32.0)(postcss@8.5.16)):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.4.2
@@ -16199,6 +16224,11 @@ snapshots:
       react: 19.2.7
     optionalDependencies:
       '@babel/core': 7.29.7
+
+  styled-jsx@5.1.6(react@19.2.7):
+    dependencies:
+      client-only: 0.0.1
+      react: 19.2.7
 
   styled-jsx@5.1.7(@babel/core@7.29.7)(react@19.2.7):
     dependencies:

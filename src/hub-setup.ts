@@ -83,8 +83,9 @@ export function registerStorybookHubSurfaces(
     diagnostics = defined as ChDiagnostics
   }
 
-  // Store terminals reference for the start-storybook RPC handler
+  // Store terminals + messages references for the start-storybook RPC handler
   state.devtoolsTerminals = ctx.terminals
+  state.devtoolsMessages = ctx.messages
 
   // Register dock entry for component highlighter UI
   ctx.docks.register(

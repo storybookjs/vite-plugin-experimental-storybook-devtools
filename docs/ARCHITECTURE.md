@@ -240,11 +240,21 @@ Panel bootstrap and Storybook process control:
 | `component-highlighter:get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }`. Replaces the removed `?sbUrl=` query param — an auto-derived dock URL can't carry query params |
 | `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` when the last start attempt's process died, so the panel can stop waiting and surface the failure |
 | `component-highlighter:storybook-index` | query | Proxy of Storybook's `index.json` |
-| `component-highlighter:start-storybook` | action | Start a Storybook dev server child process via `ctx.terminals` |
-| `component-highlighter:get-terminal-logs` | query | Tail the buffered Storybook process output (`since` offset) |
+| `component-highlighter:start-storybook` | action | Start a Storybook dev server as an interactive PTY session via `ctx.terminals` |
 | `component-highlighter:check-story` | query | Whether a story file exists for a given component path |
 | `component-highlighter:create-story` | action | Generate + write a story file from serialized props; broadcasts `story-created` (see below) |
 | `component-highlighter:get-coverage` | query | Compute and return coverage data |
+
+Storybook process output lives in devframe's own Terminals dock:
+`start-storybook` spawns the process as an interactive PTY session (id
+`storybook-dev`), so the dock renders it writable — interactive prompts
+like Storybook's port-conflict question can be answered — with scrollback,
+colors, and resize handled by the host UI. The panel's "Open Terminal"
+buttons and the failure toast deep-link to it via the `hub:docks:activate`
+RPC (`dockId: devframes_plugin_terminals`, `params.sessionId`); on a
+session error, `notifyStorybookFailure` posts a `ctx.messages` error toast
+carrying that same activate action. A dead session stays registered so its
+scrollback remains readable; the next start drops and respawns it.
 
 Open-in-editor goes through the `@devframes/service-open` wire service —
 declared on the devframe definition (`services: [...]`) and shipped as a
@@ -269,6 +279,7 @@ below.
 | `src/react-dedupe.ts` | `resolveReactDedupe(options)`: shared React-major-mismatch detection driving the `dedupeReact` option, called by both the Vite and Rsbuild adapters with their own `resolve.dedupe` mutation |
 | `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
+| `src/storybook-process.ts` | Shared Storybook process lifecycle: the session slot (one running Storybook per server), `adoptStorybookSession` (watches the terminals host for the session leaving `running`, records start failures), `notifyStorybookFailure` (error toast with an open-terminal action), and the Terminals-dock/session id constants |
 | `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
 | `src/rpc/index.ts` | Barrel: `serverFunctions` array + the `declare module 'devframe'` augmentation (`DevframeRpcServerFunctions`/`DevframeRpcClientFunctions`/`DevframeRpcSharedStates`) |
 | `src/context.ts` | `WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>` — lets each RPC function's `setup(ctx)` read the deps `createStorybookDevframe` was called with |

@@ -3,7 +3,6 @@ import { checkStory } from './functions/check-story'
 import { createStory } from './functions/create-story'
 import { getConfig } from './functions/get-config'
 import { getCoverage } from './functions/get-coverage'
-import { getTerminalLogs } from './functions/get-terminal-logs'
 import { highlightCoverageBatch } from './functions/highlight-coverage-batch'
 import { highlightCoverageInstances } from './functions/highlight-coverage-instances'
 import { highlightTarget } from './functions/highlight-target'
@@ -39,7 +38,6 @@ export const serverFunctions = [
   storybookStatus,
   storybookIndex,
   startStorybook,
-  getTerminalLogs,
   checkStory,
 ] as const
 
