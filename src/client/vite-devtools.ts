@@ -28,7 +28,13 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
     .ensureTrusted()
     .then(() => {
       setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
-        return (ctx.rpc.call as any)(method, ...args)
+        // `ctx.rpc.call` only accepts a literal method name from
+        // `DevframeRpcServerFunctions`; this passthrough forwards an
+        // arbitrary runtime method string, which no literal-keyed
+        // signature can type.
+        return (
+          ctx.rpc.call as (m: string, ...a: unknown[]) => Promise<unknown>
+        )(method, ...args)
       })
     })
     .catch(() => {
@@ -83,7 +89,7 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
             await ctx.docks.switchEntry('storybook-devtools')
           }
         },
-      } as any)
+      })
     } catch {
       // Client RPC registration not supported
     }
@@ -91,7 +97,9 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
 
   // Expose a function so the double-Escape handler in listeners.ts can
   // programmatically toggle the dock off (updates the DevTools button state).
-  ;(window as any).__componentHighlighterDeactivateDock = () => {
+  ;(
+    window as unknown as { __componentHighlighterDeactivateDock?: () => void }
+  ).__componentHighlighterDeactivateDock = () => {
     ctx.docks.toggleEntry(ctx.current.entryMeta.id)
   }
 
@@ -114,12 +122,15 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
       // Pass serialized props and component registry to the server. Raw props
       // are intentionally NOT sent — they hold unclonable live values and the
       // server generates stories from serializedProps only.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (ctx.rpc.call as any)('component-highlighter:create-story', {
+      await ctx.rpc.call('component-highlighter:create-story', {
         meta: data.meta,
-        serializedProps: data.serializedProps,
-        componentRegistry: data.componentRegistry,
-        storyName: data.storyName,
+        ...(data.serializedProps
+          ? { serializedProps: data.serializedProps }
+          : {}),
+        ...(data.componentRegistry
+          ? { componentRegistry: data.componentRegistry }
+          : {}),
+        ...(data.storyName ? { storyName: data.storyName } : {}),
         ...(data.playFunction ? { playFunction: data.playFunction } : {}),
         ...(data.playImports ? { playImports: data.playImports } : {}),
       })
@@ -166,9 +177,9 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
           if (!relPath) return
 
           try {
-            const status = (await (ctx.rpc.call as any)(
+            const status = await ctx.rpc.call(
               'component-highlighter:storybook-status',
-            )) as { running: boolean }
+            )
             if (!status.running) return
           } catch {
             return
@@ -186,15 +197,17 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
           if (!surfaceHandlesPanelActions(ctx.clientType, active)) return
 
           try {
-            await (ctx.rpc.call as any)('component-highlighter:visit-story', {
+            await ctx.rpc.call('component-highlighter:visit-story', {
               relativeFilePath: relPath,
-              preferredStoryName: data.storyName,
+              ...(data.storyName
+                ? { preferredStoryName: data.storyName }
+                : {}),
             })
           } catch {
             // Panel may not have registered its handler yet; best effort
           }
         },
-      } as any)
+      })
     } catch {
       // Client RPC registration not supported
     }

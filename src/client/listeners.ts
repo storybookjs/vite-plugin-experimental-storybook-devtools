@@ -31,6 +31,7 @@ import {
   getHighlightActor,
   isOverlayActive,
   isClickThrough,
+  type HighlightEvent,
 } from './highlight-machine'
 
 // Type declarations for globals
@@ -82,7 +83,12 @@ async function setRegistryRpcCallWhenTrusted(
     return
   }
   setRegistryRpcCall(async (method: string, ...args: unknown[]) => {
-    return (ctx.rpc.call as any)(method, ...args)
+    // `ctx.rpc.call` only accepts a literal method name from
+    // `DevframeRpcServerFunctions`; this passthrough forwards an arbitrary
+    // runtime method string, which no literal-keyed signature can type.
+    return (
+      ctx.rpc.call as (m: string, ...a: unknown[]) => Promise<unknown>
+    )(method, ...args)
   })
 }
 
@@ -135,7 +141,7 @@ function autoInitRpc() {
             handler: (data: { componentName: string }) => {
               scrollToComponent(data.componentName)
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-highlight-coverage',
@@ -149,7 +155,7 @@ function autoInitRpc() {
                 clearCoverageHighlights()
               }
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-highlight-coverage-batch',
@@ -159,7 +165,7 @@ function autoInitRpc() {
             ) => {
               showBatchCoverageHighlights(data)
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-set-highlight-mode',
@@ -179,7 +185,7 @@ function autoInitRpc() {
                 actor.send({ type: 'DOCK_DEACTIVATE' })
               }
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-set-prop',
@@ -200,7 +206,7 @@ function autoInitRpc() {
               ).__componentHighlighterSetProp
               setProp?.(data.id, data.path, data.payload)
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-reset-prop',
@@ -219,7 +225,7 @@ function autoInitRpc() {
               ).__componentHighlighterResetProp
               resetProp?.(data.id, data.path)
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-open-url',
@@ -227,13 +233,13 @@ function autoInitRpc() {
             handler: (data: { url: string }) => {
               window.open(data.url, '_blank')
             },
-          } as any)
+          })
 
           ctx.rpc.client.register({
             name: 'component-highlighter:do-open-panel-tab',
             type: 'action',
             handler: async (_data: { tab: string }) => {
-              const clientCtx = getHostClientContext() as any
+              const clientCtx = getHostClientContext()
               // This runs in the app page (the embedded surface). Skip opening
               // the in-page dock when the user is driving from a standalone
               // surface (extension) — its own panel switches instead.
@@ -241,7 +247,7 @@ function autoInitRpc() {
               if (!surfaceHandlesPanelActions('embedded', active)) return
               clientCtx?.docks?.switchEntry?.('storybook-devtools')
             },
-          } as any)
+          })
         } catch {
           // Client RPC registration not supported
         }
@@ -531,7 +537,11 @@ function initialize() {
       notifyClickThrough(isClickThrough(actor))
     },
     deactivateDock: () => {
-      const deactivate = (window as any).__componentHighlighterDeactivateDock
+      const deactivate = (
+        window as unknown as {
+          __componentHighlighterDeactivateDock?: () => void
+        }
+      ).__componentHighlighterDeactivateDock
       if (typeof deactivate === 'function') {
         deactivate()
       } else {
@@ -556,7 +566,11 @@ function initialize() {
   })
 
   // Expose machine send for overlay.ts (recording flow)
-  ;(window as any).__highlightMachineSend = (event: any) => actor.send(event)
+  ;(
+    window as unknown as {
+      __highlightMachineSend?: (event: HighlightEvent) => void
+    }
+  ).__highlightMachineSend = (event: HighlightEvent) => actor.send(event)
 
   // Event listeners for registry synchronization
   window.addEventListener('component-highlighter:register', ((

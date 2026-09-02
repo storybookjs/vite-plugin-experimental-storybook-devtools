@@ -118,8 +118,10 @@ export function scrollToComponent(componentName: string) {
       clearCoverageHighlights()
       instance.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
-      // Re-highlight after scroll so overlays match new viewport positions
-      const storyInfo = (instance as any)._hasStory ?? false
+      // Re-highlight after scroll so overlays match new viewport positions.
+      // `_hasStory` isn't part of `ComponentInstance` — nothing in this
+      // codebase sets it, so this always reads `false`.
+      const storyInfo = (instance as { _hasStory?: boolean })._hasStory ?? false
       window.addEventListener(
         'scrollend',
         () => {

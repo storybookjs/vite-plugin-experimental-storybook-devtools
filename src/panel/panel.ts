@@ -35,9 +35,7 @@ async function initRpcClient() {
     // Boot-time config: the storybookUrl the app was launched with — an
     // auto-derived dock URL can't carry query params, so it arrives over RPC.
     try {
-      const config = (await (client.call as any)(
-        'component-highlighter:get-config',
-      )) as { storybookUrl?: string; storybookDocsUrl?: string }
+      const config = await client.call('component-highlighter:get-config')
       if (config.storybookUrl) {
         storybookUrl = config.storybookUrl
       }
@@ -144,7 +142,12 @@ function isSameSelection(next: RegistryInstance | null | undefined): boolean {
 /** Convenience wrapper for server RPC calls */
 function rpcCall(method: string, ...args: unknown[]): Promise<unknown> {
   if (!rpcClient) return Promise.resolve(undefined)
-  return (rpcClient.call as any)(method, ...args)
+  // `rpcClient.call` only accepts a literal method name from
+  // `DevframeRpcServerFunctions`; this passthrough forwards an arbitrary
+  // runtime method string, which no literal-keyed signature can type.
+  return (
+    rpcClient.call as (m: string, ...a: unknown[]) => Promise<unknown>
+  )(method, ...args)
 }
 
 /** Sync the highlighter-tab-active shared state so the client knows whether to show context menu */
