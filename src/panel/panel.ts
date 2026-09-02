@@ -8,6 +8,7 @@
  */
 
 import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
+import { ansiLineToHtml, stripAnsi } from './ansi'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
 import {
@@ -2013,14 +2014,8 @@ function showHighlighterPopover(
 
 // ─── Terminal tab ───────────────────────────────────────────────────
 
-/** Strip ANSI escape codes for plain-text display */
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-}
-
 function appendTerminalLine(line: string) {
-  const stripped = stripAnsi(line)
-  const isError = ERROR_PATTERN.test(stripped)
+  const isError = ERROR_PATTERN.test(stripAnsi(line))
 
   // Track unseen lines and errors for the badge (when not on terminal tab)
   if (activeTab !== 'terminal') {
@@ -2035,7 +2030,8 @@ function appendTerminalLine(line: string) {
   const div = document.createElement('div')
   div.className = 'term-line'
   if (isError) div.classList.add('term-error')
-  div.textContent = stripped
+  // ansi_up HTML-escapes the content — see ansiLineToHtml.
+  div.innerHTML = ansiLineToHtml(line)
   output.appendChild(div)
 
   // Auto-scroll to bottom

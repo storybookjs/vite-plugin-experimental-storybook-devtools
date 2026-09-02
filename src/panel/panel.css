@@ -1179,6 +1179,28 @@ html, body, #app {
   color: #f87171;
 }
 
+/* ansi_up class-mode palette, tuned for the dark terminal background
+   (bright values for the base 8 so dark-on-dark stays readable). */
+.ansi-black-fg { color: #64748b; }
+.ansi-red-fg, .ansi-bright-red-fg { color: #f87171; }
+.ansi-green-fg, .ansi-bright-green-fg { color: #4ade80; }
+.ansi-yellow-fg, .ansi-bright-yellow-fg { color: #facc15; }
+.ansi-blue-fg, .ansi-bright-blue-fg { color: #60a5fa; }
+.ansi-magenta-fg, .ansi-bright-magenta-fg { color: #c084fc; }
+.ansi-cyan-fg, .ansi-bright-cyan-fg { color: #22d3ee; }
+.ansi-white-fg { color: #cbd5e1; }
+.ansi-bright-black-fg { color: #94a3b8; }
+.ansi-bright-white-fg { color: #f8fafc; }
+.ansi-black-bg { background: #1e293b; }
+.ansi-red-bg, .ansi-bright-red-bg { background: #7f1d1d; }
+.ansi-green-bg, .ansi-bright-green-bg { background: #14532d; }
+.ansi-yellow-bg, .ansi-bright-yellow-bg { background: #713f12; }
+.ansi-blue-bg, .ansi-bright-blue-bg { background: #1e3a8a; }
+.ansi-magenta-bg, .ansi-bright-magenta-bg { background: #581c87; }
+.ansi-cyan-bg, .ansi-bright-cyan-bg { background: #164e63; }
+.ansi-white-bg, .ansi-bright-white-bg { background: #475569; }
+.ansi-bright-black-bg { background: #334155; }
+
 /* ── Light mode — terminal override only ─────────────────────────────────── */
 /* All coverage/table/chrome colors are handled by --sb-* token defaults.    */
 /* Terminal intentionally stays dark regardless of system theme.              */

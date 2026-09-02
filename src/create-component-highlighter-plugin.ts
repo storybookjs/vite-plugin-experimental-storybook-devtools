@@ -1,18 +1,14 @@
 import type { Plugin } from 'vite'
 import type { FrameworkConfig } from './frameworks'
-import {
-  createPluginFromDevframe,
-  createProcessLauncher,
-} from '@vitejs/devtools-kit/node'
+import { createPluginFromDevframe } from '@vitejs/devtools-kit/node'
 import type { KitNodeContext } from '@vitejs/devtools-kit'
 import * as fs from 'fs'
 import * as path from 'path'
 import { createRequire } from 'module'
 import { ConsoleNotificationService } from './notifications'
 import { resolveReactDedupe } from './react-dedupe'
-import { createStorybookDevframe, STORYBOOK_ICON } from './devframe'
+import { createStorybookDevframe } from './devframe'
 import type { StorybookDevframeState } from './context'
-import { adoptStorybookSession } from './storybook-process'
 import {
   createComponentHighlighterUnplugin,
   getComponentHighlighterRuntimePaths,
@@ -157,7 +153,6 @@ export function createComponentHighlighterPlugin(
 
   let isServe = false
   let resolvedBase = '/'
-  let launchCwd = process.cwd()
   // Vite's standard CSP integration: when the app sets `html.cspNonce`, Vite
   // stamps its injected tags with this nonce. We mirror it onto the inline
   // DevTools-hook <script> so it survives a strict Content-Security-Policy.
@@ -207,7 +202,6 @@ export function createComponentHighlighterPlugin(
     configResolved(config) {
       isServe = config.command === 'serve'
       resolvedBase = config.base || '/'
-      launchCwd = config.root
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
     },
     config: (viteConfig) => {
@@ -400,77 +394,8 @@ export function createComponentHighlighterPlugin(
     chDiagnostics = diagnostics
   }
 
-  // Launcher dock for the Storybook process (kit-composed): spawns
-  // `storybook dev` into a tracked terminal session, streams the startup
-  // digest on the card, and swaps to an iframe embedding the running
-  // Storybook UI once the server answers. Shares the session slot with the
-  // `start-storybook` RPC, so whichever side starts first wins and the
-  // other reports "already running".
-  const storybookLauncher = createProcessLauncher({
-    id: 'storybook',
-    title: 'Storybook',
-    icon: STORYBOOK_ICON,
-    description: 'Start Storybook and embed it here once it is up.',
-    prepare: () => {
-      if (state.storybookSession) {
-        throw new Error(
-          'Storybook is already running — see the Storybook panel.',
-        )
-      }
-      state.storybookStartFailure = null
-    },
-    process: () => ({
-      command: 'npx',
-      args: [
-        'storybook',
-        'dev',
-        '-p',
-        new URL(storybookUrl).port || '6006',
-        '--no-open',
-      ],
-      cwd: launchCwd,
-      env: { ...process.env, STORYBOOK: 'true' } as Record<string, string>,
-    }),
-    session: { id: 'storybook-dev', title: 'Storybook', icon: STORYBOOK_ICON },
-    serve: {
-      onReady: async (session) => {
-        adoptStorybookSession(state, session)
-        await waitForStorybook(storybookUrl, state)
-        return storybookUrl
-      },
-    },
-  })
-
   return [
     transformPlugin,
     createPluginFromDevframe(definition, { setup: kitSetup }),
-    storybookLauncher,
   ]
-}
-
-/**
- * Poll until Storybook answers on its URL, or fail fast when the spawned
- * process already died (the exit handler records the failure).
- */
-async function waitForStorybook(
-  url: string,
-  state: StorybookDevframeState,
-  timeoutMs = 120_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (state.storybookStartFailure) {
-      throw new Error(
-        'Storybook exited before becoming reachable — see its terminal session.',
-      )
-    }
-    try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(3000) })
-      if (r.ok) return
-    } catch {
-      // not up yet
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  throw new Error(`Storybook did not become reachable at ${url}.`)
 }
