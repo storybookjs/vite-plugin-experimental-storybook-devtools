@@ -1,79 +1,162 @@
-import type { ChildProcess } from 'node:child_process'
 import type { StorybookDevframeState } from './context'
 
 /**
- * Structural slice of a devframe child-process terminal session — enough for
- * log capture and lifecycle tracking, so the hub and kit session types both
- * fit without importing either host package.
+ * Dock id of devframe's built-in Terminals dock (hub-ui's
+ * `devframes_plugin_terminals` constant, not exported by the package).
+ * Activating it with `{ sessionId }` deep-links to one session.
  */
-export interface StorybookProcessSession {
-  getChildProcess: () => ChildProcess | undefined
-}
+export const TERMINALS_DOCK_ID = 'devframes_plugin_terminals'
+
+/** Terminal session id of the Storybook dev-server process. */
+export const STORYBOOK_SESSION_ID = 'storybook-dev'
 
 /**
- * Write one line to every context's terminal-logs stream. `setup()` may run
- * in more than one context (e.g. Nuxt's client + SSR Vite), each with its
- * own transport and channel — fanning out keeps the log visible from
- * whichever context a panel is connected to.
+ * Structural slice of a devframe PTY terminal session — enough for lifecycle
+ * tracking and reading the scrollback, without importing the hub host package.
  */
-export function pushTerminalLine(
-  state: StorybookDevframeState,
-  line: string,
-): void {
-  for (const sink of state.terminalLogSinks) {
-    try {
-      sink.write(line)
-    } catch {
-      // sink closed with its context
-    }
+export interface StorybookProcessSession {
+  id: string
+  status?: string
+  /** Terminal scrollback, newest chunks last (raw, with ANSI/control codes). */
+  buffer?: string[]
+}
+
+interface TerminalsHostSlice {
+  events: {
+    on: (
+      event: 'terminals:session:updated',
+      handler: (session: StorybookProcessSession) => void,
+    ) => () => void
   }
 }
 
+// eslint-disable-next-line no-control-regex
+const ANSI = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g
+// Leading whitespace + clack/box-drawing/marker glyphs (│ ┌ └ ├ ─ ■ ▲ ◆ ● ✗ …).
+const BOX_PREFIX = /^[\s─-╿■-◿✓-✘×]+/
+// Stack frames, module URLs, the crash caret, and the re-thrown raw error —
+// noise that follows the human-readable message.
+const NOISE_LINE =
+  /^(at\s|file:\/\/|node:|Node\.js v|\^+\s*$|throw\s|[a-z_]+:\s|\}|\{$)/
+// A Storybook CLI error code, e.g. `SB_CORE-SERVER_0006`.
+const SB_ERROR = /\bSB_[A-Z0-9][A-Z0-9_-]*_\d+\b/
+// A generic error signature to fall back on when there's no SB code.
+const GENERIC_ERROR =
+  /([A-Z][A-Za-z]*Error\b|\bCannot find\b|\bENOENT\b|\bEACCES\b|\bnot found\b)/
+
+function cleanLine(raw: string): string {
+  // A line rewritten in place (spinner, progress) keeps only its final state,
+  // then loses its clack/box prefix.
+  return (raw.split('\r').pop() ?? raw).replace(BOX_PREFIX, '').trimEnd()
+}
+
+function cap(snippet: string, maxChars: number): string {
+  return snippet.length > maxChars
+    ? `${snippet.slice(0, maxChars).trimEnd()}…`
+    : snippet
+}
+
 /**
- * Wire a spawned Storybook session into the shared state: stream its output
- * into the terminal-logs channel, record a start failure when the process
- * dies, and clear the session slot so the next start can respawn. `onExit`
- * runs with the dead session after the slot is cleared — the RPC start path
- * uses it to drop the session from the terminals host.
+ * Distill a PTY scrollback into a short, plain-text failure preview. Strips
+ * ANSI/OSC and clack box-drawing prefixes, then anchors on the actual error
+ * — a Storybook `SB_*` code if present, else a generic error signature — and
+ * returns that line plus its immediate message, stopping at the first blank
+ * or stack frame so the Node crash dump and stack trace stay in the terminal.
+ * Falls back to the last meaningful lines when no error signature is found.
+ * Best-effort — the full output lives in the Terminals dock.
+ */
+export function extractErrorSnippet(
+  buffer: string[] | undefined,
+  maxLines = 5,
+  maxChars = 320,
+): string | null {
+  if (!buffer?.length) return null
+  const lines = buffer.join('').replace(ANSI, '').split(/\r?\n/).map(cleanLine)
+
+  let anchor = lines.findIndex((line) => SB_ERROR.test(line))
+  if (anchor < 0) {
+    anchor = lines.findIndex(
+      (line) => GENERIC_ERROR.test(line) && !NOISE_LINE.test(line),
+    )
+  }
+
+  if (anchor >= 0) {
+    const collected: string[] = []
+    for (let i = anchor; i < lines.length && collected.length < maxLines; i++) {
+      const line = lines[i]!
+      if (!line.trim()) {
+        if (collected.length) break
+        continue
+      }
+      if (i > anchor && NOISE_LINE.test(line)) break
+      collected.push(line)
+    }
+    const snippet = collected.join('\n').trim()
+    if (snippet) return cap(snippet, maxChars)
+  }
+
+  // No recognizable error line — show the last meaningful, non-noise lines.
+  const meaningful = lines.filter(
+    (line) => line.trim() && /[A-Za-z0-9]/.test(line) && !NOISE_LINE.test(line),
+  )
+  if (!meaningful.length) return null
+  return cap(meaningful.slice(-maxLines).join('\n').trim(), maxChars)
+}
+
+/**
+ * Wire a spawned Storybook PTY session into the shared state: watch the
+ * terminals host for the session leaving `running`, record a start failure
+ * when it errored, and clear the session slot so the next start can respawn.
+ * The dead session stays registered in the terminals host — its scrollback
+ * is where the failure detail lives — and is only dropped by the next start.
  */
 export function adoptStorybookSession(
   state: StorybookDevframeState,
+  terminals: TerminalsHostSlice,
   session: StorybookProcessSession,
-  onExit?: (session: StorybookProcessSession) => void,
+  onError?: () => void,
+  // The host drains the stream's final chunks (the error text) a tick after
+  // it marks the session `error`; wait briefly so `buffer` is complete.
+  bufferFlushMs = 50,
 ): void {
   state.storybookSession = session
-  const cp = session.getChildProcess()
-  if (!cp) return
-
-  const capture = (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n')) {
-      if (line) pushTerminalLine(state, line)
-    }
-  }
-  cp.stdout?.on('data', capture)
-  cp.stderr?.on('data', capture)
-
-  const drop = () => {
-    const dead = state.storybookSession as StorybookProcessSession | null
+  const unbind = terminals.events.on('terminals:session:updated', (updated) => {
+    if (updated.id !== session.id || updated.status === 'running') return
+    unbind()
     state.storybookSession = null
-    if (dead) onExit?.(dead)
-  }
-  cp.on('exit', (code: number | null) => {
-    pushTerminalLine(state, `[process exited with code ${code}]`)
-    if (code !== 0) {
-      state.storybookStartFailure = { code }
-      pushTerminalLine(
-        state,
-        `[error] Storybook failed to start (exit code ${code}). ` +
-          'Check that Storybook is installed in this project — ' +
-          'see the log above for the underlying error.',
-      )
+    if (updated.status === 'error') {
+      setTimeout(() => {
+        state.storybookStartFailure = {
+          code: null,
+          detail: extractErrorSnippet(updated.buffer),
+        }
+        onError?.()
+      }, bufferFlushMs)
     }
-    drop()
   })
-  cp.on('error', (err: Error) => {
-    state.storybookStartFailure = { code: null }
-    pushTerminalLine(state, `[error] Storybook failed to start: ${err.message}`)
-    drop()
+}
+
+/**
+ * Toast an error notification with an action that opens the Terminals dock
+ * on the Storybook session, where the failure output lives.
+ */
+export function notifyStorybookFailure(state: StorybookDevframeState): void {
+  const detail = state.storybookStartFailure?.detail
+  state.devtoolsMessages?.error?.('Storybook failed to start', {
+    description: detail
+      ? `${detail}\n\nOpen the terminal for the full output.`
+      : 'The process exited — Open the terminal for the error output.',
+    category: 'storybook',
+    actions: [
+      {
+        id: 'open-storybook-terminal',
+        label: 'Open Terminal',
+        kind: 'activate',
+        activate: {
+          dockId: TERMINALS_DOCK_ID,
+          params: { sessionId: STORYBOOK_SESSION_ID },
+        },
+      },
+    ],
   })
 }

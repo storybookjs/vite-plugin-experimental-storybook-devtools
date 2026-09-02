@@ -99,7 +99,6 @@
     "@vitest/browser-playwright": "^4.1.9",
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/compiler-sfc": "^3.5.28",
-    "ansi_up": "^6.0.6",
     "bumpp": "^10.3.2",
     "pkg-pr-new": "^0.0.75",
     "playwright": "^1.57.0",

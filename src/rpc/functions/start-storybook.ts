@@ -2,7 +2,8 @@ import { defineRpcFunction } from 'devframe'
 import { getStorybookDevframeContext } from '../../context'
 import {
   adoptStorybookSession,
-  pushTerminalLine,
+  notifyStorybookFailure,
+  STORYBOOK_SESSION_ID,
 } from '../../storybook-process'
 
 export const startStorybook = defineRpcFunction({
@@ -23,7 +24,18 @@ export const startStorybook = defineRpcFunction({
         state.storybookStartFailure = null
 
         try {
-          const session = await state.devtoolsTerminals.startChildProcess(
+          // A previous run's dead session may still be registered (kept so
+          // its scrollback stays readable in the Terminals dock) — drop it
+          // so the spawn can reuse the session id.
+          const stale = state.devtoolsTerminals.sessions?.get?.(
+            STORYBOOK_SESSION_ID,
+          )
+          if (stale) state.devtoolsTerminals.remove(stale)
+
+          // A PTY session: the Terminals dock renders it writable, so
+          // interactive prompts (e.g. Storybook's port-conflict question)
+          // can actually be answered, and the process sees a real TTY.
+          const session = await state.devtoolsTerminals.startPtySession(
             {
               command: 'npx',
               args: [
@@ -34,39 +46,33 @@ export const startStorybook = defineRpcFunction({
                 '--no-open',
               ],
               cwd: ctx.cwd,
-              // STORYBOOK: same env the playgrounds' own `storybook` scripts
-              // set — app bundler configs use it to keep this plugin out of
+              // Same env the playgrounds' own `storybook` scripts set: app
+              // bundler configs use it to keep this plugin out of
               // Storybook's builder (which loads the same config file).
-              // FORCE_COLOR: piped stdio has no TTY, so the CLI would drop
-              // its ANSI colors; the panel's Terminal tab renders them.
-              env: {
-                ...process.env,
-                STORYBOOK: 'true',
-                FORCE_COLOR: '1',
-              } as Record<string, string>,
+              env: { ...process.env, STORYBOOK: 'true' } as Record<
+                string,
+                string
+              >,
             },
             {
-              id: 'storybook-dev',
+              id: STORYBOOK_SESSION_ID,
               title: 'Storybook',
               icon: 'ph:book-duotone',
+              // Restarting goes through this RPC (fresh session), not the
+              // dock's restart control — a closed PTY stream can't rerun.
+              restartable: false,
             },
           )
 
-          // A dead session's stream is closed for good — drop it from the
-          // terminals host so the next start can reuse the session id.
-          adoptStorybookSession(state, session, (dead) => {
-            try {
-              state.devtoolsTerminals?.remove?.(dead)
-            } catch {
-              /* already gone */
-            }
-          })
+          adoptStorybookSession(state, state.devtoolsTerminals, session, () =>
+            notifyStorybookFailure(state),
+          )
 
           return { started: true }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
           state.storybookStartFailure = { code: null }
-          pushTerminalLine(state, `[error] Failed to start Storybook: ${msg}`)
+          notifyStorybookFailure(state)
           return { started: false, error: msg }
         }
       },

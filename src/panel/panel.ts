@@ -8,7 +8,6 @@
  */
 
 import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
-import { ansiLineToHtml, stripAnsi } from './ansi'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
 import {
@@ -180,7 +179,6 @@ const RESET_ICON = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" 
 // SB_LOGO_FULL — dual-color Storybook logo for the rail (pink bg + white S)
 const SB_LOGO_FULL = `<svg width="20" height="20" viewBox="-31.5 0 319 319" xmlns="http://www.w3.org/2000/svg"><path fill="#FF4785" d="M9.87,293.32L0.01,30.57C-0.31,21.9,6.34,14.54,15.01,14L238.49,0.03C247.32,-0.52,254.91,6.18,255.47,15.01C255.49,15.34,255.5,15.67,255.5,16V302.32C255.5,311.16,248.33,318.32,239.49,318.32C239.25,318.32,239.01,318.32,238.77,318.31L25.15,308.71C16.83,308.34,10.18,301.65,9.87,293.32Z"/><path fill="#FFF" d="M188.67,39.13L190.19,2.41L220.88,0L222.21,37.86C222.25,39.18,221.22,40.29,219.9,40.33C219.34,40.35,218.79,40.17,218.34,39.82L206.51,30.5L192.49,41.13C191.44,41.93,189.95,41.72,189.15,40.67C188.81,40.23,188.64,39.68,188.67,39.13ZM149.41,119.98C149.41,126.21,191.36,123.22,196.99,118.85C196.99,76.45,174.23,54.17,132.57,54.17C90.91,54.17,67.57,76.79,67.57,110.74C67.57,169.85,147.35,170.98,147.35,203.23C147.35,212.28,142.91,217.65,133.16,217.65C120.46,217.65,115.43,211.17,116.02,189.1C116.02,184.32,67.57,182.82,66.09,189.1C62.33,242.57,95.64,257.99,133.75,257.99C170.69,257.99,199.65,238.3,199.65,202.66C199.65,139.3,118.68,141,118.68,109.6C118.68,96.88,128.14,95.18,133.75,95.18C139.66,95.18,150.3,96.22,149.41,119.98Z"/></svg>`
 const COVERAGE_TAB_ICON = `<svg width="16" height="16" viewBox="0 0 10 12" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M9.76464 1.0757C9.90598 1.16404 10 1.32104 10 1.5V7.5L9.99992 7.50892C9.9987 7.57865 9.98321 7.64491 9.95623 7.70488C9.92676 7.77041 9.88358 7.82845 9.83035 7.87534L5.3369 11.8695C5.30013 11.9031 5.25937 11.9303 5.21616 11.951C5.14779 11.9838 5.0738 12 5 12C4.9262 12 4.85221 11.9838 4.78384 11.951C4.74062 11.9303 4.69986 11.9031 4.66308 11.8695L0.169665 7.87535L0.161201 7.86772C0.109893 7.82048 0.0706711 7.76488 0.0437672 7.70488C0.0169921 7.64535 0.0015266 7.57963 0.000107183 7.51046L0 7.5V1.5C0 1.32103 0.0940346 1.16401 0.235393 1.07568L0.252579 1.06477C0.268532 1.0548 0.290464 1.04142 0.318377 1.02514C0.374201 0.992577 0.453956 0.94838 0.557643 0.896536C0.765036 0.79284 1.06813 0.658576 1.46689 0.525658C2.2651 0.259589 3.44341 0 5 0C6.55659 0 7.7349 0.259589 8.53311 0.525658C8.93187 0.658576 9.23496 0.79284 9.44236 0.896536C9.54604 0.94838 9.6258 0.992577 9.68162 1.02514C9.70954 1.04142 9.73147 1.0548 9.74742 1.06477L9.76464 1.0757ZM1 1.7934V7.27547L2.06804 8.22483L8.65573 1.63719C8.53022 1.58541 8.38394 1.53003 8.21689 1.47434C7.5151 1.24041 6.44341 1 5 1C3.55659 1 2.4849 1.24041 1.78311 1.47434C1.43187 1.59142 1.17246 1.70716 1.00486 1.79096L1 1.7934ZM5 10.831L2.81674 8.89035L9 2.70713V7.27547L5 10.831Z" fill="currentColor"/></svg>`
-const TERMINAL_TAB_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`
 const CROSSHAIR_ICON = `<svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 3.00391C0.447715 3.00391 0 3.45162 0 4.00391V9.00391C0 9.55619 0.447715 10.0039 1 10.0039H4.5C4.77614 10.0039 5 9.78005 5 9.50391C5 9.22776 4.77614 9.00391 4.5 9.00391H1V4.00391L13 4.00391V9.00391H12C11.7239 9.00391 11.5 9.22776 11.5 9.50391C11.5 9.78005 11.7239 10.0039 12 10.0039H13C13.5523 10.0039 14 9.55619 14 9.00391V4.00391C14 3.45162 13.5523 3.00391 13 3.00391H1Z" fill="currentColor"/><path d="M6.45041 7.00643C6.50971 7.00046 6.5704 7.00502 6.62952 7.0209C6.67575 7.03326 6.71935 7.05208 6.75929 7.07634L10.2265 9.09876C10.2664 9.12106 10.3035 9.149 10.3366 9.18222C10.3798 9.22561 10.414 9.27597 10.4384 9.33038C10.4682 9.39673 10.4824 9.46686 10.4822 9.53619C10.4821 9.60554 10.4676 9.67562 10.4374 9.74185C10.4128 9.79612 10.3784 9.84632 10.335 9.8895C10.3018 9.92257 10.2646 9.95035 10.2245 9.97248L9.1496 10.5931L9.8996 11.8921C10.1067 12.2508 9.9838 12.7095 9.62508 12.9166C9.26636 13.1238 8.80767 13.0008 8.60056 12.6421L7.85056 11.3431L6.77563 11.9637C6.73646 11.9873 6.69378 12.0057 6.64855 12.0179C6.58942 12.0339 6.52873 12.0386 6.46941 12.0327C6.39698 12.0258 6.32904 12.0033 6.26895 11.9687C6.2088 11.9342 6.15518 11.8869 6.11265 11.8278C6.07771 11.7795 6.05119 11.7247 6.03524 11.6656C6.02298 11.6204 6.01735 11.5743 6.018 11.5285L6.00012 7.51465C5.99908 7.46793 6.00458 7.42076 6.017 7.37454C6.03285 7.31525 6.05933 7.26029 6.09428 7.21183C6.13666 7.15281 6.1901 7.10543 6.25004 7.0709C6.31004 7.03618 6.37794 7.01357 6.45041 7.00643Z" fill="currentColor"/></svg>`
 // const DOCS_TAB_ICON = `<svg width="16" height="16" viewBox="0 0 12 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 5.5C3 5.22386 3.22386 5 3.5 5H8.5C8.77614 5 9 5.22386 9 5.5C9 5.77614 8.77614 6 8.5 6H3.5C3.22386 6 3 5.77614 3 5.5Z" fill="currentColor"/><path d="M3.5 7.5C3.22386 7.5 3 7.72386 3 8C3 8.27614 3.22386 8.5 3.5 8.5H8.5C8.77614 8.5 9 8.27614 9 8C9 7.72386 8.77614 7.5 8.5 7.5H3.5Z" fill="currentColor"/><path d="M3 10.5C3 10.2239 3.22386 10 3.5 10H8.5C8.77614 10 9 10.2239 9 10.5C9 10.7761 8.77614 11 8.5 11H3.5C3.22386 11 3 10.7761 3 10.5Z" fill="currentColor"/><path fill-rule="evenodd" clip-rule="evenodd" d="M0.5 0C0.223858 0 0 0.223857 0 0.5V13.5C0 13.7761 0.223858 14 0.5 14H11.5C11.7761 14 12 13.7761 12 13.5V3.20711C12 3.0745 11.9473 2.94732 11.8536 2.85355L9.14645 0.146447C9.05268 0.0526784 8.9255 0 8.79289 0H0.5ZM1 1H8.5V3C8.5 3.27614 8.72386 3.5 9 3.5H11V13H1V1Z" fill="currentColor"/></svg>`
 const HELP_ICON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6.5 6.5a1.5 1.5 0 1 1 1.5 1.5v1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/><circle cx="8" cy="11.5" r="0.75" fill="currentColor"/></svg>`
@@ -379,8 +377,8 @@ async function visitStory(
   }
 
   // Start Storybook and navigate once ready. Stay on the Storybook tab —
-  // the pane shows the starting state; the log stays a click away on the
-  // terminal tab (revealed, not force-switched).
+  // the pane shows the starting state; the log stays a click away in the
+  // Terminals dock (not force-switched).
   renderStorybookState('starting')
   try {
     await rpcCall('component-highlighter:start-storybook')
@@ -388,7 +386,6 @@ async function visitStory(
     // Server may not support terminal start
   }
 
-  showTerminalTab()
   switchTab('storybook')
 
   // Poll until Storybook is ready, then build the URL and navigate
@@ -601,46 +598,26 @@ function clearAllHighlights() {
 
 // ─── Tab management ─────────────────────────────────────────────────
 
-type TabId = 'storybook' | 'highlighter' | 'coverage' | 'terminal' | 'about'
+type TabId = 'storybook' | 'highlighter' | 'coverage' | 'about'
 
 let activeTab: TabId = 'storybook'
 let coverageInterval: ReturnType<typeof setInterval> | null = null
 
-// Terminal badge state
-let terminalUnseenCount = 0
-let terminalHasError = false
 let highlightEnabled = false
-let terminalTabVisible = false
 
-function showTerminalTab() {
-  if (terminalTabVisible) return
-  terminalTabVisible = true
-  const termTabBtn = document.querySelector(
-    '.rail-btn[data-tab="terminal"]',
-  ) as HTMLElement | null
-  if (termTabBtn) termTabBtn.style.display = ''
-}
+// devframe's built-in Terminals dock (hub-ui's dock id — not exported by
+// the package) and the Storybook session id the start-storybook RPC spawns.
+const TERMINALS_DOCK_ID = 'devframes_plugin_terminals'
+const STORYBOOK_SESSION_ID = 'storybook-dev'
 
-const ERROR_PATTERN =
-  /\b(error|ERR!|fail|fatal|exception|stack\s*trace|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|Cannot find|Unexpected token)\b/i
-
-function updateTerminalBadge() {
-  const badge = document.getElementById('terminal-badge')
-  if (!badge) return
-
-  if (activeTab === 'terminal' || terminalUnseenCount === 0) {
-    badge.hidden = true
-    return
-  }
-
-  badge.hidden = false
-  badge.className = `rail-badge ${terminalHasError ? 'error' : 'info'}`
-}
-
-function clearTerminalBadge() {
-  terminalUnseenCount = 0
-  terminalHasError = false
-  updateTerminalBadge()
+/** Switch the host viewer to the Terminals dock, on the Storybook session. */
+function openStorybookTerminal() {
+  rpcCall('hub:docks:activate', {
+    dockId: TERMINALS_DOCK_ID,
+    params: { sessionId: STORYBOOK_SESSION_ID },
+  }).catch(() => {
+    // host without the terminals dock — nothing to open
+  })
 }
 
 function switchTab(tab: TabId) {
@@ -679,15 +656,12 @@ function switchTab(tab: TabId) {
     }
   }
 
-  if (tab === 'terminal') {
-    clearTerminalBadge()
-  }
 }
 
 // ─── Storybook tab ──────────────────────────────────────────────────
 
 type SbState = 'checking' | 'not-running' | 'starting' | 'running' | 'failed'
-type SbStartFailure = { code: number | null }
+type SbStartFailure = { code: number | null; detail?: string | null }
 type SbStatus = {
   running: boolean
   startFailure?: SbStartFailure | null | undefined
@@ -724,14 +698,11 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
         <div class="sb-state">
           <div class="spinner"></div>
           <div class="msg">Starting Storybook\u2026</div>
-          <button class="start-btn" id="sb-viewlog-btn">View log</button>
+          <button class="start-btn" id="sb-viewlog-btn">Open Terminal</button>
         </div>`
       document
         .getElementById('sb-viewlog-btn')
-        ?.addEventListener('click', () => {
-          showTerminalTab()
-          switchTab('terminal')
-        })
+        ?.addEventListener('click', openStorybookTerminal)
       break
 
     case 'running':
@@ -744,15 +715,19 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
           <div class="msg">Storybook failed to start${
             failure?.code != null ? ` (exit code ${failure.code})` : ''
           }</div>
+          ${
+            failure?.detail
+              ? `<pre class="sb-error-detail">${esc(failure.detail)}</pre>`
+              : ''
+          }
           <div class="btn-row">
-            <button class="start-btn" id="sb-error-btn">Show error log</button>
+            <button class="start-btn" id="sb-error-btn">Open Terminal</button>
             <button class="start-btn" id="sb-retry-btn">Try again</button>
           </div>
         </div>`
-      document.getElementById('sb-error-btn')?.addEventListener('click', () => {
-        showTerminalTab()
-        switchTab('terminal')
-      })
+      document
+        .getElementById('sb-error-btn')
+        ?.addEventListener('click', openStorybookTerminal)
       document
         .getElementById('sb-retry-btn')
         ?.addEventListener('click', startStorybook)
@@ -761,21 +736,12 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
 }
 
 /**
- * Put the Storybook pane into its failed state and flag the terminal's
- * error badge — the failure detail lives in the terminal log.
+ * Put the Storybook pane into its failed state — the failure detail lives
+ * in the Terminals dock's Storybook session, a click away via its button.
  */
 function markStorybookStartFailed(failure: SbStartFailure | null | undefined) {
   renderStorybookState('failed', failure)
   switchTab('storybook')
-  showTerminalTab()
-  flagTerminalError()
-}
-
-/** Mark the terminal rail button with an error badge. */
-function flagTerminalError() {
-  terminalHasError = true
-  if (terminalUnseenCount === 0) terminalUnseenCount = 1
-  updateTerminalBadge()
 }
 
 async function getStorybookStatus(): Promise<SbStatus> {
@@ -807,10 +773,6 @@ async function startStorybook() {
   } catch {
     // Server may not support terminal start; fall through to polling
   }
-
-  // Reveal the terminal tab for the spawn log, but keep the user on the
-  // Storybook pane's starting state.
-  showTerminalTab()
 
   // Poll until Storybook is ready (max ~120s)
   let attempts = 0
@@ -1849,9 +1811,6 @@ async function buildHighlighterPanel() {
       startBtn.disabled = true
       startBtn.textContent = 'Starting\u2026'
 
-      // Show terminal tab button (logs will appear there)
-      showTerminalTab()
-
       try {
         await rpcCall('component-highlighter:start-storybook')
       } catch { /* best effort */ }
@@ -1872,18 +1831,18 @@ async function buildHighlighterPanel() {
           clearInterval(poll)
           // Mirror the failure on the Storybook tab, but keep the user here.
           renderStorybookState('failed', status.startFailure)
-          flagTerminalError()
           notRunning.innerHTML = `
             <div class="hl-sb-status-msg">Storybook failed to start</div>
-            <div class="hl-sb-status-sub">See the terminal log for the error.</div>
+            ${
+              status.startFailure.detail
+                ? `<pre class="sb-error-detail">${esc(status.startFailure.detail)}</pre>`
+                : '<div class="hl-sb-status-sub">The terminal has the error output.</div>'
+            }
           `
           const errBtn = document.createElement('button')
           errBtn.className = 'start-btn'
-          errBtn.textContent = 'Show error log'
-          errBtn.addEventListener('click', () => {
-            showTerminalTab()
-            switchTab('terminal')
-          })
+          errBtn.textContent = 'Open Terminal'
+          errBtn.addEventListener('click', openStorybookTerminal)
           notRunning.appendChild(errBtn)
         } else if (status.running) {
           clearInterval(poll)
@@ -2012,52 +1971,6 @@ function showHighlighterPopover(
   positionPopover(popover, anchor)
 }
 
-// ─── Terminal tab ───────────────────────────────────────────────────
-
-function appendTerminalLine(line: string) {
-  const isError = ERROR_PATTERN.test(stripAnsi(line))
-
-  // Track unseen lines and errors for the badge (when not on terminal tab)
-  if (activeTab !== 'terminal') {
-    terminalUnseenCount += 1
-    if (isError) terminalHasError = true
-    updateTerminalBadge()
-  }
-
-  const output = document.getElementById('terminal-output')
-  if (!output) return
-
-  const div = document.createElement('div')
-  div.className = 'term-line'
-  if (isError) div.classList.add('term-error')
-  // ansi_up HTML-escapes the content — see ansiLineToHtml.
-  div.innerHTML = ansiLineToHtml(line)
-  output.appendChild(div)
-
-  // Auto-scroll to bottom
-  output.scrollTop = output.scrollHeight
-}
-
-/**
- * Tail the server's terminal-logs stream. The channel's replay window feeds
- * a (re)connecting panel the tail first, then lines arrive as they happen.
- */
-function subscribeTerminalLogs() {
-  if (!rpcClient) return
-  const reader = (
-    rpcClient as unknown as {
-      streaming: {
-        subscribe: (channel: string, id: string) => AsyncIterable<string>
-      }
-    }
-  ).streaming.subscribe('component-highlighter:terminal-logs', 'storybook')
-  ;(async () => {
-    for await (const line of reader) appendTerminalLine(line)
-  })().catch(() => {
-    // stream ended with the connection; a reconnect re-subscribes
-  })
-}
-
 // ─── Bootstrap ──────────────────────────────────────────────────────
 
 function init() {
@@ -2096,15 +2009,6 @@ function init() {
   covBtn.title = 'Coverage'
   covBtn.addEventListener('click', () => switchTab('coverage'))
 
-  // Terminal tab — hidden until Storybook starts
-  const termBtn = document.createElement('button')
-  termBtn.className = 'rail-btn'
-  termBtn.setAttribute('data-tab', 'terminal')
-  termBtn.style.display = 'none'
-  termBtn.innerHTML = `${TERMINAL_TAB_ICON}<span id="terminal-badge" class="rail-badge" hidden></span>`
-  termBtn.title = 'Terminal'
-  termBtn.addEventListener('click', () => switchTab('terminal'))
-
   // Docs button — opens docs in new tab (no panel pane)
   const docsBtn = document.createElement('button')
   docsBtn.className = 'rail-btn'
@@ -2129,7 +2033,6 @@ function init() {
   rail.appendChild(sbBtn)
   rail.appendChild(highlightBtn)
   rail.appendChild(covBtn)
-  rail.appendChild(termBtn)
   rail.appendChild(docsBtn)
   rail.appendChild(spacer)
   rail.appendChild(helpBtn)
@@ -2148,18 +2051,6 @@ function init() {
   covPane.id = 'pane-coverage'
   covPane.innerHTML =
     '<div class="coverage-root"><div class="empty">Loading coverage data\u2026</div></div>'
-
-  const termPane = document.createElement('div')
-  termPane.className = 'tab-pane'
-  termPane.id = 'pane-terminal'
-  termPane.innerHTML = `
-    <div class="terminal-root">
-      <div class="term-header">
-        <span>Storybook Terminal Output</span>
-        <button class="term-clear-btn" id="term-clear-btn">Clear</button>
-      </div>
-      <div class="term-output" id="terminal-output"></div>
-    </div>`
 
   const aboutPane = document.createElement('div')
   aboutPane.className = 'tab-pane'
@@ -2181,21 +2072,13 @@ function init() {
   content.appendChild(sbPane)
   content.appendChild(hlPane)
   content.appendChild(covPane)
-  content.appendChild(termPane)
   content.appendChild(aboutPane)
   app.appendChild(content)
-
-  // Wire up the clear button after DOM is ready
-  document.getElementById('term-clear-btn')?.addEventListener('click', () => {
-    const output = document.getElementById('terminal-output')
-    if (output) output.innerHTML = ''
-  })
 
   // Init RPC client — also sets up shared state subscriptions for
   // pending visit/tab, registry, and highlight toggle sync.
   initRpcClient().then(() => {
     registerPanelRpcHandlers()
-    subscribeTerminalLogs()
   })
 
   // Init storybook tab

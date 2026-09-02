@@ -108,17 +108,6 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
         initialValue: { value: false },
       })
 
-      // Storybook process output, pushed line-by-line. The replay window
-      // lets a panel that (re)connects mid-run catch up on the tail without
-      // a cursor protocol.
-      const terminalLogs = scope.rpc.streaming.create<string>(
-        'terminal-logs',
-        { replayWindow: 2000 },
-      )
-      deps.state.terminalLogSinks.push(
-        terminalLogs.start({ id: 'storybook' }),
-      )
-
       for (const fn of serverFunctions) {
         scope.rpc.register(fn)
       }
