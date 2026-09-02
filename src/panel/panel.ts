@@ -512,6 +512,7 @@ function showActionPopover(anchor: HTMLElement, entry: CoverageEntry) {
     makePopoverItem(BULLSEYE_ICON, 'Locate component', () => {
       rpcCall('component-highlighter:scroll-to-component', {
         componentName: entry.componentName,
+        hasStory: entry.hasStory,
       }).catch(() => {})
     }),
   )
@@ -1493,6 +1494,7 @@ async function buildHighlighterPanel() {
   locateBtn.addEventListener('click', () => {
     rpcCall('component-highlighter:scroll-to-component', {
       componentName: comp.meta.componentName,
+      hasStory: hasStories,
     }).catch(() => {})
   })
   hdrActions.appendChild(locateBtn)

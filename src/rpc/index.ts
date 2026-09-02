@@ -56,6 +56,7 @@ declare module 'devframe' {
   interface DevframeRpcClientFunctions {
     'component-highlighter:do-scroll-to-component': (data: {
       componentName: string
+      hasStory: boolean
     }) => void
     'component-highlighter:do-highlight-coverage': (
       data: { componentName: string; hasStory: boolean } | null,

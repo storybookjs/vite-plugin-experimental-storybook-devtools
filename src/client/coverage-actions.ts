@@ -107,7 +107,7 @@ export function showBatchCoverageHighlights(
 
 // ─── Scroll to component ─────────────────────────────────────────────
 
-export function scrollToComponent(componentName: string) {
+export function scrollToComponent(componentName: string, hasStory: boolean) {
   if (!componentRegistry) return
 
   for (const instance of componentRegistry.values()) {
@@ -119,13 +119,12 @@ export function scrollToComponent(componentName: string) {
       instance.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
 
       // Re-highlight after scroll so overlays match new viewport positions.
-      // `_hasStory` isn't part of `ComponentInstance` — nothing in this
-      // codebase sets it, so this always reads `false`.
-      const storyInfo = (instance as { _hasStory?: boolean })._hasStory ?? false
+      // The panel passes the component's real story status through the
+      // scroll RPC, so the re-drawn overlay keeps its covered/missing color.
       window.addEventListener(
         'scrollend',
         () => {
-          showCoverageHighlights(componentName, storyInfo)
+          showCoverageHighlights(componentName, hasStory)
         },
         { once: true },
       )

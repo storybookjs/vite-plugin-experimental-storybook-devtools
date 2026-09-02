@@ -138,8 +138,8 @@ function autoInitRpc() {
           ctx.rpc.client.register({
             name: 'component-highlighter:do-scroll-to-component',
             type: 'action',
-            handler: (data: { componentName: string }) => {
-              scrollToComponent(data.componentName)
+            handler: (data: { componentName: string; hasStory: boolean }) => {
+              scrollToComponent(data.componentName, data.hasStory)
             },
           })
 
