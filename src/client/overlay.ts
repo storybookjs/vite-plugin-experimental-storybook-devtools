@@ -11,6 +11,7 @@ import {
   stopRecording,
 } from './interaction-recorder'
 import { createContextMenu, type ContextMenuHandle } from './context-menu'
+import type { HighlightEvent } from './highlight-machine'
 import { attachHighlightLabel, removeHighlightLabel } from './highlight-label'
 import { pickStoryId } from '../utils/story-matching'
 
@@ -108,10 +109,9 @@ async function checkStoryFile(
   try {
     const ctx = getHostClientContext()
     if (ctx?.rpc?.call) {
-      const result = (await (ctx.rpc.call as any)(
-        'component-highlighter:check-story',
-        { componentPath },
-      )) as { hasStory: boolean; storyPath: string | null }
+      const result = await ctx.rpc.call('component-highlighter:check-story', {
+        componentPath,
+      })
       storyFileCache.set(componentPath, result)
       return result
     }
@@ -130,10 +130,7 @@ let openInEditorAvailable: boolean | undefined
 
 /** Whether the host advertises the open wire service (synchronous snapshot). */
 function hasOpenService(): boolean {
-  const rpc = getHostClientContext()?.rpc as unknown as
-    | { services?: { has: (pkg: string) => boolean } }
-    | undefined
-  return !!rpc?.services?.has(OPEN_SERVICE)
+  return !!getHostClientContext()?.rpc.services?.has(OPEN_SERVICE)
 }
 
 async function isOpenInEditorAvailable(): Promise<boolean> {
@@ -547,7 +544,11 @@ export async function showContextMenu(
       // We need to import the machine to send events... but to avoid circular deps,
       // we use a callback pattern: the caller (listeners.ts) provides onStartRecording.
       // Actually, we can just use the window hook for recording.
-      const sendEvent = (window as any).__highlightMachineSend
+      const sendEvent = (
+        window as unknown as {
+          __highlightMachineSend?: (event: HighlightEvent) => void
+        }
+      ).__highlightMachineSend
       if (sendEvent) {
         sendEvent({ type: 'START_RECORDING' })
       }
@@ -586,18 +587,17 @@ export async function showContextMenu(
       onMenuClosed()
     },
     async visitStory(relativeFilePath: string) {
-      const ctx = getHostClientContext() as any
-      if (ctx?.docks?.switchEntry) {
-        await ctx.docks.switchEntry('storybook-devtools')
-      }
-
+      // Don't open a dock here. `visit-story` broadcasts `do-visit-story` to
+      // every surface: each panel navigates its own Storybook iframe, and the
+      // surface currently driving (see active-surface routing) opens/switches
+      // its dock. Opening it locally would pop the in-app embedded dock even
+      // when the user is working in a separate DevTools-panel/extension.
       try {
         const rpcCtx = getHostClientContext()
         if (rpcCtx?.rpc?.call) {
-          await (rpcCtx.rpc.call as any)(
-            'component-highlighter:visit-story',
-            { relativeFilePath },
-          )
+          await rpcCtx.rpc.call('component-highlighter:visit-story', {
+            relativeFilePath,
+          })
           return
         }
       } catch {
@@ -607,9 +607,9 @@ export async function showContextMenu(
       try {
         const rpcCtx = getHostClientContext()
         if (!rpcCtx?.rpc?.call) return
-        const data = (await (rpcCtx.rpc.call as any)(
+        const data = await rpcCtx.rpc.call(
           'component-highlighter:storybook-index',
-        )) as { entries?: Record<string, any> }
+        )
         const entries = data.entries || {}
         const storyId = pickStoryId(entries, relativeFilePath)
         if (storyId) {
@@ -687,16 +687,17 @@ export function pushSelectedComponentRPC(
       ? {
           id: instance.id,
           meta: { ...instance.meta },
-          serializedProps: instance.serializedProps,
+          ...(instance.serializedProps !== undefined
+            ? { serializedProps: instance.serializedProps }
+            : {}),
           isConnected: instance.element?.isConnected ?? false,
         }
       : null
 
     if (ctx.rpc.call) {
-      ;(ctx.rpc.call as any)(
-        'component-highlighter:select-component',
-        data,
-      ).catch(() => {})
+      ctx.rpc
+        .call('component-highlighter:select-component', data)
+        .catch(() => {})
     }
 
     if (ctx.rpc.sharedState) {

@@ -476,11 +476,15 @@ export function getHighlightActor(): HighlightActor {
  * Call once during initialization (from listeners.ts).
  * Subsequent calls to getHighlightActor() return the same instance.
  */
+type HighlightMachineImplementations = Parameters<
+  typeof highlightMachine.provide
+>[0]
+
 export function createHighlightActor(
-  actions: Partial<Record<string, (...args: any[]) => void>>,
+  actions: NonNullable<HighlightMachineImplementations['actions']>,
 ): HighlightActor {
   if (_actor) return _actor
-  const provided = highlightMachine.provide({ actions: actions as any })
+  const provided = highlightMachine.provide({ actions })
   _actor = createActor(provided)
   _actor.start()
   return _actor
@@ -489,7 +493,7 @@ export function createHighlightActor(
 // ─── Snapshot helpers ───────────────────────────────────────────────
 
 export function isOverlayActive(actor: HighlightActor): boolean {
-  return (actor.getSnapshot() as any).matches({ overlay: 'enabled' })
+  return actor.getSnapshot().matches({ overlay: 'enabled' })
 }
 
 export function isAnyActive(actor: HighlightActor): boolean {
@@ -497,11 +501,11 @@ export function isAnyActive(actor: HighlightActor): boolean {
 }
 
 export function isClickThrough(actor: HighlightActor): boolean {
-  return (actor.getSnapshot() as any).matches({ clickThrough: 'on' })
+  return actor.getSnapshot().matches({ clickThrough: 'on' })
 }
 
 export function isRecordingState(actor: HighlightActor): boolean {
-  return (actor.getSnapshot() as any).matches({
+  return actor.getSnapshot().matches({
     overlay: { enabled: 'recording' },
   })
 }
