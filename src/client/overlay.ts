@@ -586,11 +586,11 @@ export async function showContextMenu(
       onMenuClosed()
     },
     async visitStory(relativeFilePath: string) {
-      const ctx = getHostClientContext() as any
-      if (ctx?.docks?.switchEntry) {
-        await ctx.docks.switchEntry('storybook-devtools')
-      }
-
+      // Don't open a dock here. `visit-story` broadcasts `do-visit-story` to
+      // every surface: each panel navigates its own Storybook iframe, and the
+      // surface currently driving (see active-surface routing) opens/switches
+      // its dock. Opening it locally would pop the in-app embedded dock even
+      // when the user is working in a separate DevTools-panel/extension.
       try {
         const rpcCtx = getHostClientContext()
         if (rpcCtx?.rpc?.call) {

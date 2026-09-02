@@ -6,11 +6,12 @@ import {
   showStoryCreationFeedback,
   hideContextMenu,
 } from './overlay'
+import { setRegistryRpcCall } from './listeners'
 import {
-  enableHighlightMode,
-  disableHighlightMode,
-  setRegistryRpcCall,
-} from './listeners'
+  getActiveSurface,
+  setActiveSurface,
+  surfaceHandlesPanelActions,
+} from './utils/active-surface'
 import { debug, error as logError } from './logger'
 
 // Track previous subscription so we never stack duplicate listeners
@@ -36,17 +37,57 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
 
   // ─── Dock activation/deactivation ─────────────────────────────────
 
-  // When dock is activated, enable highlight mode
+  // Toggle highlight mode through the server, not the local state machine.
+  // This dock's client script runs wherever the dock UI lives — the embedded
+  // in-page dock, but also a separate DevTools-panel/browser-extension
+  // context — while the overlay must run in the app page. `set-highlight-mode`
+  // fans `do-set-highlight-mode` out to every connected client, so the app
+  // page's listeners toggle their own overlay regardless of where this runs
+  // (the embedded case receives its own broadcast just the same).
+  const setHighlightMode = (enabled: boolean) => {
+    ;(ctx.rpc.call as (m: string, ...a: unknown[]) => Promise<unknown>)(
+      'component-highlighter:set-highlight-mode',
+      { enabled },
+    ).catch(() => {
+      // Not connected/trusted yet — best effort.
+    })
+  }
+
   ctx.current.events.on('entry:activated', () => {
     debug('dock activated - enabling highlight mode')
-    enableHighlightMode()
+    // Claim "driver" for this surface, so panel-open/navigation actions that
+    // follow (e.g. Go to story) route here instead of popping every surface.
+    setActiveSurface(ctx.rpc, ctx.clientType)
+    setHighlightMode(true)
   })
 
-  // When dock is deactivated, disable highlight mode
   ctx.current.events.on('entry:deactivated', () => {
     debug('dock deactivated - disabling highlight mode')
-    disableHighlightMode()
+    setHighlightMode(false)
   })
+
+  // Open/switch this surface's Storybook panel when a story is visited —
+  // but only on the surface that's currently driving. The `do-visit-story`
+  // broadcast reaches every connected surface; the panel iframe navigation
+  // is handled separately (panel.ts) on all of them, while the dock only
+  // opens where the user is actually working.
+  if (ctx.rpc.client) {
+    try {
+      ctx.rpc.client.register({
+        name: 'component-highlighter:do-visit-story',
+        type: 'action',
+        handler: async () => {
+          const active = await getActiveSurface(ctx.rpc)
+          if (!surfaceHandlesPanelActions(ctx.clientType, active)) return
+          if (ctx.docks?.switchEntry) {
+            await ctx.docks.switchEntry('storybook-devtools')
+          }
+        },
+      } as any)
+    } catch {
+      // Client RPC registration not supported
+    }
+  }
 
   // Expose a function so the double-Escape handler in listeners.ts can
   // programmatically toggle the dock off (updates the DevTools button state).
@@ -134,12 +175,15 @@ export default function clientScriptSetup(ctx: DockClientScriptContext): void {
           }
 
           // Close the context menu now that we're navigating to the story
+          // (a no-op on surfaces without an in-page overlay).
           hideContextMenu()
 
-          // Switch to the panel dock and tell it to visit the story via RPC
-          if (ctx.docks?.switchEntry) {
-            await ctx.docks.switchEntry('storybook-devtools')
-          }
+          // The story-created broadcast reaches every surface; only the one
+          // driving triggers the navigation, so we don't pop a dock on a
+          // surface the user isn't working in. The dock switch itself is done
+          // by the `do-visit-story` handler above, on the matching surface.
+          const active = await getActiveSurface(ctx.rpc)
+          if (!surfaceHandlesPanelActions(ctx.clientType, active)) return
 
           try {
             await (ctx.rpc.call as any)('component-highlighter:visit-story', {

@@ -2,6 +2,10 @@ import type { ComponentInstance } from '../frameworks/types'
 import type { SerializedRegistryInstance, RegistryDiff } from '../shared-types'
 import { getHostClientContext } from './utils/host-context'
 import {
+  getActiveSurface,
+  surfaceHandlesPanelActions,
+} from './utils/active-surface'
+import {
   setComponentRegistry,
   showContextMenu,
   hideContextMenu,
@@ -228,8 +232,13 @@ function autoInitRpc() {
           ctx.rpc.client.register({
             name: 'component-highlighter:do-open-panel-tab',
             type: 'action',
-            handler: (_data: { tab: string }) => {
+            handler: async (_data: { tab: string }) => {
               const clientCtx = getHostClientContext() as any
+              // This runs in the app page (the embedded surface). Skip opening
+              // the in-page dock when the user is driving from a standalone
+              // surface (extension) — its own panel switches instead.
+              const active = await getActiveSurface(clientCtx?.rpc)
+              if (!surfaceHandlesPanelActions('embedded', active)) return
               clientCtx?.docks?.switchEntry?.('storybook-devtools')
             },
           } as any)
@@ -668,16 +677,6 @@ function initialize() {
 
   // Start auto-initialization of RPC
   autoInitRpc()
-}
-
-// ─── Exports for vite-devtools.ts ────────────────────────────────────
-
-export function enableHighlightMode() {
-  getHighlightActor().send({ type: 'DOCK_ACTIVATE' })
-}
-
-export function disableHighlightMode() {
-  getHighlightActor().send({ type: 'DOCK_DEACTIVATE' })
 }
 
 // Run initialization
