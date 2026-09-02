@@ -211,7 +211,8 @@ panel and overlay feature-detect it and fall back to Vite's
 | `src/client/utils/prop-utils.ts` | Prop classification, editability, badge utilities |
 | `src/client/utils/prop-editor.ts` | Shared inline prop editor form builder |
 | `src/panel/panel.ts` | DevTools panel tabs |
-| `src/utils/story-matching.ts` | Story-to-component matching against Storybook's `index.json`, and visit-target selection || `src/utils/story-generator.ts` | Shared story generation utilities (naming, args formatting) |
+| `src/utils/story-matching.ts` | Story-to-component matching against Storybook's `index.json`, and visit-target selection |
+| `src/utils/instance-selection.ts` | Props fingerprinting and picking one live instance per variant for story creation, preferring an instance with live edits || `src/utils/story-generator.ts` | Shared story generation utilities (naming, args formatting) |
 | `src/utils/normalize-runtime-imports.ts` | Normalizes runtime import specifiers across hosts |
 | `src/utils/storybook-docs-url.ts` | Resolves the Storybook docs URL for the "Open Docs" command |
 | `src/codegen/interactions-to-code.ts` | Converts recorded interactions to play-function code |
