@@ -2,7 +2,7 @@
   "name": "playground-react",
   "type": "module",
   "version": "0.0.0",
-  "description": "React playground for vite-plugin-experimental-storybook-devtools",
+  "description": "React playground for @storybook/experimental-devtools",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.0.0",
   "private": true,
-  "description": "Next.js (App Router, webpack) playground for vite-plugin-experimental-storybook-devtools",
+  "description": "Next.js (App Router, webpack) playground for @storybook/experimental-devtools",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,7 +14,7 @@
     "next": "15.5.24",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "vite-plugin-experimental-storybook-devtools": "link:../.."
+    "@storybook/experimental-devtools": "link:../.."
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",

@@ -1778,8 +1778,7 @@ async function buildHighlighterPanel() {
           }
           buildHighlighterPanel() // rebuild anyway after max retries
         } finally {
-          // The in-place refresh keeps this button alive — reset it
-          // (the old full rebuild recreated it as a side effect).
+          // The in-place refresh keeps this button alive — reset it.
           addBtn.disabled = false
           addBtn.textContent = 'Add'
         }
@@ -2072,7 +2071,7 @@ function init() {
     <div class="about-root">
       <div class="about-logo">${SB_LOGO_FULL.replace('width="20" height="20"', 'width="48" height="48"')}</div>
       <div class="about-name">Storybook DevTools</div>
-      <div class="about-version">vite-plugin-experimental-storybook-devtools</div>
+      <div class="about-version">@storybook/experimental-devtools</div>
       <a class="about-link" href="https://github.com/storybookjs/vite-plugin-experimental-storybook-devtools" target="_blank" rel="noopener noreferrer">
         ${CODE_ICON} View on GitHub
       </a>

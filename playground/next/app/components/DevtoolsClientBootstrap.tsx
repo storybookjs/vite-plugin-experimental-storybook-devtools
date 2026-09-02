@@ -7,8 +7,8 @@
 // dist/client/listeners.mjs + dist/client/overlay.mjs directly (real
 // consuming apps import neither — the embedded dock loads the client lazily
 // once DevTools connects).
-import 'vite-plugin-experimental-storybook-devtools/client/listeners'
-import 'vite-plugin-experimental-storybook-devtools/client/overlay'
+import '@storybook/experimental-devtools/client/listeners'
+import '@storybook/experimental-devtools/client/overlay'
 
 export function DevtoolsClientBootstrap() {
   return null

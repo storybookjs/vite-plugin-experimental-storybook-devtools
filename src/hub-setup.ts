@@ -65,7 +65,7 @@ export function registerStorybookHubSurfaces(
       // Function form returns a clean URL for every code (the string form
       // would append the lowercased code as a path segment).
       docsBase: () =>
-        'https://github.com/yannbf/vite-plugin-experimental-storybook-devtools/blob/main/docs/REACT_PATTERNS.md',
+        'https://github.com/storybookjs/vite-plugin-experimental-storybook-devtools/blob/main/docs/REACT_PATTERNS.md',
       codes: {
         CH_TRANSFORM_FAILED: {
           why: (p: { file: string; detail: string }) =>

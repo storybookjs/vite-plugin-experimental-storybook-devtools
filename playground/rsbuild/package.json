@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.0.0",
   "private": true,
-  "description": "Rsbuild (rspack) playground for vite-plugin-experimental-storybook-devtools",
+  "description": "Rsbuild (rspack) playground for @storybook/experimental-devtools",
   "scripts": {
     "dev": "rsbuild dev",
     "build": "rsbuild build",

@@ -164,7 +164,7 @@ describe('withStorybookDevtools', () => {
 
     expect(nextConfig.serverExternalPackages).toContain('my-own-package')
     expect(nextConfig.serverExternalPackages).toContain(
-      'vite-plugin-experimental-storybook-devtools',
+      '@storybook/experimental-devtools',
     )
     expect(nextConfig.serverExternalPackages).toContain('devframe')
     expect(nextConfig.serverExternalPackages).toContain('@devframes/next')

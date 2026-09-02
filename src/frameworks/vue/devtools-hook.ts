@@ -14,8 +14,7 @@
  * real Vue devtools hook is already present (browser extension / @vitejs
  * devtools), we don't clobber it — we wrap its `emit` so both keep working.
  *
- * Vue specifics (validated in the Phase 0 spike, see
- * docs/plans/vue-non-intrusive-detection.md → "Spike results"):
+ * Vue specifics:
  *
  * - Vue's devtools component-event emit signature is
  *   `emit(event, app, uid, parentUid, instance)` — the component instance is at

@@ -48,8 +48,8 @@ type DevframeRpcServerFunctionsShape =
   >
 
 // RPC function type declarations. `devframe` (not `@vitejs/devtools-kit`) owns
-// these registries as of kit 0.6 — the kit re-exports the same interfaces, so
-// client code augmenting either module sees the same merged shape.
+// these registries — the kit re-exports the same interfaces, so client code
+// augmenting either module sees the same merged shape.
 declare module 'devframe' {
   interface DevframeRpcServerFunctions extends DevframeRpcServerFunctionsShape {}
 

@@ -57,13 +57,13 @@ export default defineNuxtConfig({
     ].filter(Boolean),
     resolve: {
       alias: {
-        'vite-plugin-experimental-storybook-devtools/client/listeners': r(
+        '@storybook/experimental-devtools/client/listeners': r(
           '../../src/client/listeners.ts',
         ),
-        'vite-plugin-experimental-storybook-devtools/client/overlay': r(
+        '@storybook/experimental-devtools/client/overlay': r(
           '../../src/client/overlay.ts',
         ),
-        'vite-plugin-experimental-storybook-devtools/client/vite-devtools': r(
+        '@storybook/experimental-devtools/client/vite-devtools': r(
           '../../src/client/vite-devtools.ts',
         ),
       },

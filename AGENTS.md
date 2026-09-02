@@ -15,32 +15,28 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
 1. **Start with tests, not assumptions**
    - If behavior changes, add/update tests first.
    - Prefer extending shared e2e helpers/suites over duplicating spec logic.
+   - Sequence: add/adjust tests describing the expected behavior, confirm
+     they fail against the old behavior, implement the change, then re-run
+     the tests and capture the output.
 
 2. **Keep framework playgrounds aligned**
    - Component naming and app structure should stay equivalent across supported frameworks when possible.
    - If one framework playground changes, review whether the others should match.
-   - `playground/react` (React 19) and `playground/react18` (React 18) share
-     ONE source tree: `playground/react18/src` is a symlink to
-     `playground/react/src` (canonical). `playground/rsbuild` (Rsbuild host,
-     React 19) is a third symlink consumer of the same tree — same mechanics,
-     but its shared entry's `client/listeners` + `client/overlay` imports are
-     aliased to shims (`playground/rsbuild/shims/`) instead of importing the
-     package directly, since Rsbuild has no `/@id/{specifier}` resolution for
-     the client bundle. Edit components once in `playground/react/src`; all
-     three playgrounds and their shared E2E suites pick it up. React 18 and
-     19 are both required and both E2E-gated. Do not replace the symlinks
-     with copies.
-   - The `rsc` option's `"use client"` transform gate is covered by unit tests
-     (`src/frameworks/react/transform.test.ts` → "RSC mode"). Runtime RSC
-     coverage lives separately in `playground/next` (App Router, React 19,
-     `rsc: true`, mixed server + client components): it has its own source
-     tree rather than joining the symlink group above, since the RSC gate
-     needs a real server component in the render tree, which the `rsc: false`
-     SPA playgrounds don't have. It uses the same client-bundle shim pattern
-     as `playground/rsbuild` (`playground/next/shims/`), since Next has no
-     `/@id/{specifier}` resolution either.
-     `e2e/playground-next-detection.spec.ts` asserts the client component set
-     registers and that the server component never appears in the registry.
+   - `playground/react` (React 19) is the canonical source tree.
+     `playground/react18/src` and `playground/rsbuild/src` are symlinks to
+     `playground/react/src`. Edit components once there; all three
+     playgrounds and their shared E2E suites pick it up. Do not replace the
+     symlinks with copies.
+   - `playground/rsbuild` and `playground/next` alias the shared entry's
+     `client/listeners` + `client/overlay` imports to shims
+     (`playground/<host>/shims/`) instead of importing the package directly.
+   - `playground/next` has its own source tree, not a symlink, because its
+     RSC gate (`rsc: true`) needs a real server component in the render
+     tree, which the `rsc: false` SPA playgrounds don't have. The `"use
+     client"` transform gate itself is covered by unit tests
+     (`src/frameworks/react/transform.test.ts` → "RSC mode");
+     `e2e/playground-next-detection.spec.ts` covers the runtime registry.
+   - React 18 and 19 are both required and both E2E-gated.
    - Keep `docs/SUPPORTED_FRAMEWORKS.md` current.
 
 3. **Use shared test primitives**
@@ -70,7 +66,6 @@ Read `docs/ARCHITECTURE.md` early for implementation/refactor tasks.
      - `README.md` - User-facing feature descriptions, configuration, usage guides
      - `AGENTS.md` - Agent working rules and validation steps
      - `docs/ARCHITECTURE.md` - Module responsibilities, endpoints, window globals, key IDs
-     - `docs/AGENT_PLAYBOOK.md` - Operational workflow and definition of done
      - `docs/SUPPORTED_FRAMEWORKS.md` - If framework list changed
      - `.github/pull_request_template.md` - If PR process changed
    - When in doubt, update the docs. Stale documentation causes compounding errors for future agents and contributors.
@@ -112,14 +107,11 @@ iframeDoc?.querySelector('.act-btn.locate');      // scroll-to-component buttons
 
 ### Authorization
 
-If the DevTools shows "Unauthorized", auto-authorize with:
+If the DevTools shows "Unauthorized", auto-authorize with the snippet below.
+The host publishes the client context on `window.__DEVFRAME_HUB_CLIENT_CONTEXT__`
+(standalone viewer: `__VITE_DEVTOOLS_CLIENT_CONTEXT__`); the token lives in
+localStorage under `__DEVFRAME_CONNECTION_AUTH_TOKEN__`.
 ```js
-// The embedded dock host publishes the app-page client context on
-// window.__DEVFRAME_HUB_CLIENT_CONTEXT__ (the standalone viewer uses
-// __VITE_DEVTOOLS_CLIENT_CONTEXT__ instead — src/client/utils/host-context.ts
-// checks both). The auth token is devframe-core state:
-// __DEVFRAME_CONNECTION_AUTH_TOKEN__ (read from localStorage or window);
-// requestTrustWithToken lives on ctx.rpc.
 const ctx =
   window.__VITE_DEVTOOLS_CLIENT_CONTEXT__ ||
   window.__DEVFRAME_HUB_CLIENT_CONTEXT__;
@@ -147,33 +139,25 @@ they work before dock activation. See `docs/ARCHITECTURE.md` for the full RPC ta
 
 ## Required Validation Before Handoff
 
-Run relevant checks (at minimum):
+Run at minimum:
 
 ```bash
 pnpm test
 pnpm exec playwright test
 ```
 
-If you touch broader behavior, run the full test set impacted by your changes.
+Run the broader test set too when the change touches more than one area.
 
 ## PR Hygiene
 
-- Prefer tests and implementation in the same PR (tests-first sequence within one PR).
-- In PR description include:
-  - What changed
-  - Why
-  - Exact commands run
-  - Any caveats/follow-ups
-- Keep test additions and implementation changes together in one PR whenever practical.
+- Keep tests and implementation in the same PR, tests first.
+- PR description includes: what changed, why, exact commands run, and any caveats or follow-ups.
 
 ---
 
 ## UI Styling — Storybook Design System
 
 The DevTools panel UI uses vanilla JS + Shadow DOM. Do **not** introduce React or Emotion just for styling. Instead, use Storybook's design tokens as CSS custom properties injected at the Shadow DOM root.
-
-### Full token reference
-See `/Users/m/projects/storybook/DESIGN_SYSTEM_REPORT.md` (local checkout of storybookjs/storybook).
 
 ### In-repo skill
 See `.agents/skills/storybook-ui/SKILL.md` for implementation guidance.

@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next'
 import { fileURLToPath } from 'node:url'
-import { withStorybookDevtools } from 'vite-plugin-experimental-storybook-devtools/next'
+import { withStorybookDevtools } from '@storybook/experimental-devtools/next'
 
 const r = (filepath: string) => fileURLToPath(new URL(filepath, import.meta.url))
 
@@ -31,10 +31,10 @@ const nextConfig: NextConfig = {
     config.resolve ??= {}
     config.resolve.alias = {
       ...(config.resolve.alias as Record<string, string> | undefined),
-      'vite-plugin-experimental-storybook-devtools/client/listeners': r(
+      '@storybook/experimental-devtools/client/listeners': r(
         './shims/devtools-client.ts',
       ),
-      'vite-plugin-experimental-storybook-devtools/client/overlay': r(
+      '@storybook/experimental-devtools/client/overlay': r(
         './shims/empty.ts',
       ),
     }

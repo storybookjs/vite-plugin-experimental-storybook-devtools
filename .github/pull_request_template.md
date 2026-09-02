@@ -31,7 +31,6 @@ pnpm exec playwright test
 ## Documentation
 
 - [ ] Updated `AGENTS.md` if workflow/expectations changed
-- [ ] Updated `docs/AGENT_PLAYBOOK.md` if process changed
 - [ ] Added/updated inline comments for non-obvious logic
 
 ## PR Type

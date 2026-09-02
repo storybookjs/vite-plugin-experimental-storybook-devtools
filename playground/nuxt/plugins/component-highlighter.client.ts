@@ -1,3 +1,3 @@
-import 'vite-plugin-experimental-storybook-devtools/client/listeners'
+import '@storybook/experimental-devtools/client/listeners'
 
 export default defineNuxtPlugin(() => {})

@@ -104,7 +104,7 @@ function createClientBundleMiddleware(packageRoot: string) {
  * // rsbuild.config.ts
  * import { defineConfig } from '@rsbuild/core'
  * import { pluginReact } from '@rsbuild/plugin-react'
- * import { storybookDevtoolsRsbuild } from 'vite-plugin-experimental-storybook-devtools/rsbuild'
+ * import { storybookDevtoolsRsbuild } from '@storybook/experimental-devtools/rsbuild'
  *
  * export default defineConfig({
  *   plugins: [
