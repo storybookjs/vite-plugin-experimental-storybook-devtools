@@ -169,6 +169,7 @@ On Rsbuild, instrumentation mounts through rspack via the shared `unplugin` core
 
 - **`clientAuth`** *(default `true`)* — set `clientAuth: false` to disable devframe's interactive OTP auth gate for single-user localhost or E2E setups (mirrors Nuxt's `devtools.clientAuth: false`).
 - **`framework: 'vue'`** is accepted, but only `framework: 'react'` is playground/E2E-verified on Rsbuild today.
+- **Open-in-editor works via the bundled `@devframes/service-open` wire service** — Rsbuild has no `/__open-in-editor` dev-server endpoint (a Vite feature), so "Open Code" and the coverage table's editor actions go through the service's RPC instead.
 - **Dev-time runtime is always the built `dist/` output** — Rsbuild has no equivalent of Vite's `server.transformRequest`, so there's no dev-source read path. Run `pnpm build` before `rsbuild dev` for the plugin's own runtime modules to be present.
 - The `dedupeReact` option and its React-major-mismatch detection (see "React version support" below) work the same way on Rsbuild, via `resolve.dedupe`.
 
