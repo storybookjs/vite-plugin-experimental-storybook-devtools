@@ -4,6 +4,7 @@ import { defineRpcFunction } from 'devframe'
 import type { SerializedProps } from '../../frameworks'
 import type { SerializedRegistryInstance } from '../../shared-types'
 import { getStorybookDevframeContext } from '../../context'
+import { ordinal } from '../../utils/instance-selection'
 
 export interface ComponentStoryData {
   meta: {
@@ -28,6 +29,13 @@ export interface ComponentStoryData {
   playImports?: string[]
   /** When true, skip navigating to the story after creation (e.g. batch "Create all") */
   skipNavigation?: boolean
+  /**
+   * Which live instance these props came from, among the component's
+   * connected siblings — set by the caller when more than one instance is
+   * rendered, so the creation toast can name the source (e.g. "the 3rd of 3
+   * instances").
+   */
+  sourceInstance?: { index: number; total: number }
 }
 
 export const createStory = defineRpcFunction({
@@ -163,8 +171,12 @@ export const createStory = defineRpcFunction({
             )
 
             const verb = existingContent ? 'added to' : 'created in'
+            const sourceNote =
+              data.sourceInstance && data.sourceInstance.total > 1
+                ? ` (from the ${ordinal(data.sourceInstance.index)} of ${data.sourceInstance.total} instances)`
+                : ''
             state.notifications.notify({
-              message: `Story "${story.storyName}" ${verb} ${path.basename(outputPath)}`,
+              message: `Story "${story.storyName}" ${verb} ${path.basename(outputPath)}${sourceNote}`,
               level: 'success',
               toast: true,
               autoDismissMs: 4000,

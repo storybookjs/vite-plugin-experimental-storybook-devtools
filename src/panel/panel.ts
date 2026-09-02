@@ -15,6 +15,10 @@ import {
   pickStoryId,
   stripExtForMatch,
 } from '../utils/story-matching'
+import {
+  pickRepresentativeByKey,
+  propsFingerprint,
+} from '../utils/instance-selection'
 
 // ─── RPC client ─────────────────────────────────────────────────────
 
@@ -809,23 +813,6 @@ async function startStorybook() {
 
 // ─── Story creation from coverage ───────────────────────────────────
 
-/**
- * Build a fingerprint string for serialized props, ignoring functions and JSX.
- * Used to deduplicate component instances that represent the same variant.
- */
-function propsFingerprint(props: Record<string, unknown>): string {
-  const meaningful: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(props)) {
-    if (value && typeof value === 'object') {
-      const v = value as Record<string, unknown>
-      if (v['__isFunction'] || v['__isJSX']) continue
-    }
-    if (typeof value === 'function') continue
-    meaningful[key] = value
-  }
-  return JSON.stringify(meaningful, Object.keys(meaningful).sort())
-}
-
 /** Suggest a story name based on meaningful prop values */
 function suggestStoryName(props: Record<string, unknown>): string {
   const meaningfulProps = ['variant', 'type', 'size', 'mode', 'status', 'kind', 'color', 'intent', 'appearance']
@@ -854,45 +841,61 @@ function fetchRegistry(): RegistryInstance[] {
   }
 }
 
+/** A representative instance picked for story creation, plus its position among live siblings sharing the same filePath (for the creation toast). */
+interface InstanceSelection {
+  instance: RegistryInstance
+  /** 1-based position among all connected instances of this component. */
+  index: number
+  /** Total connected instances of this component (siblings). */
+  total: number
+}
+
 /**
  * Collect unique instances of a component from the server registry snapshot,
- * deduplicated by their serialized props fingerprint.
+ * deduplicated by their serialized props fingerprint. When several instances
+ * share a fingerprint, the one carrying live edits is kept (see
+ * `pickRepresentativeByKey`) so an edited sibling's props are never silently
+ * dropped in favor of an unedited one.
  */
 async function collectUniqueInstances(
   filePath: string,
-): Promise<RegistryInstance[]> {
+): Promise<InstanceSelection[]> {
   const instances = await fetchRegistry()
-  const seen = new Map<string, RegistryInstance>()
-  for (const instance of instances) {
-    if (instance.meta?.filePath !== filePath) continue
-    if (!instance.isConnected) continue
-    const sp = instance.serializedProps
-    const fp = sp ? propsFingerprint(sp) : '{}'
-    if (!seen.has(fp)) {
-      seen.set(fp, instance)
-    }
-  }
-  return Array.from(seen.values())
+  const matching = instances.filter(
+    (i) => i.meta?.filePath === filePath && i.isConnected,
+  )
+  const representatives = pickRepresentativeByKey(matching, (i) =>
+    i.serializedProps ? propsFingerprint(i.serializedProps) : '{}',
+  )
+  return representatives.map((instance) => ({
+    instance,
+    index: matching.indexOf(instance) + 1,
+    total: matching.length,
+  }))
 }
 
 /**
  * Collect all unique visible instances across ALL components from the server
- * registry snapshot. Deduplicates by (filePath + propsFingerprint).
+ * registry snapshot. Deduplicates by (filePath + propsFingerprint), same
+ * edited-instance preference as `collectUniqueInstances`.
  */
-async function collectAllVisibleInstances(): Promise<RegistryInstance[]> {
+async function collectAllVisibleInstances(): Promise<InstanceSelection[]> {
   const instances = await fetchRegistry()
-  const seen = new Map<string, RegistryInstance>()
-  for (const instance of instances) {
-    const filePath = instance.meta?.filePath
-    if (!filePath || !instance.isConnected) continue
-    const sp = instance.serializedProps
-    const fp = sp ? propsFingerprint(sp) : '{}'
-    const key = `${filePath}::${fp}`
-    if (!seen.has(key)) {
-      seen.set(key, instance)
+  const connected = instances.filter((i) => i.meta?.filePath && i.isConnected)
+  const representatives = pickRepresentativeByKey(connected, (i) => {
+    const fp = i.serializedProps ? propsFingerprint(i.serializedProps) : '{}'
+    return `${i.meta.filePath}::${fp}`
+  })
+  return representatives.map((instance) => {
+    const siblings = connected.filter(
+      (i) => i.meta.filePath === instance.meta.filePath,
+    )
+    return {
+      instance,
+      index: siblings.indexOf(instance) + 1,
+      total: siblings.length,
     }
-  }
-  return Array.from(seen.values())
+  })
 }
 
 /**
@@ -900,14 +903,15 @@ async function collectAllVisibleInstances(): Promise<RegistryInstance[]> {
  * directly with instance data from the registry snapshot.
  */
 async function createStoryForComponent(filePath: string): Promise<boolean> {
-  const instances = await collectUniqueInstances(filePath)
-  if (instances.length === 0) return false
+  const selections = await collectUniqueInstances(filePath)
+  if (selections.length === 0) return false
 
-  for (const instance of instances) {
+  for (const { instance, index, total } of selections) {
     try {
       await rpcCall('component-highlighter:create-story', {
         meta: instance.meta,
         serializedProps: instance.serializedProps,
+        ...(total > 1 ? { sourceInstance: { index, total } } : {}),
       })
     } catch {
       // Best effort; continue with remaining instances
@@ -1093,24 +1097,26 @@ async function buildCoveragePanel(coverage: CoverageData) {
     // "Generate all" button
     const allVisibleInstances = await collectAllVisibleInstances()
     const uncoveredFilePaths = new Set(missingEntries.map((e) => e.filePath))
-    const uncoveredInstances = allVisibleInstances.filter(
-      (inst) =>
-        inst.meta?.filePath && uncoveredFilePaths.has(inst.meta.filePath),
+    const uncoveredSelections = allVisibleInstances.filter(
+      (sel) =>
+        sel.instance.meta?.filePath &&
+        uncoveredFilePaths.has(sel.instance.meta.filePath),
     )
-    if (uncoveredInstances.length > 0) {
+    if (uncoveredSelections.length > 0) {
       const createAllBtn = document.createElement('button')
       createAllBtn.className = 'create-all-btn'
       createAllBtn.textContent = 'Generate all'
-      createAllBtn.title = `Create stories for ${uncoveredInstances.length} uncovered component${uncoveredInstances.length === 1 ? '' : 's'}`
+      createAllBtn.title = `Create stories for ${uncoveredSelections.length} uncovered component${uncoveredSelections.length === 1 ? '' : 's'}`
       createAllBtn.addEventListener('click', async () => {
         createAllBtn.disabled = true
         createAllBtn.textContent = 'Creating\u2026'
-        for (const instance of uncoveredInstances) {
+        for (const { instance, index, total } of uncoveredSelections) {
           try {
             await rpcCall('component-highlighter:create-story', {
               meta: instance.meta,
               serializedProps: instance.serializedProps,
               skipNavigation: true,
+              ...(total > 1 ? { sourceInstance: { index, total } } : {}),
             })
           } catch {
             // Best effort

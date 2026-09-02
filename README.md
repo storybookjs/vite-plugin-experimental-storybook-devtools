@@ -275,7 +275,9 @@ The **Coverage** tab shows a progress bar, a table of all detected
 components with their story status, and visibility indicators for what's
 currently rendered. **Create all** generates stories for every visible
 component instance, deduplicating by props fingerprint; per-component
-buttons create one story at a time.
+buttons create one story at a time. When several instances share a
+fingerprint, the one with live prop edits is used, and the creation toast
+names which instance the story came from.
 
 ### DevTools Panel Tabs
 
