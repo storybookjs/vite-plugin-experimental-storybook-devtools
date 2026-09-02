@@ -224,7 +224,20 @@ function coverageColorClass(pct: number): string {
   return 'red'
 }
 
+const OPEN_SERVICE = '@devframes/service-open'
+
 function openInEditor(filePath: string) {
+  const client = rpcClient as unknown as {
+    services?: { has: (pkg: string) => boolean }
+    call: (method: string, ...args: unknown[]) => Promise<unknown>
+  } | null
+  if (client?.services?.has(OPEN_SERVICE)) {
+    client
+      .call('devframes:service:open:open-in-editor', { path: filePath })
+      .catch(() => {})
+    return
+  }
+  // Vite's built-in endpoint — the fallback on hosts without the service.
   fetch(`/__open-in-editor?file=${encodeURIComponent(filePath)}`).catch(
     () => {},
   )

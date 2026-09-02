@@ -24,6 +24,9 @@ importers:
       '@devframes/next':
         specifier: 0.9.5
         version: 0.9.5(@devframes/hub-ui@0.9.5(@devframes/hub@0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(@devframes/json-render@0.9.5(@devframes/hub@0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(@devframes/hub@0.9.5(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7)))(crossws@0.4.12(srvx@0.12.7))(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7))(next@15.5.24(@playwright/test@1.61.1)(@types/node@25.9.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)
+      '@devframes/service-open':
+        specifier: 0.9.5
+        version: 0.9.5(devframe@0.9.5(cac@7.0.0)(srvx@0.12.7))
       '@medv/finder':
         specifier: ^3.1.0
         version: 3.2.0

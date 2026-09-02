@@ -92,7 +92,7 @@ test.describe('Next.js playground detection coverage', () => {
     const serverInfoText = await page
       .locator('.server-info')
       .textContent()
-    expect(serverInfoText).toContain('Rendered on the server')
+    expect(serverInfoText).toContain('Server component')
   })
 
   test('tracks modal subtree components after opening the task form', async ({
@@ -133,11 +133,7 @@ test.describe('Next.js playground detection coverage', () => {
   })
 })
 
-registerCommonHighlighterSuite(test as any, {
-  // Next has no built-in `/__open-in-editor` dev-server endpoint (a Vite
-  // feature); the button correctly hides itself when the probe fails.
-  hasOpenInEditor: false,
-})
+registerCommonHighlighterSuite(test as any)
 registerHighlightPanelStateSuite(test as any)
 registerLivePropEditSuite(test as any, {
   // The Next playground has no PropZoo; TaskCard's `task` object covers the
@@ -167,6 +163,6 @@ registerListenersReplaySuite(test as any)
 registerSsrSuite(test as any, expect as any, {
   componentName: 'HydrationInfo',
   selector: '.hydration-info',
-  markerText: 'Server-rendered at',
+  markerText: 'initially server-rendered at',
 })
 registerPanelRenderSuite(test as any, expect as any, { componentName: 'TaskCard' })

@@ -256,7 +256,12 @@ session error, `notifyStorybookFailure` posts a `ctx.messages` error toast
 carrying that same activate action. A dead session stays registered so its
 scrollback remains readable; the next start drops and respawns it.
 
-`/__open-in-editor` remains available separately (Vite's own built-in endpoint, not registered by this plugin).
+Open-in-editor goes through the `@devframes/service-open` wire service —
+declared on the devframe definition (`services: [...]`) and shipped as a
+dependency, so `devframes:service:open:open-in-editor` is registered on every
+host. The panel and overlay feature-detect it with
+`rpc.services.has('@devframes/service-open')` and fall back to Vite's own
+`/__open-in-editor` endpoint where the service is unavailable.
 
 The remaining RPC functions — registry sync, panel↔client relay, notifications
 — are covered in the "Panel↔Client communication" and "Shared state" sections

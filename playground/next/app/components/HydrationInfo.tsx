@@ -12,7 +12,7 @@ export interface HydrationInfoProps {
 export function HydrationInfo({ renderedAt }: HydrationInfoProps) {
   return (
     <aside className="hydration-info">
-      Server-rendered at <time dateTime={renderedAt}>{renderedAt}</time>
+      Client component initially server-rendered at <time dateTime={renderedAt}>{renderedAt}</time>
     </aside>
   )
 }
