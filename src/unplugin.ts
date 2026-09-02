@@ -249,7 +249,7 @@ function buildComponentHighlighterUnpluginOptions(
   }
 
   return {
-    name: 'vite-plugin-experimental-storybook-devtools',
+    name: '@storybook/experimental-devtools',
     enforce: 'pre',
     resolveId(id: string) {
       // HMR invalidation appends ?t=<timestamp> to re-fetched imports —

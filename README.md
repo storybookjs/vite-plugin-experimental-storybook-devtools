@@ -1,34 +1,33 @@
-# Vite Devtools Storybook plugin
+# Storybook DevTools
 
-A dev-server plugin — for Vite or Rsbuild — that instruments React, Vue, and Nuxt SSR components to provide visual highlighting and **automatic Storybook story generation** during development. Hover over components in your running app to see their details and create stories with a single click.
+Dev-server devtools for visual component highlighting and automatic Storybook story generation. It instruments React, Vue, and Nuxt SSR components on top of Vite, Rsbuild, or Next.js. Hover over components in your running app to see their details and create stories with a single click.
 
 ## Features
 
-- **Component Highlighting** - Visual overlay on React, Vue, and Nuxt SSR components with configurable colors
+- **Component Highlighting** - Visual overlay on React, Vue, and Nuxt SSR components
 - **One-Click Story Generation** - Create Storybook stories directly from your running app
 - **Interaction Recording** - Record user interactions and generate stories with play functions
-- **Props Serialization** - Properly serializes JSX children, Vue slots, nested components, and reactive objects
+- **Props Serialization** - Serializes JSX children, Vue slots, nested components, and reactive objects
 - **Append to Existing Stories** - Add new story variants to existing story files
 - **Smart Imports** - Automatically resolves and adds component imports
-- **DevTools Integration** - Built-in Vite DevTools Kit dock panel with Storybook, Coverage, Terminal, and Docs tabs
+- **DevTools Integration** - Dock panel with Storybook, Coverage, Terminal, and Docs tabs
 - **Coverage Dashboard** - Track story coverage across all detected components
 - **Copy Prompt** - Copy LLM-friendly component context to clipboard for AI-assisted development
-- **Performance Optimized** - Only active in development, tree-shaken in production
+- **Development Only** - Never runs in production builds
 - **Keyboard Shortcuts** - Quick toggles and navigation
 
 ## Installation
 
 ```bash
-npm install vite-plugin-experimental-storybook-devtools
+npm install @storybook/experimental-devtools
 # or
-pnpm add vite-plugin-experimental-storybook-devtools
+pnpm add @storybook/experimental-devtools
 # or
-yarn add vite-plugin-experimental-storybook-devtools
+yarn add @storybook/experimental-devtools
 ```
 
 ### Peer Dependencies
 
-This plugin requires:
 - One bundler host: `vite` >= 5.0.0 with `@vitejs/devtools` >= 0.6.0, `@rsbuild/core` >= 1.1.7, or `next` (App Router, webpack dev)
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
@@ -41,7 +40,7 @@ This plugin requires:
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { DevTools } from '@vitejs/devtools'
-import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/react'
+import componentHighlighter from '@storybook/experimental-devtools/react'
 
 export default defineConfig({
   plugins: [
@@ -59,7 +58,7 @@ export default defineConfig({
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { DevTools } from '@vitejs/devtools'
-import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/vue'
+import componentHighlighter from '@storybook/experimental-devtools/vue'
 
 export default defineConfig({
   plugins: [
@@ -80,7 +79,7 @@ import componentHighlighter, {
   getNuxtDevToolsHookScript,
   getNuxtViteDevToolsInjectionScript,
   viteDevToolsBridgeModule,
-} from 'vite-plugin-experimental-storybook-devtools/nuxt'
+} from '@storybook/experimental-devtools/nuxt'
 
 export default defineNuxtConfig({
   ssr: true,
@@ -113,30 +112,25 @@ export default defineNuxtConfig({
 })
 ```
 
-Nuxt SSR uses the Vue component runtime, but Nuxt does not rely on Vite's
-`transformIndexHtml` hook for its rendered HTML. Add the first script so the
-Vue devtools hook exists before hydration mounts the client app, and add the
-module script so the embedded Vite DevTools dock is mounted. Register
-`viteDevToolsBridgeModule` so the DevTools HTTP routes (the dock UI, panel
-assets, and client-script resolution) are reachable through Nuxt's dev
-server — Nuxt otherwise diverts non-build-asset requests around the Vite
-middlewares that serve them. The playground also pins `vite.server.host` to
-`127.0.0.1` so the page and DevTools websocket use the same host. When running
-Storybook for Nuxt components, omit the module, DevTools plugin, component
-highlighter plugin, and head scripts from the Storybook process.
+Nuxt SSR uses the Vue component runtime. Register `viteDevToolsBridgeModule` so
+the DevTools dock and its assets are reachable through Nuxt's dev server, and
+add both head scripts so the highlighter is wired up before and after
+hydration. Pin `vite.server.host` if the page and the DevTools websocket need
+to agree on a host (for example `127.0.0.1`). When running Storybook for Nuxt
+components, omit the module, the DevTools plugin, the component highlighter
+plugin, and the head scripts from the Storybook process.
 
 ### Vite (unified entry)
 
-`./react` and `./vue` are thin wrappers over one factory that also has its
-own entry point, `./vite`, for picking the framework with an option instead
-of the import path:
+`./react` and `./vue` are thin wrappers over a single `./vite` entry that
+picks the framework via an option instead of the import path:
 
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { DevTools } from '@vitejs/devtools'
-import { storybookDevtools } from 'vite-plugin-experimental-storybook-devtools/vite'
+import { storybookDevtools } from '@storybook/experimental-devtools/vite'
 
 export default defineConfig({
   plugins: [
@@ -149,13 +143,14 @@ export default defineConfig({
 
 ### Rsbuild (rspack)
 
-`./rsbuild` mounts the same instrumentation and dock on an Rsbuild project instead of Vite — no `@vitejs/devtools` plugin needed, since Rsbuild has no Vite DevTools to hook into:
+`./rsbuild` mounts the same instrumentation and dock on an Rsbuild project.
+No `@vitejs/devtools` plugin is needed here.
 
 ```typescript
 // rsbuild.config.ts
 import { defineConfig } from '@rsbuild/core'
 import { pluginReact } from '@rsbuild/plugin-react'
-import { storybookDevtoolsRsbuild } from 'vite-plugin-experimental-storybook-devtools/rsbuild'
+import { storybookDevtoolsRsbuild } from '@storybook/experimental-devtools/rsbuild'
 
 export default defineConfig({
   plugins: [
@@ -165,27 +160,25 @@ export default defineConfig({
 })
 ```
 
-On Rsbuild, instrumentation mounts through rspack via the shared `unplugin` core, and the DevTools dock is mounted as a devframe hub (`@devframes/hub` + `@devframes/hub-ui`) on the dev server's middlewares, riding a sidecar WebSocket. Notable differences from the Vite host:
+Options:
 
-- **`clientAuth`** *(default `true`)* — set `clientAuth: false` to disable devframe's interactive OTP auth gate for single-user localhost or E2E setups (mirrors Nuxt's `devtools.clientAuth: false`).
+- **`clientAuth`** *(default `true`)* — set `clientAuth: false` to skip the interactive auth gate for single-user localhost or E2E setups.
 - **`framework: 'vue'`** is accepted, but only `framework: 'react'` is playground/E2E-verified on Rsbuild today.
-- **Open-in-editor works via the bundled `@devframes/service-open` wire service** — Rsbuild has no `/__open-in-editor` dev-server endpoint (a Vite feature), so "Open Code" and the coverage table's editor actions go through the service's RPC instead.
-- **Dev-time runtime is always the built `dist/` output** — Rsbuild has no equivalent of Vite's `server.transformRequest`, so there's no dev-source read path. Run `pnpm build` before `rsbuild dev` for the plugin's own runtime modules to be present.
-- The `dedupeReact` option and its React-major-mismatch detection (see "React version support" below) work the same way on Rsbuild, via `resolve.dedupe`.
+- **`dedupeReact`** works the same as on Vite — see "React version support" below.
 
 ### Next.js (webpack)
 
-`./next` mounts the same instrumentation on Next's App Router dev server (`next dev`, webpack — Turbopack has no unplugin adapter, see below). Dev-only, client-compilation-only: the webpack plugin is only pushed onto the client compilation (`context.dev && !context.isServer && context.nextRuntime !== 'edge'`), so server components and the edge runtime are never touched.
+`./next` mounts the same instrumentation on Next's App Router dev server
+(`next dev`, webpack). Turbopack is unsupported — see below.
 
 ```typescript
 // next.config.ts
 import type { NextConfig } from 'next'
-import { withStorybookDevtools } from 'vite-plugin-experimental-storybook-devtools/next'
+import { withStorybookDevtools } from '@storybook/experimental-devtools/next'
 
 const nextConfig: NextConfig = {
-  // Next's App Router treats a leading-underscore path segment as a private,
-  // unroutable folder, so the hub and client-bundle routes live at
-  // non-underscore paths and get rewritten to their public URLs here.
+  // Next's App Router treats a leading-underscore path segment as private
+  // and unroutable, so the routes below are rewritten from public paths.
   async rewrites() {
     return [
       { source: '/__devframes/:path*', destination: '/internal-devframes-hub/:path*' },
@@ -202,7 +195,7 @@ export default withStorybookDevtools()(nextConfig)
 
 ```typescript
 // app/internal-devframes-hub/[[...path]]/route.ts
-import { createStorybookDevtoolsRoute } from 'vite-plugin-experimental-storybook-devtools/next'
+import { createStorybookDevtoolsRoute } from '@storybook/experimental-devtools/next'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -212,7 +205,7 @@ export const { GET, POST, DELETE } = createStorybookDevtoolsRoute()
 
 ```typescript
 // app/internal-devframes-client/[[...path]]/route.ts
-import { createStorybookDevtoolsClientBundleRoute } from 'vite-plugin-experimental-storybook-devtools/next'
+import { createStorybookDevtoolsClientBundleRoute } from '@storybook/experimental-devtools/next'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -220,17 +213,14 @@ export const dynamic = 'force-dynamic'
 export const { GET } = createStorybookDevtoolsClientBundleRoute()
 ```
 
-`createStorybookDevtoolsRoute` mounts the devframes hub (`@devframes/hub`) on a sidecar WebSocket, since Next route handlers can't accept socket upgrades. `createStorybookDevtoolsClientBundleRoute` serves the dock's self-contained client bundle (`dist/client-bundled/`) at `/__storybook-devtools-client/vite-devtools.mjs` — the same public path the Rsbuild host uses, so a consuming app's own client bootstrap can `import()` it by URL and share one browser module instance with the embedded dock. Next has no HTML-transform hook the way Vite has `transformIndexHtml`, so hook delivery on this host always goes through entry injection: `withStorybookDevtools` prepends the devtools-hook import to Next's client bootstrap modules (`@next/react-refresh-utils/dist/runtime.js` and the `next/dist/client/*` entries) rather than any served HTML.
+Options and caveats:
 
-Notable differences from the Vite host:
-
-- **`auth`** *(default `true`)* — `createStorybookDevtoolsRoute({ auth: false })` disables the hub's interactive auth gate for single-user localhost or E2E setups (same purpose as Rsbuild's `clientAuth: false`).
-- **`host`** — pin the side-car server's bind address (e.g. `host: '127.0.0.1'`) to match `next dev -H 127.0.0.1`; the library default (`'localhost'`) can resolve to a loopback address the browser's explicit WebSocket target can't reach.
-- **Turbopack is unsupported** — there is no unplugin adapter for it. Running `next dev` under Turbopack prints one console warning and otherwise no-ops; the app runs normally, just without instrumentation. Run `next dev` without `--turbopack` on Next 15, or pass `--webpack` explicitly on majors where Turbopack is the default (Next 16+).
-- **RSC (`rsc` option, default `true`)** — the App Router ships Server Components by default, so only modules with a `"use client"` directive are instrumented; server components never register and are invisible to highlighting/coverage. This also means a module that is client-side only *transitively* (imported by a `"use client"` module but carrying no directive of its own) is **not** instrumented — only modules with their own `"use client"` directive are tagged.
-- **Open-in-editor works via the bundled `@devframes/service-open` wire service** — Next has no `/__open-in-editor` dev-server endpoint (a Vite feature), so "Open Code" and the coverage table's editor actions go through the service's RPC instead.
+- **`auth`** *(default `true`)* — `createStorybookDevtoolsRoute({ auth: false })` disables the interactive auth gate for single-user localhost or E2E setups.
+- **`host`** — pin the sidecar server's bind address (e.g. `host: '127.0.0.1'`) to match `next dev -H 127.0.0.1`; the default (`'localhost'`) can resolve to an address the browser's websocket can't reach.
+- **Turbopack is unsupported.** Running `next dev` under Turbopack prints a warning and the app runs normally, without instrumentation. Run `next dev` without `--turbopack` on Next 15, or pass `--webpack` explicitly on majors where Turbopack is the default (Next 16+).
+- **`rsc`** *(default `true`)* — only modules with a `"use client"` directive are instrumented; server components are never registered or highlighted. A module that is client-only transitively (imported by a `"use client"` module but carrying no directive of its own) is not instrumented either — only modules with their own directive are tagged.
 - **Story generation** maps to `@storybook/nextjs`.
-- **Manual hook fallback** — when entry injection isn't viable, `getNextDevToolsHookScript()` returns the same hook script body for manual delivery, e.g. via `<Script strategy="beforeInteractive">` in the root layout.
+- **Manual hook fallback** — if entry injection isn't viable in your setup, `getNextDevToolsHookScript()` returns the same hook script for manual delivery, e.g. via `<Script strategy="beforeInteractive">` in the root layout.
 
 ### Start developing
 
@@ -259,47 +249,33 @@ Once the dock is active:
 
 ### Highlight Colors
 
-- **Pink solid border** - Currently hovered component
-- **Pink dashed border** - Other instances of the same component type
-- **Pink background (20%)** - Selected component (context menu open)
+- **Pink solid border** - currently hovered component
+- **Pink dashed border** - other instances of the same component type
+- **Pink background (20%)** - selected component (context menu open)
 
-### Context Menu
+### Context Menu and Story Creation
 
-Click on a highlighted component to open the context menu, which provides:
+Click a highlighted component to open its context menu:
 
-**Action buttons (top row):**
-1. **Open Code** - Opens the component source file in your editor
-2. **Copy Prompt** - Copies an LLM-friendly prompt with component name, file path, current props, and story status to clipboard
-3. **Open Story** - Opens the story file in your editor (disabled if no story exists yet)
-4. **View Story** - Navigates to the story in the embedded Storybook panel
+- **Open Code** / **Open Story** - open the source or story file in your editor (Open Story is omitted if no story exists yet)
+- **Copy Prompt** - copies an LLM-friendly prompt with component name, path, props, and story status
+- **View Story** - navigates to the story in the embedded Storybook panel
+- **Properties** - all current props with type-colored badges, expandable objects, copy buttons
 
-**Properties section:**
-- Displays all current props with type-colored badges (strings, numbers, booleans, functions, objects, JSX/slots)
-- Expandable object viewer with copy buttons
-- Collapsible props section
-
-**Story creation:**
-- **Story name input** - Pre-filled with a smart suggestion based on props (variant, type, size, etc.)
-- **Create** - Generates a story file with the current props
-- **Create with Interactions** - Records user interactions (clicks, typing, selections) and generates a story with a play function
-
-### Creating Stories
-
-1. **Click on a highlighted component** to open the context menu
-2. **Enter a story name** (auto-suggested based on meaningful props like variant, size, type)
-3. **Click "Create"** to generate a story with current props
-4. Or **click "Create with Interactions"** to record interactions first, then click the stop button to save
+To create a story: enter a name (auto-suggested from meaningful props like
+variant, size, type), then click **Create** for a story with the current
+props, or **Create with Interactions** to record clicks/typing/selections
+first and generate a story with a play function.
 
 The story file is created at `<component-dir>/<ComponentName>.stories.{ts,tsx}` (`.ts` for Vue, `.tsx` for React). If the file already exists, a new named export is appended.
 
 ### Coverage Dashboard
 
-The DevTools panel includes a **Coverage** tab that shows:
-- A progress bar with color-coded coverage percentage
-- A table of all detected components with their story status
-- **Create all** button - Creates stories for all visible component instances on screen, deduplicating by props fingerprint
-- Per-component create buttons for individual story generation
-- Visibility indicators showing which components are currently rendered
+The **Coverage** tab shows a progress bar, a table of all detected
+components with their story status, and visibility indicators for what's
+currently rendered. **Create all** generates stories for every visible
+component instance, deduplicating by props fingerprint; per-component
+buttons create one story at a time.
 
 ### DevTools Panel Tabs
 
@@ -314,9 +290,9 @@ The DevTools panel includes a **Coverage** tab that shows:
 
 ```typescript
 componentHighlighter({
-  // Glob patterns for files to instrument
-  include: ['**/*.{tsx,jsx}'],     // React
-  include: ['**/*.vue'],           // Vue / Nuxt
+  // Glob patterns for files to instrument.
+  // Default differs per framework: '**/*.{tsx,jsx}' for React, '**/*.vue' for Vue/Nuxt.
+  include: ['**/*.{tsx,jsx}'],
 
   // Glob patterns to exclude
   exclude: ['**/node_modules/**', '**/dist/**'],
@@ -354,34 +330,24 @@ componentHighlighter({
 
 ### React version support (18 and 19)
 
-React detection is non-intrusive — it reads the live React fiber tree via the
-DevTools global hook and never wraps your components, so the rendered tree
-stays clean and RSC keeps working. **React 18 and 19 are both supported and
-covered by E2E.**
+React detection reads the live React fiber tree via the DevTools global hook
+and never wraps your components, so the rendered tree stays clean and RSC
+keeps working. React 18 and 19 are both supported and covered by E2E.
 
-Which authoring patterns are detected (named/default exports, `memo`/
-`forwardRef`, `React.memo` member form, class components, generics, compound,
-barrel re-exports, every prop kind), the documented limitations (anonymous
-default exports, arbitrary custom HOCs), and **React Server Components support
-via the `rsc` option** (a `"use client"` gate for Vite-based RSC frameworks
-like TanStack Start) are all in
+Which authoring patterns are detected, and the documented limitations, are in
 **[docs/REACT_PATTERNS.md](./docs/REACT_PATTERNS.md)**.
 
-One detail matters for prop-serialization fidelity. The plugin's bundled
-`react-element-to-jsx-string` resolves *its own* React copy. If that major
-differs from your app's React (e.g. your app is on React 18 but the plugin's
-copy is 19), the library's internal `React.isValidElement` rejects your
-elements and serialized props silently degrade to a "Failed to serialize"
-placeholder. Forcing a single React instance via Vite's `resolve.dedupe`
-fixes it.
-
-The `dedupeReact` option controls this:
+The `dedupeReact` option matters when the plugin's bundled
+`react-element-to-jsx-string` resolves a different React major than your
+app's (for example your app is on React 18 but the plugin's copy is 19) —
+in that case prop serialization silently degrades to a "Failed to
+serialize" placeholder unless a single React instance is enforced.
 
 | Value | Behavior |
 |-------|----------|
 | `'auto'` *(default)* | Detects a React major mismatch and adds `react`/`react-dom` to `resolve.dedupe` **only when needed**. Single-version apps (the common React 19 case) get **no config mutation at all**. |
 | `true` | Always dedupe. |
-| `false` | Never dedupe. For advanced setups that intentionally run multiple React copies (module federation / micro-frontends). If a mismatch is detected while disabled, a one-line warning is logged — it never fails silently. |
+| `false` | Never dedupe. For advanced setups that intentionally run multiple React copies (module federation / micro-frontends). If a mismatch is detected while disabled, a one-line warning is logged. |
 
 If you set `dedupeReact: false` and need the fix manually, add this to your
 Vite config:
@@ -392,11 +358,6 @@ export default defineConfig({
   resolve: { dedupe: ['react', 'react-dom'] },
 })
 ```
-
-### Other bundlers
-
-Vite, Rsbuild, and Next.js (webpack) are the supported bundler hosts — see
-"Rsbuild (rspack)" and "Next.js (webpack)" above.
 
 ### Default Exclusions
 
@@ -479,35 +440,20 @@ export const Secondary: Story = {
 | Functions | `onClick={handler}` | `@click="handler"` | `fn()` (with import) |
 | Children | `<>Hello <Button /></>` | Default slot content | Framework-specific syntax |
 
-## Architecture
+## How it works
 
-For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Build-time transforms tag your components without wrapping or reconstructing
+them, so the rendered tree stays untouched. At runtime, each framework's
+DevTools hook reports component instances as they mount, and the plugin
+registers them with their metadata, props, and DOM elements. A client-side
+overlay renders highlights and the context menu on top of your running app.
+When you create a story, the serialized props are sent to the dev-server
+plugin, which writes the story file to disk. Interaction recording captures
+your clicks, typing, and selections as an ordered list of steps and formats
+them into a Storybook play function.
 
-```
-+-----------------+    +------------------+    +-----------------+
-|   Vite Plugin   |    | Runtime Module   |    |  DevTools Dock  |
-|                 |    |                  |    |                 |
-| - Transform     |--->| - Registration   |--->| - Panel UI      |
-| - Inject meta   |    | - Registry       |    | - RPC Handler   |
-| - RPC surface   |    | - Serialization  |    | - Story create  |
-+-----------------+    +------------------+    +-----------------+
-                             |                         |
-                             v                         v
-                  +------------------+    +---------------------+
-                  | Client Overlay   |    | Framework Story Gen |
-                  | - Highlights     |    | - React generator   |
-                  | - Context menu   |    | - Vue generator     |
-                  | - Interactions   |    | - Shared utilities  |
-                  +------------------+    +---------------------+
-```
-
-### How It Works
-
-1. **Build-time**: Non-intrusive transforms tag modules without wrapping or reconstructing components (React: a Babel `__chRegisterMeta` tag; Vue: a single idempotent runtime-import added to the SFC script block)
-2. **Runtime**: Detection is driven by each framework's DevTools global hook — React walks the live fiber tree on commit; Vue subscribes to `component:added/updated/removed`. Both read native source identity (React from the build-time tag, Vue from `instance.type.__file`/`__name`) and register instances with metadata, props, and DOM elements. No component is wrapped.
-3. **Interaction**: Client overlay renders highlights on hover/click, shows context menu with props and actions
-4. **Story Creation**: Serialized props are sent via DevTools RPC to the server plugin, which dynamically loads the framework-specific story generator and writes story files to disk
-5. **Interaction Recording**: User actions are captured as an ordered list of steps, then formatted into a Storybook play function
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module-level
+breakdown.
 
 ## Keyboard Shortcuts Reference
 
@@ -519,13 +465,40 @@ For detailed technical documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTU
 | `Escape` x2 (within 600ms) | Exit highlight mode entirely |
 | `Enter` (in story name input) | Create story |
 
+## Limitations
+
+- **Framework scope** - Currently supports React, Vue, and Nuxt SSR through the Vue integration
+- **Bundler hosts** - Vite, Rsbuild, and Next.js (webpack) are supported; on Rsbuild, only `framework: 'react'` is playground/E2E-verified (Vue is accepted but unverified); Next.js is React-only (`@storybook/nextjs`) and only instruments `"use client"` modules
+- **Development only** - Disabled in production builds by default
+- **DevTools required** - Vite hosts need `@vitejs/devtools` for the dock panel and RPC; Rsbuild and Next.js hosts get the dock through a bundled devframe hub instead
+- **Provider dependencies** - Components requiring context providers may need Storybook decorators
+
+## Troubleshooting
+
+### Stories aren't being created
+
+1. Ensure the DevTools dock is open and the Component Highlighter entry is active
+2. Check the browser console for errors
+3. Verify the output path is writable
+
+### Components not being highlighted
+
+1. Ensure the file matches the `include` patterns
+2. Check that it's not matching an `exclude` pattern
+3. For Vue, ensure the component has a `<script setup>` or `<script>` block
+
+### Story generation produces wrong imports
+
+1. Check that component references are in the live registry (rendered on screen)
+2. Vue components need the `.vue` extension in the import path
+
 ## Development
 
 ### Setup
 
 ```bash
-git clone https://github.com/storybookjs/vite-plugin-storybook-devtools.git
-cd vite-plugin-storybook-devtools
+git clone https://github.com/storybookjs/vite-plugin-experimental-storybook-devtools.git
+cd vite-plugin-experimental-storybook-devtools
 
 pnpm install
 ```
@@ -558,112 +531,6 @@ pnpm build
 # Type check
 pnpm typecheck
 ```
-
-### Project Structure
-
-```
-src/
-  unplugin.ts                             # Portable instrumentation core (unplugin): transform pipeline, virtual modules, entry-injection
-  create-component-highlighter-plugin.ts  # Vite adapter: composes the unplugin output with Vite-only hooks, mounts the devframe
-  vite.ts                                 # Unified `./vite` entry — storybookDevtools({ framework })
-  devframe-export.ts                      # `./devframe` entry — createStorybookDevframe for custom hosts
-  rsbuild.ts                              # `./rsbuild` entry — Rsbuild/rspack adapter, mounts a devframe hub
-  next.ts                                 # `./next` entry — Next.js (App Router, webpack) adapter, devframes hub route builders
-  devframe.ts                             # Devframe definition: scoped shared state + serverFunctions registration, panel clientAssets
-  context.ts                              # WeakMap<DevframeNodeContext, deps> so RPC functions' setup(ctx) can read createStorybookDevframe's deps
-  rpc/
-    index.ts                              # serverFunctions barrel + declare module 'devframe' augmentation
-    functions/                            # One file per RPC function (bare name, namespaced to component-highlighter:<name>)
-  hub-setup.ts                            # Host-neutral hub surfaces (docks, commands, terminals, diagnostics) shared by the Vite kitSetup, the Rsbuild adapter, and the Next.js adapter
-  react-dedupe.ts                         # React-major-mismatch detection shared by the Vite and Rsbuild adapters
-  runtime-helpers.ts                      # Shared runtime utilities (DOM tracking, observers)
-  coverage-dashboard.ts                   # Server-side coverage computation
-  notifications.ts                        # Notification abstraction (DevTools logs + console)
-  shared-types.ts                         # Shared types for server/client RPC transfer
-  frameworks/
-    types.ts                              # Shared framework interfaces
-    react/
-      plugin.ts                           # React entry point
-      index.ts                            # React framework config
-      transform.ts                        # Babel AST tag (__chRegisterMeta, non-wrapping)
-      devtools-hook.ts                    # Inline <head> React DevTools hook bootstrap
-      runtime-module.ts                   # Fiber-tree walker + registration
-      story-generator.ts                  # React story generation
-    vue/
-      plugin.ts                           # Vue entry point
-      index.ts                            # Vue framework config
-      transform.ts                        # Idempotent runtime-import tag (no SFC rebuild)
-      devtools-hook.ts                    # Inline <head> Vue DevTools hook bootstrap
-      runtime-module.ts                   # DevTools-hook event reconciler + registration
-      story-generator.ts                  # Vue story generation
-      vnode-to-template.ts               # VNode to template serialization
-  client/
-    overlay.ts                            # Highlight UI, story file cache, save actions
-    context-menu.ts                       # Context menu (Shadow DOM), props display, actions
-    listeners.ts                          # Mouse/keyboard event handlers, highlight mode state
-    vite-devtools.ts                      # DevTools dock lifecycle (activate/deactivate)
-    interaction-recorder.ts               # User interaction recording for play functions
-    coverage-actions.ts                   # Client-side coverage actions (scroll, highlight)
-    logger.ts                             # Debug logging utility
-    utils/
-      format-utils.ts                     # Value formatting helpers for context menu
-      html-preview.ts                     # HTML preview rendering for prop values
-      prop-utils.ts                       # Prop type detection and badge utilities
-  codegen/
-    interactions-to-code.ts               # Converts recorded interactions to play function code
-    generate-query.ts                     # Generates Testing Library queries from targets
-    args-to-string.ts                     # Serializes args objects to source code strings
-    combine-interactions.ts               # Combines/deduplicates sequential interaction steps
-    get-interaction-event.ts              # Maps DOM events to interaction event types
-    types.ts                              # Codegen type definitions
-  panel/
-    panel.ts                              # DevTools panel (Storybook, Coverage, Terminal, Docs tabs)
-    panel.css                             # Panel styles
-    index.html                            # Panel HTML shell
-  utils/
-    story-generator.ts                    # Shared story generation utilities
-e2e/
-  highlighter-helpers.ts                  # Shared E2E helper functions
-  common-highlighter-suite.ts             # Shared test suite (framework playgrounds)
-  component-highlighter.spec.ts           # Highlighter interaction tests
-  playground-react-detection.spec.ts      # React-specific detection tests
-  playground-vue-detection.spec.ts        # Vue-specific detection tests
-  playground-rsbuild-detection.spec.ts    # Rsbuild host detection + shared suites
-playground/
-  react/                                  # React development app (Vite host)
-  vue/                                    # Vue development app (Vite host)
-  rsbuild/                                # React development app (Rsbuild host); src is a symlink to playground/react/src
-  next/                                   # Next.js App Router app (webpack host), mixed server/client components
-```
-
-## Limitations
-
-- **Framework scope** - Currently supports React, Vue, and Nuxt SSR through the Vue integration
-- **Bundler hosts** - Vite, Rsbuild, and Next.js (webpack) are supported; on Rsbuild, only `framework: 'react'` is playground/E2E-verified (Vue is accepted but unverified); Next.js is React-only (`@storybook/nextjs`) and only instruments `"use client"` modules
-- **Development only** - Disabled in production builds by default
-- **DevTools required** - Vite hosts need `@vitejs/devtools` for the dock panel and RPC; Rsbuild and Next.js hosts get the dock via a bundled devframe hub instead
-- **Function components** - Class components are not supported
-- **Provider dependencies** - Components requiring context providers may need Storybook decorators
-
-## Troubleshooting
-
-### Stories aren't being created
-
-1. Ensure the DevTools dock is open and the Component Highlighter entry is active
-2. Check the browser console for errors
-3. Verify the output path is writable
-
-### Components not being highlighted
-
-1. Ensure the file matches the `include` patterns
-2. Check that it's not matching an `exclude` pattern
-3. Verify the component is a function component (class components are not supported)
-4. For Vue, ensure the component has a `<script setup>` or `<script>` block
-
-### Story generation produces wrong imports
-
-1. Check that component references are in the live registry (rendered on screen)
-2. Vue components need the `.vue` extension in the import path
 
 ## License
 

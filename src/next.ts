@@ -66,7 +66,7 @@ const DEFAULT_NEXT_CLIENT_ENTRY = [
 ]
 
 const SERVER_EXTERNAL_PACKAGES = [
-  'vite-plugin-experimental-storybook-devtools',
+  '@storybook/experimental-devtools',
   'devframe',
   '@devframes/next',
   '@devframes/hub',

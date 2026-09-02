@@ -33,14 +33,22 @@ shared with the React 18 playground via symlink) and asserted by
 
 ### Supported prop kinds (`patterns/PropZoo.tsx`)
 
-primitives · string-literal unions · destructured defaults · deep nested
-objects · arrays of objects · **arrays of primitives** · **`Date`** ·
-**inline `style` object** · **element prop that isn't `children`** ·
-**function-as-children / render prop** · **discriminated unions** ·
-**nullable** (`string | null`) · **tuple** (`[number, number]`) ·
-**event handler with args** · `ReactNode` children (single / array /
-**nested mapped array**) · function props · **`Date`** (emitted as
-`new Date("…ISO…")`).
+- primitives
+- string-literal unions
+- destructured defaults
+- deep nested objects
+- arrays of objects
+- arrays of primitives
+- `Date` (emitted as `new Date("…ISO…")`)
+- inline `style` object
+- element prop that isn't `children`
+- function-as-children / render prop
+- discriminated unions
+- nullable (`string | null`)
+- tuple (`[number, number]`)
+- event handler with args
+- `ReactNode` children (single / array / nested mapped array)
+- function props
 
 **Prop serialization safety:** React-reserved props `ref` and `key` are
 dropped (never valid story args — and a live `ref` holds a DOM node).
@@ -52,11 +60,11 @@ safe markers, so a `forwardRef`'s `ref` can never blow the call stack
 
 Each editable prop row has a pencil; clicking it turns the value into a typed
 form (Apply / Cancel). Edits drive React's own
-`renderer.overrideProps(fiber, path, value)` — the exact API React DevTools'
-props editor uses — reached through the DevTools hook we already install.
-Available in the **tooltip** (in-app overlay, direct call) and the **panel**
-(via `set-prop` RPC → `do-set-prop` → runtime). No remount; component state
-is preserved; the next commit re-syncs the registry/UI.
+`renderer.overrideProps(fiber, path, value)`, reached through the DevTools
+hook we already install. Available in the tooltip (in-app overlay, direct
+call) and the panel (via `set-prop` RPC → `do-set-prop` → runtime). No
+remount; component state is preserved; the next commit re-syncs the
+registry/UI.
 
 The framework-agnostic machinery (payload decoding, reset-to-original
 snapshots, registry sync) is shared: `src/runtime-helpers.ts` →
@@ -132,9 +140,9 @@ gate is covered by `src/frameworks/react/transform.test.ts` ("RSC mode"):
 client modules are tagged, server modules (no directive) are returned
 untouched, and the SPA default (`rsc: false`) still tags everything.
 
-**Caveat:** this targets Vite-based RSC (TanStack Start). Next.js is not Vite
-(webpack/Turbopack), so this Vite plugin does not apply there regardless of the
-gate.
+On the Next.js host (`./next` entry, `src/next.ts`), `rsc` defaults to
+`true`, since the App Router ships Server Components by default. Vite-based
+RSC frameworks (e.g. TanStack Start) opt in explicitly with `rsc: true`.
 
 ## How to extend support
 

@@ -10,7 +10,8 @@
  * existing `<script setup>` (or `<script>`) block so the runtime module is
  * pulled into the page's module graph. Nothing else in the SFC is touched —
  * the original script body, template, styles, and custom blocks are preserved
- * byte-for-byte. Non-`setup` `<script>` blocks are no longer dropped.
+ * byte-for-byte. All script blocks are preserved, including non-`setup`
+ * `<script>` blocks.
  *
  * Returning the (minimally) edited source (rather than `undefined`) also keeps
  * the plugin's coverage tracking working, which keys off a truthy transform

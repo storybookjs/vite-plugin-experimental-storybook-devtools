@@ -611,7 +611,6 @@ function handleRemoved(instance: VueInstance) {
 
 // The Vue devtools emit signature for component events is
 // `emit(event, app, uid, parentUid, instance)` — the live instance is args[3].
-// (Validated in the Phase 0 spike.)
 function handleVueEvent(event: string, args: unknown[]) {
   const instance = args[3] as VueInstance | undefined
   if (!instance || typeof instance !== 'object') return

@@ -2,7 +2,7 @@
   "name": "playground-nuxt",
   "type": "module",
   "version": "0.0.0",
-  "description": "Nuxt SSR playground for vite-plugin-experimental-storybook-devtools",
+  "description": "Nuxt SSR playground for @storybook/experimental-devtools",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",

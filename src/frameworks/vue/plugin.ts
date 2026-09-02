@@ -3,7 +3,7 @@
  *
  * Import this to use the component highlighter with Vue:
  * ```ts
- * import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/vue'
+ * import componentHighlighter from '@storybook/experimental-devtools/vue'
  * ```
  */
 
@@ -22,7 +22,7 @@ import { vueFramework } from '.'
  * import { defineConfig } from 'vite'
  * import vue from '@vitejs/plugin-vue'
  * import { DevTools } from '@vitejs/devtools'
- * import componentHighlighter from 'vite-plugin-experimental-storybook-devtools/vue'
+ * import componentHighlighter from '@storybook/experimental-devtools/vue'
  *
  * export default defineConfig({
  *   plugins: [

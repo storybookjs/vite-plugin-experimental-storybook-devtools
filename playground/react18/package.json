@@ -2,7 +2,7 @@
   "name": "playground-react18",
   "type": "module",
   "version": "0.0.0",
-  "description": "React 18 playground for vite-plugin-experimental-storybook-devtools (cross-version parity)",
+  "description": "React 18 playground for @storybook/experimental-devtools (cross-version parity)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

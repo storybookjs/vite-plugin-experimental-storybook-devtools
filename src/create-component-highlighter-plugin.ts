@@ -211,21 +211,21 @@ export function createComponentHighlighterPlugin(
       // re-optimization on first load.
       viteConfig.optimizeDeps.exclude ??= []
       viteConfig.optimizeDeps.exclude.push(
-        'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
-        'vite-plugin-experimental-storybook-devtools/client/listeners',
-        'vite-plugin-experimental-storybook-devtools/client/overlay',
+        '@storybook/experimental-devtools/client/vite-devtools',
+        '@storybook/experimental-devtools/client/listeners',
+        '@storybook/experimental-devtools/client/overlay',
       )
 
       // @testing-library/dom and aria-query are CJS-only packages. Pre-bundle
       // them so Vite handles the CJS→ESM conversion and named imports work.
-      // Use the `vite-plugin-experimental-storybook-devtools > @testing-library/dom`
+      // Use the `@storybook/experimental-devtools > @testing-library/dom`
       // form so Vite resolves these deps from THIS plugin's node_modules. With
       // pnpm's isolated store the packages are not hoisted into the consumer's
       // node_modules, so a bare `@testing-library/dom` specifier fails to resolve.
       viteConfig.optimizeDeps.include ??= []
       viteConfig.optimizeDeps.include.push(
-        'vite-plugin-experimental-storybook-devtools > @testing-library/dom',
-        'vite-plugin-experimental-storybook-devtools > @testing-library/dom > aria-query',
+        '@storybook/experimental-devtools > @testing-library/dom',
+        '@storybook/experimental-devtools > @testing-library/dom > aria-query',
       )
 
       // The client modules above are excluded from optimization, so Vite never
@@ -387,7 +387,7 @@ export function createComponentHighlighterPlugin(
       storybookFramework: framework.storybookFramework,
       dockClientScript: {
         importFrom:
-          'vite-plugin-experimental-storybook-devtools/client/vite-devtools',
+          '@storybook/experimental-devtools/client/vite-devtools',
         importName: 'default',
       },
     })

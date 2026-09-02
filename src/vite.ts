@@ -4,7 +4,7 @@
  * Import this to use the component highlighter with Vite, picking the
  * framework via the `framework` option:
  * ```ts
- * import { storybookDevtools } from 'vite-plugin-experimental-storybook-devtools/vite'
+ * import { storybookDevtools } from '@storybook/experimental-devtools/vite'
  * ```
  */
 
@@ -26,7 +26,7 @@ export type { ComponentHighlighterOptions } from './create-component-highlighter
  * import { defineConfig } from 'vite'
  * import react from '@vitejs/plugin-react'
  * import { DevTools } from '@vitejs/devtools'
- * import { storybookDevtools } from 'vite-plugin-experimental-storybook-devtools/vite'
+ * import { storybookDevtools } from '@storybook/experimental-devtools/vite'
  *
  * export default defineConfig({
  *   plugins: [

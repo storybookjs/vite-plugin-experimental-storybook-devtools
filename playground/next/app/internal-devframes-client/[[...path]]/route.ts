@@ -1,4 +1,4 @@
-import { createStorybookDevtoolsClientBundleRoute } from 'vite-plugin-experimental-storybook-devtools/next'
+import { createStorybookDevtoolsClientBundleRoute } from '@storybook/experimental-devtools/next'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

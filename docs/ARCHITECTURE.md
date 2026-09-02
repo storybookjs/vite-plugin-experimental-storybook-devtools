@@ -1,318 +1,227 @@
-# Architecture (Agent-Focused)
+# Architecture
 
-Short, high-signal reference for contributors and coding agents.
-
-> Keep this file concise. If behavior/flow changes, update this file in the same PR.
+Reference for contributors and coding agents.
 
 ## What this plugin does
 
-`vite-plugin-experimental-storybook-devtools` tracks rendered components in dev, overlays highlights in the browser, and generates Storybook stories from runtime props. It supports React, Vue, and Nuxt SSR through the Vue integration, mounted on one of three bundler hosts: Vite (`./react`, `./vue`, `./vite`; Nuxt rides this), Rsbuild/rspack (`./rsbuild`), or Next.js/webpack (`./next`, React only).
-
-## Supported frameworks
+`@storybook/experimental-devtools` tracks rendered components in
+dev, overlays highlights in the browser, and generates Storybook stories from
+runtime props. It supports React, Vue, and Nuxt SSR (via the Vue
+integration), on three bundler hosts: Vite (`./react`, `./vue`, `./vite`;
+Nuxt rides this), Rsbuild/rspack (`./rsbuild`), and Next.js/webpack
+(`./next`, React only).
 
 See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
-## Runtime flow (end-to-end)
+## Runtime flow
 
-1. **Plugin setup** (`src/unplugin.ts` + `src/create-component-highlighter-plugin.ts` + `src/rsbuild.ts` + `src/hub-setup.ts` + `src/devframe.ts`)
-   - `unplugin.ts` is the portable instrumentation core, built on `unplugin`:
-     the transform pipeline (filter → `framework.detect` →
-     `framework.transform`, coverage tracking, diagnostics dedupe), the
-     `resolveId`/`load` handling for the runtime-helpers and framework
-     virtual modules (including the dev-source vs. built-dist read path,
-     the built-dist path always available, the dev-source path supplied by
-     a bundler-specific `host.loadDevSource`), and the `entry`
-     hook-injection strategy (see below). `createComponentHighlighterUnplugin(framework, options, host)`
-     returns the `unplugin` instance; `.vite()` produces the Vite plugin and
-     `.rspack()` produces the rspack plugin — the same `.vite()` call unit
-     tests use to exercise the real, Vite-composed hooks without a running
-     Vite instance.
-   - `create-component-highlighter-plugin.ts` is the Vite adapter: it calls
-     `.vite()` and extends the result with the Vite-only hooks unplugin has
-     no equivalent for — `config` (optimizeDeps/alias/dedupe mutations),
-     `configResolved` (isServe, cspNonce), `configureServer` (watcher.add +
-     server ref, and supplies `host.loadDevSource` backed by
-     `server.transformRequest`), `transformIndexHtml` (`'html'`
-     hook-injection mode only), and `handleHotUpdate` — then returns
-     `[transformPlugin, createPluginFromDevframe(definition, { setup:
-     kitSetup })]` — Vite flattens plugin arrays. `kitSetup` pre-seeds Vite's
-     `/@id/{specifier}` client-module-resolution template (avoids the hub's
-     DF8111 "unresolvable client script" startup warning) and delegates the
-     rest to `registerStorybookHubSurfaces` (`hub-setup.ts`)
-   - `rsbuild.ts` is the Rsbuild/rspack adapter (`storybookDevtoolsRsbuild`):
-     mounts instrumentation via `unplugin.rspack()` in `modifyRspackConfig`
-     (the `\0` virtual ids from `unplugin.ts` round-trip unchanged — rspack's
-     unplugin adapter encodes any non-file `resolveId` result onto a virtual
-     filesystem path and decodes it for `load`), delivers the devtools-hook
-     script and the hub's embedded-dock bootstrap via `modifyHTMLTags`, and
-     mounts a `@devframes/hub` (+ `@devframes/hub-ui` dock) on the dev
-     server's Connect middlewares in `onBeforeStartDevServer`, riding
-     devframe's sidecar WebSocket (`ws: { sidecar: true }`, since Rsbuild's
-     request handlers never see socket upgrades). It has no
-     `host.loadDevSource` — rspack has no equivalent of Vite's
-     `server.transformRequest`, so the runtime-helpers/framework virtual
-     modules always read from built `dist/` (`pnpm build` must have run).
-     The highlighter action dock's client script is served as a
-     self-contained browser bundle (`dist/client-bundled/`, built by
-     `tsdown.config.ts`'s second entry) from a dedicated middleware at
-     `/__storybook-devtools-client/vite-devtools.mjs`, because rspack has no
-     `/@id/{specifier}` module-graph URL for a bare-specifier client-script
-     import; the dock entry's `importFrom` is that URL, which bypasses the
-     `clientModuleResolution` template Vite uses. React alias/dedupe
-     (`react-element-to-jsx-string`/`react-is` → this package's copies,
-     `resolve.dedupe` via `react-dedupe.ts`) is applied in
-     `modifyRsbuildConfig`.
-   - `next.ts` is the Next.js/webpack adapter: `withStorybookDevtools()`
-     mounts instrumentation via `unplugin.webpack()` in `next.config.ts`'s
-     `webpack()` composer, restricted to the dev client compilation
-     (`context.dev && !context.isServer && context.nextRuntime !== 'edge'`).
-     Hook delivery is always `hookInjection: 'entry'` — Next has no
-     HTML-transform hook — targeting Next's client bootstrap modules
-     (`@next/react-refresh-utils/dist/runtime.js`,
-     `next/dist/client/app-next-dev.js`, and related entries). webpack5
-     treats the portable core's `virtual:...` module ids as an unhandled URI
-     scheme (bypassing the resolver hook unplugin's webpack adapter taps), so
-     a second plugin (`createVirtualSchemeWebpackPlugin`) relays
-     `resolveForScheme.for('virtual')` requests through the same
-     `resolveId`/`load` hook pair the Vite adapter uses, writing the result
-     to a real path via `webpack-virtual-modules`. Because `next.config.ts`
-     (build-time) and the compiled route handlers (request-time) are two
-     independently-loaded module instances, `withStorybookDevtools` and
-     `createStorybookDevtoolsRoute` share `transformedComponents` and
-     diagnostics through a `globalThis` singleton. Two route handlers a
-     consuming app creates complete the host:
-     `createStorybookDevtoolsRoute()` mounts the `@devframes/hub` on a
-     sidecar WebSocket (Next routes can't accept upgrades), and
-     `createStorybookDevtoolsClientBundleRoute()` serves the dock's
-     self-contained client bundle at the same
-     `/__storybook-devtools-client/vite-devtools.mjs` convention the Rsbuild
-     host uses. Because the App Router treats leading-underscore path
-     segments as private, both routes live at non-underscore paths and rely
-     on the consuming app's `next.config.ts` `rewrites()` to expose them at
-     `/__devframes/*` and `/__storybook-devtools-client/*`. Turbopack has no
-     unplugin adapter, so `withStorybookDevtools` prints one warning and
-     no-ops under `process.env.TURBOPACK` rather than crashing.
-   - `hub-setup.ts` (`registerStorybookHubSurfaces`) holds the host-neutral
-     hub surfaces — notifications, diagnostics catalog, terminals ref, the
-     action dock, Mod+K commands — shared by the Vite adapter's `kitSetup`,
-     the Rsbuild adapter, and the Next.js adapter's
-     `createStorybookDevtoolsRoute`, since a kit's `KitNodeContext` is a
-     `DevframeHubContext` (from `@devframes/hub`) plus Vite-only extras. Only
-     the Vite-only `clientModuleResolution` pre-seed stays out of it.
-   - `react-dedupe.ts` (`resolveReactDedupe`) is the shared React-major-
-     mismatch decision (see invariant 6 below) — both adapters call it with
-     their own dedupe-list mutation.
-   - `devframe.ts` builds the `storybook-devtools` devframe (`defineDevframe`):
-     registers the plugin's full RPC surface and shared state on the
-     framework-neutral `DevframeNodeContext`, and serves the panel as
-     `clientAssets`
-   - Handles story file creation via RPC
+The plugin has six stages: bundler setup, a build-time transform, a browser
+runtime, an overlay + listeners layer, a DevTools panel, and server-side
+story generation.
 
-2. **Framework transform** (`src/frameworks/*/transform.ts`)
-   - React: **non-intrusive** Babel AST transform — components are NOT wrapped.
-     It only appends an idempotent metadata tag `__chRegisterMeta(Component,
-     { componentName, filePath, relativeFilePath, sourceId, isDefaultExport })`.
-     The rendered fiber/DOM tree is untouched, so RSC works (only tagged client
-     components ever appear) and there is no tree pollution.
-   - Vue: **non-intrusive** — the SFC is NOT reconstructed and no per-component
-     code is injected. The transform performs a single idempotent edit:
-     prepend a side-effect `import 'virtual:component-highlighter/vue-runtime'`
-     to the existing `<script setup>`/`<script>` block (loads the runtime,
-     keeps coverage tracking working). Everything else is byte-for-byte
-     preserved. Source identity is read at runtime from Vue's native
-     `instance.type.__file` / `__name`.
+### 1. Plugin setup
 
-3. **Browser runtime** (`src/frameworks/*/runtime-module.ts` + `src/runtime-helpers.ts`)
-   - **Hook delivery, dual strategy** (`hookInjection` option, `src/unplugin.ts` +
-     `src/create-component-highlighter-plugin.ts`): the framework's inline
-     hook script (see React/Vue below) reaches the browser one of two ways.
-     `'html'` (default): Vite's `transformIndexHtml` head-prepends it as an
-     inline `<script>`, CSP-nonce included when `html.cspNonce` is set — Vite
-     only, stays in the adapter. `'entry'`: the portable core's `transform`
-     hook prepends `import 'virtual:component-highlighter/devtools-hook'` to
-     the app's entry module(s) (matched by the `entry` option) before the
-     component-filter gate runs, once per call whose input doesn't already
-     carry it; ES import hoisting runs it before the rest of the module body.
-     The virtual module's `load` returns `framework.htmlHeadSnippet?.() ?? ''`
-     — the same script body either way. `'entry'` mode disables the
-     `transformIndexHtml` injection so the hook is never delivered twice.
-   - React: an inline `<head>` script (`src/frameworks/react/devtools-hook.ts`,
-     injected via `transformIndexHtml` in `'html'` mode) installs a minimal
-     `__REACT_DEVTOOLS_GLOBAL_HOOK__` *before* react-dom registers. The runtime
-     module subscribes via `window.__chInstallCommitHandler` and walks the live
-     fiber tree on every commit, reading the `__chRegisterMeta` symbol off
-     `fiber.type`/`elementType`, resolving the nearest host DOM node, and
-     reconciling the registry. No component is wrapped.
-   - Vue: an inline `<head>` script (`src/frameworks/vue/devtools-hook.ts`,
-     injected via `transformIndexHtml` in `'html'` mode) installs a minimal
-     `__VUE_DEVTOOLS_GLOBAL_HOOK__` *before* `createApp` runs. The runtime
-     module subscribes via `window.__chInstallVueHandler` to Vue's
-     `component:added`/`updated`/`removed` events (the live instance is at emit
-     arg index 3), resolves the root DOM node (`subTree.el`/`vnode.el`/
-     `proxy.$el`), and reconciles the registry — keyed per live instance in a
-     `WeakMap`. No component is wrapped. NB: the hook MUST expose
-     `cleanupBuffer()` (returning `false`) or `@vue/runtime-core` never emits
-     `component:removed`. Live prop editing mutates the instance's
-     shallow-reactive internal `props` object (the mechanism Vue DevTools'
-     own prop editor uses); nested paths clone-and-reassign the top-level
-     key, and only declared props are editable.
-     Meta comes from Vue's native `instance.type.__file`/`__name`; the exact
-     cwd-relative path is computed against `__COMPONENT_HIGHLIGHTER_ROOT__`, a
-     build constant the virtual-module loader injects (like
-     `__COMPONENT_HIGHLIGHTER_DEBUG__`).
-   - Nuxt SSR: `src/frameworks/nuxt/plugin.ts` reuses the Vue Vite plugin and
-     exposes `getNuxtDevToolsHookScript()` so `nuxt.config.ts` can inject the
-     same hook into SSR HTML before hydration. It also exposes
-     `getNuxtViteDevToolsInjectionScript()` because Nuxt SSR does not run the
-     Vite DevTools `transformIndexHtml` injection for the embedded dock, and
-     `viteDevToolsBridgeModule`, a Nuxt module that clears Nuxt's
-     `_skip_transform` diversion for devtools-owned paths (`/__devtools*`,
-     `/__devframes*`, `/__storybook-devtools*`) and re-bases `/@id/*` /
-     dock-imports URLs onto Vite's build-assets base, so the DevTools HTTP
-     surface is reachable through Nuxt's dev server (the RPC WebSocket rides a
-     sidecar port and needs no bridging). The core transform hook skips
-     `options.ssr`, so the browser runtime never enters Nuxt's server module
-     graph.
-   - Registers component instances in a global `Map` registry on `window`
-   - Tracks props, serialized props, and DOM anchor elements
-   - Emits `component-highlighter:register/unregister/update-props` custom events
-   - Replays its full registry when `component-highlighter:listeners-ready`
-     fires (via `onListenersReady` in `src/runtime-helpers.ts`). The listeners
-     module is loaded by the async DevTools client — usually *after* the
-     framework's first commit — so register events for the initial page would
-     otherwise be lost and highlighting would only work for components mounted
-     later (e.g. after a route change).
+`src/unplugin.ts` is the portable instrumentation core, built on `unplugin`.
+It owns the transform pipeline (filter → `framework.detect` →
+`framework.transform`), coverage tracking, diagnostics dedupe, and virtual
+module resolution. Each bundler host (below) wraps it with its own adapter.
 
-4. **Overlay + listeners** (`src/client/overlay.ts`, `src/client/listeners.ts`, `src/client/context-menu.ts`)
-   - `listeners.ts` and `overlay.ts` connect to the host-published app-page
-     client context via `getHostClientContext()`
-     (`src/client/utils/host-context.ts`, which reads
-     `__DEVFRAME_HUB_CLIENT_CONTEXT__` from the embedded dock host, falling
-     back to the standalone viewer's `__VITE_DEVTOOLS_CLIENT_CONTEXT__`) —
-     distinct from the panel (above), which is a separate devframe SPA
-     connecting via `connectDevframe()` (`devframe/client`)
-   - `listeners.ts` dispatches `component-highlighter:listeners-ready` once its
-     registry event listeners are attached (triggers the runtime replay above)
-   - Renders highlight rectangles in `#component-highlighter-container`
-   - Handles hover, click, keyboard shortcuts (Alt toggle, Escape, double-Escape)
-   - Context menu (Shadow DOM) shows props, action buttons, story creation form
-   - Triggers story creation requests (Create / Create with Interactions)
-   - Interaction recorder (`src/client/interaction-recorder.ts`) captures user actions as play function steps
+`src/hub-setup.ts` registers the hub surfaces shared by all three hosts:
+notifications, diagnostics, the terminals reference, the
+`component-highlighter` action dock, and the Mod+K commands.
 
-5. **DevTools panel** (`src/panel/panel.ts`)
-   - Served as the `storybook-devtools` devframe's `clientAssets` SPA at
-     `/__storybook-devtools/` (the devframe's `id`); connects via
-     `connectDevframe()` from `devframe/client` and awaits `ensureTrusted()`
-     before subscribing to shared state. The panel's dock entry is
-     auto-derived from the devframe definition by `createPluginFromDevframe`
-     (dock id `storybook-devtools`) — distinct from the action dock that opens
-     the highlighter overlay, id `component-highlighter`, registered
-     separately via `defineDockEntry` in `kitSetup`
-   - Four tabs: Storybook (embedded iframe), Coverage (dashboard), Terminal (process output), Docs
-   - Coverage tab: lists all detected components, shows story status, bulk "Create all" button
-   - Panel communicates via Vite DevTools RPC (works whether inline or popped out)
-   - Story navigation uses Storybook channel API (`__STORYBOOK_ADDONS_CHANNEL__.emit('setCurrentStory')`) for smooth transitions
+`src/react-dedupe.ts` detects a React-major mismatch between the app and
+this plugin's own `react-element-to-jsx-string` dependency, and decides
+whether to add `react`/`react-dom` to the bundler's dedupe list.
 
-6. **Story generation (server)** (`src/frameworks/*/story-generator.ts`)
-   - Receives payload from client via DevTools RPC
-   - Generates framework-specific story source (React `.stories.tsx`, Vue `.stories.ts`)
-   - Writes new files or appends to existing story files
-   - Broadcasts the `component-highlighter:story-created` RPC event back to the client for feedback
+`src/devframe.ts` defines the `storybook-devtools` devframe: it registers
+the RPC surface and shared state, and serves the panel as `clientAssets`.
+
+### 2. Framework transform
+
+`src/frameworks/<fw>/transform.ts` runs at build time. Neither transform
+wraps components.
+
+- **React**: a Babel AST transform that appends one idempotent call,
+  `__chRegisterMeta(Component, { componentName, filePath,
+  relativeFilePath, sourceId, isDefaultExport })`. The fiber tree is
+  untouched.
+- **Vue**: prepends one side-effect import,
+  `import 'virtual:component-highlighter/vue-runtime'`, to the
+  `<script setup>`/`<script>` block. Everything else is preserved
+  byte-for-byte. Source identity is read at runtime from Vue's own
+  `instance.type.__file`/`__name`.
+
+Both report non-fatal detection gaps through `TransformOptions.onIssue`,
+surfaced as DevTools diagnostics.
+
+### 3. Browser runtime
+
+`src/frameworks/<fw>/runtime-module.ts` and `src/runtime-helpers.ts` run in
+the browser. The devtools hook script must reach the page before the
+framework's renderer registers, via one of two `hookInjection` modes:
+`'html'` (default, Vite only — `transformIndexHtml` head-prepends it) or
+`'entry'` (prepended to the app's entry module, matched by the `entry`
+option).
+
+- **React**: `src/frameworks/react/devtools-hook.ts` installs a minimal
+  `__REACT_DEVTOOLS_GLOBAL_HOOK__` before react-dom registers. The runtime
+  module subscribes via `window.__chInstallCommitHandler` and walks the
+  live fiber tree on every commit, reading the `__chRegisterMeta` tag off
+  `fiber.type`/`elementType`.
+- **Vue**: `src/frameworks/vue/devtools-hook.ts` installs a minimal
+  `__VUE_DEVTOOLS_GLOBAL_HOOK__` before `createApp` runs. The runtime
+  module subscribes via `window.__chInstallVueHandler` to Vue's
+  `component:added`/`updated`/`removed` events, keyed per instance in a
+  `WeakMap`. The hook must expose `cleanupBuffer()` (returning `false`), or
+  `@vue/runtime-core` never emits `component:removed`.
+- **Nuxt SSR**: `src/frameworks/nuxt/plugin.ts` reuses the Vue Vite plugin,
+  exposing `getNuxtDevToolsHookScript()` for `nuxt.config.ts` to inject
+  before hydration, plus a `viteDevToolsBridgeModule` Nuxt module that
+  makes the DevTools HTTP surface reachable through Nuxt's dev server.
+
+The runtime registers instances in a `Map` on `window`, tracks props and DOM
+anchors, and emits `component-highlighter:register`/`unregister`/
+`update-props` events. Because the listeners module can load after the
+first commit, the runtime replays its full registry when
+`component-highlighter:listeners-ready` fires.
+
+### 4. Overlay + listeners
+
+`src/client/overlay.ts`, `src/client/listeners.ts`, and
+`src/client/context-menu.ts` run in the browser page, connecting to the
+host-published client context via `getHostClientContext()` — separate from
+the panel, which connects as its own devframe SPA. `listeners.ts` dispatches
+`component-highlighter:listeners-ready` once attached, triggering the
+runtime replay above. It renders highlight rectangles in
+`#component-highlighter-container`, handles hover/click/keyboard shortcuts,
+and drives the Shadow DOM context menu. `src/client/interaction-recorder.ts`
+captures user actions as play-function steps for "Create with Interactions".
+
+### 5. DevTools panel
+
+`src/panel/panel.ts` is served as the devframe's `clientAssets` SPA at
+`/__storybook-devtools/`. Four tabs: Storybook (embedded iframe), Coverage
+(dashboard, bulk "Create all"), Terminal (process output), Docs. Story
+navigation uses the Storybook channel API
+(`__STORYBOOK_ADDONS_CHANNEL__.emit('setCurrentStory')`).
+
+### 6. Story generation (server)
+
+`src/frameworks/<fw>/story-generator.ts` receives a payload over RPC,
+generates framework-specific story source (React `.stories.tsx`, Vue
+`.stories.ts`), writes or appends the file, and broadcasts
+`component-highlighter:story-created` back to the client.
+
+## Bundler hosts
+
+| Host | Entry file | Instrumentation mount | Hook delivery | Dock/panel serving |
+|------|-----------|------------------------|---------------|---------------------|
+| Vite | `src/create-component-highlighter-plugin.ts` | `unplugin.vite()`, plus Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`) | `'html'` via `transformIndexHtml`, or `'entry'` | devframe mounted through Vite's own dev server; dock client resolved via Vite's `/@id/{specifier}` |
+| Rsbuild | `src/rsbuild.ts` (`storybookDevtoolsRsbuild`) | `unplugin.rspack()` in `modifyRspackConfig` | Devtools-hook script and dock bootstrap injected via `modifyHTMLTags` | `@devframes/hub` mounted on the dev server's Connect middlewares in `onBeforeStartDevServer`, over a sidecar WebSocket; dock client bundle served from `dist/client-bundled/` at `/__storybook-devtools-client/vite-devtools.mjs` |
+| Next.js | `src/next.ts` (`withStorybookDevtools`) | `unplugin.webpack()` in `next.config.ts`'s `webpack()`, restricted to the dev client compilation | `'entry'` only, targeting Next's client bootstrap modules | Two route handlers a consuming app mounts: `createStorybookDevtoolsRoute()` (hub over a sidecar WebSocket) and `createStorybookDevtoolsClientBundleRoute()` (same client-bundle URL convention as Rsbuild); both exposed via `next.config.ts` `rewrites()` since App Router treats leading-underscore paths as private |
+
+Notes:
+
+- Rsbuild has no equivalent of Vite's `server.transformRequest`, so its
+  runtime-helpers and framework virtual modules always read from built
+  `dist/` — run `pnpm build` before using it.
+- Next has no unplugin adapter for Turbopack: `withStorybookDevtools` warns
+  and no-ops under `process.env.TURBOPACK` instead of crashing.
+- Next's RSC gate (see Invariants) defaults to `true`; it targets
+  `@storybook/nextjs` only.
 
 ## Server RPC surface
 
-There is no HTTP middleware. Every server routine is a `devframe` RPC function,
-one file per function under `src/rpc/functions/`, collected by the
-`src/rpc/index.ts` barrel into `serverFunctions` and registered in
-`src/devframe.ts` via `ctx.scope('component-highlighter').rpc.register(fn)` —
-functions declare bare names (e.g. `create-story`) and the scope namespaces
-them to `component-highlighter:create-story` on the wire. `src/rpc/index.ts`
-also carries the `declare module 'devframe'` augmentation of
-`DevframeRpcServerFunctions` (derived from `serverFunctions` via
-`RpcDefinitionsToFunctionsWithNamespace`) / `DevframeRpcClientFunctions` /
-`DevframeRpcSharedStates` (`devframe`, not `@vitejs/devtools-kit`, owns these
-registries as of kit 0.6 — the kit re-exports the same interfaces).
-
-Panel bootstrap and Storybook process control:
+There is no HTTP middleware. Every server routine is a `devframe` RPC
+function, one file per function under `src/rpc/functions/`, collected by
+`src/rpc/index.ts` into `serverFunctions`. Functions declare bare names; the
+`component-highlighter` scope namespaces them on the wire (e.g. `create-story`
+→ `component-highlighter:create-story`).
 
 | RPC function | Type | Purpose |
 |---------------|------|---------|
-| `component-highlighter:get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }`. Replaces the removed `?sbUrl=` query param — an auto-derived dock URL can't carry query params |
-| `component-highlighter:storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` when the last start attempt's process died, so the panel can stop waiting and surface the failure |
-| `component-highlighter:storybook-index` | query | Proxy of Storybook's `index.json` |
-| `component-highlighter:start-storybook` | action | Start a Storybook dev server as an interactive PTY session via `ctx.terminals` |
-| `component-highlighter:check-story` | query | Whether a story file exists for a given component path |
-| `component-highlighter:create-story` | action | Generate + write a story file from serialized props; broadcasts `story-created` (see below) |
-| `component-highlighter:get-coverage` | query | Compute and return coverage data |
+| `get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }` |
+| `storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` if the last start died |
+| `storybook-index` | query | Proxy of Storybook's `index.json` |
+| `start-storybook` | action | Start Storybook as an interactive PTY session via `ctx.terminals` |
+| `check-story` | query | Whether a story file exists for a given component path |
+| `create-story` | action | Generate and write a story file; broadcasts `story-created` |
+| `get-coverage` | query | Compute and return coverage data |
+| `push-registry-diff` | action | Client syncs registry changes to shared state |
+| `scroll-to-component` | action | Panel asks the client to scroll to a component |
+| `highlight-coverage-instances` | action | Panel asks the client to show/clear coverage highlights |
+| `highlight-coverage-batch` | action | Panel asks the client to batch-highlight coverage instances |
+| `set-highlight-mode` | action | Toggle highlight mode on the client |
+| `set-prop` | action | Panel live-edits a prop on the client |
+| `reset-prop` | action | Panel resets a prop to its original value |
+| `select-component` | action | Client/overlay selects a component in the panel |
+| `visit-story` | action | Tell the panel to navigate to a story |
+| `notify` | action | Show a toast notification via DevTools logs |
+| `highlight-target` | action | Debug-log the current highlight target |
+| `toggle-overlay` | action | Debug-log an overlay toggle |
 
-Storybook process output lives in devframe's own Terminals dock:
-`start-storybook` spawns the process as an interactive PTY session (id
-`storybook-dev`), so the dock renders it writable — interactive prompts
-like Storybook's port-conflict question can be answered — with scrollback,
-colors, and resize handled by the host UI. The panel's "Open Terminal"
-buttons and the failure toast deep-link to it via the `hub:docks:activate`
-RPC (`dockId: devframes_plugin_terminals`, `params.sessionId`); on a
-session error, `notifyStorybookFailure` posts a `ctx.messages` error toast
-carrying that same activate action. A dead session stays registered so its
-scrollback remains readable; the next start drops and respawns it.
+`start-storybook` spawns Storybook as an interactive PTY session
+(`storybook-dev`) in devframe's Terminals dock, so prompts like a
+port-conflict question can be answered. The panel's "Open Terminal" buttons
+and the failure toast deep-link to it via `hub:docks:activate`. A dead
+session stays registered for its scrollback; the next start respawns it.
 
-Open-in-editor goes through the `@devframes/service-open` wire service —
-declared on the devframe definition (`services: [...]`) and shipped as a
-dependency, so `devframes:service:open:open-in-editor` is registered on every
-host. The panel and overlay feature-detect it with
-`rpc.services.has('@devframes/service-open')` and fall back to Vite's own
-`/__open-in-editor` endpoint where the service is unavailable.
-
-The remaining RPC functions — registry sync, panel↔client relay, notifications
-— are covered in the "Panel↔Client communication" and "Shared state" sections
-below.
+Open-in-editor goes through the `@devframes/service-open` wire service,
+registered on every host as `devframes:service:open:open-in-editor`. The
+panel and overlay feature-detect it and fall back to Vite's
+`/__open-in-editor` endpoint when unavailable.
 
 ## Key modules (where to edit)
 
 | Module | Responsibility |
 |--------|---------------|
-| `src/unplugin.ts` | Portable instrumentation core, built on `unplugin`: `createComponentHighlighterUnplugin(framework, options, host)`. Owns the transform pipeline (filter → `framework.detect` → `framework.transform`, coverage tracking, diagnostics dedupe), `resolveId`/`load` for the runtime-helpers and framework virtual modules plus the `virtual:component-highlighter/devtools-hook` module, and the `'entry'` hook-injection strategy. Bundler-specific needs (reading dev-source through a running server) come from the `ComponentHighlighterUnpluginHost` the caller supplies |
-| `src/create-component-highlighter-plugin.ts` | Vite adapter: entrypoint `createComponentHighlighterPlugin(framework, options)`. Calls `createComponentHighlighterUnplugin(...).vite()` and extends the result with the Vite-only hooks (`config`, `configResolved`, `configureServer`, `transformIndexHtml`, `handleHotUpdate`), mounts the `storybook-devtools` devframe (`createStorybookDevframe` + `createPluginFromDevframe`). `kitSetup` (runs after the devframe's own `setup(ctx)`) pre-seeds the Vite `clientModuleResolution` template, then delegates docks/commands/diagnostics registration to `registerStorybookHubSurfaces` (`hub-setup.ts`) |
-| `src/rsbuild.ts` | `./rsbuild` entry: `storybookDevtoolsRsbuild({ framework, clientAuth, ...options })`. Mounts instrumentation via `unplugin.rspack()`, delivers the devtools-hook script and hub dock bootstrap via `modifyHTMLTags`, mounts a `@devframes/hub` on the dev server's middlewares (sidecar WebSocket), serves the highlighter dock's self-contained client bundle from `dist/client-bundled/` by URL, and applies the React alias/dedupe config for rspack |
-| `src/next.ts` | `./next` entry: `withStorybookDevtools(options?)` composes `next.config.ts` (`unplugin.webpack()` on the dev client compilation only, `entry` hook injection into Next's client bootstrap, a `virtual:` URI-scheme relay plugin for webpack5, extended `serverExternalPackages`); `createStorybookDevtoolsRoute()` and `createStorybookDevtoolsClientBundleRoute()` build the two `app/**/route.ts` handlers a consuming app mounts for the devframes hub and the dock's client bundle. React only (`@storybook/nextjs`); RSC gate defaults to `true` |
-| `src/hub-setup.ts` | `registerStorybookHubSurfaces(ctx, options)`: host-neutral hub surfaces (notifications, diagnostics catalog, terminals ref, the `component-highlighter` action dock, Mod+K commands) against the bundler-neutral `DevframeHubContext`, shared by the Vite adapter's `kitSetup`, the Rsbuild adapter, and the Next.js adapter's `createStorybookDevtoolsRoute` |
-| `src/react-dedupe.ts` | `resolveReactDedupe(options)`: shared React-major-mismatch detection driving the `dedupeReact` option, called by both the Vite and Rsbuild adapters with their own `resolve.dedupe` mutation |
-| `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
-| `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
-| `src/storybook-process.ts` | Shared Storybook process lifecycle: the session slot (one running Storybook per server), `adoptStorybookSession` (watches the terminals host for the session leaving `running`, records start failures), `notifyStorybookFailure` (error toast with an open-terminal action), and the Terminals-dock/session id constants |
-| `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
-| `src/rpc/index.ts` | Barrel: `serverFunctions` array + the `declare module 'devframe'` augmentation (`DevframeRpcServerFunctions`/`DevframeRpcClientFunctions`/`DevframeRpcSharedStates`) |
-| `src/context.ts` | `WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>` — lets each RPC function's `setup(ctx)` read the deps `createStorybookDevframe` was called with |
-| `src/devframe-export.ts` | `./devframe` entry: re-exports `createStorybookDevframe` for mounting the definition in a custom DevTools host |
-| `src/frameworks/<fw>/transform.ts` | Build-time tagging (React: non-wrapping `__chRegisterMeta`; Vue: a single idempotent side-effect runtime import — no SFC reconstruction). Reports non-fatal detection gaps (parse failures, unsupported patterns) via `TransformOptions.onIssue` → DevTools diagnostics |
-| `src/frameworks/react/devtools-hook.ts` | Inline `<head>` script: installs the minimal React DevTools global hook + `__chInstallCommitHandler` bridge |
-| `src/frameworks/vue/devtools-hook.ts` | Inline `<head>` script: installs the minimal Vue DevTools global hook (incl. `cleanupBuffer`) + `__chInstallVueHandler` bridge |
-| `src/frameworks/nuxt/plugin.ts` | Nuxt entry point: reuses Vue instrumentation, exports SSR head-script helpers for the Vue hook and embedded Vite DevTools dock, and the `viteDevToolsBridgeModule` Nuxt module that makes the DevTools HTTP routes reachable through Nuxt's dev server |
-| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization (React: fiber-tree walker driven by the DevTools hook; Vue: `component:added/updated/removed` hook-event reconciler) |
-| `src/runtime-helpers.ts` | Shared runtime tracking helpers (DOM anchoring, observers, tracking gate + per-frame serialization coalescer, `createLivePropEditor` — the framework-agnostic live prop-edit machinery; runtimes supply only `applyOverride`) |
-| `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
-| `src/client/overlay.ts` | Highlight rendering, story file cache, save actions, debug overlay |
-| `src/client/context-menu.ts` | Context menu UI (Shadow DOM), props display, action buttons |
-| `src/client/interaction-recorder.ts` | User interaction recording and play function generation |
-| `src/client/coverage-actions.ts` | Client-side coverage actions (scroll, highlight) triggered by panel via RPC |
-| `src/utils/story-matching.ts` | Single source of truth for story↔component matching against Storybook's index.json (`componentPath` when present — index v5+ — else importPath/title heuristics) and visit-target selection (`pickStoryId`, incl. the `requirePreferred` polling contract for just-created stories) |
-| `src/client/vite-devtools.ts` | DevTools dock lifecycle, client RPC handlers for panel→client broadcast |
-| `src/client/logger.ts` | Debug logging utility (`window.__componentHighlighterDebug`) |
-| `src/client/utils/format-utils.ts` | Value formatting helpers for context menu display |
-| `src/client/utils/html-preview.ts` | HTML preview rendering for prop values |
-| `src/client/utils/prop-utils.ts` | Prop classification, editability, and badge utilities (pure; shared by context menu + panel) |
-| `src/client/utils/prop-editor.ts` | Shared inline prop editor (`createPropEditor`): one form builder for both the context menu (in-page `overrideProps`) and the panel (RPC `set-prop`) |
-| `src/panel/panel.ts` | DevTools panel tabs (Storybook, Coverage, Terminal, Docs) |
+| `src/unplugin.ts` | Portable instrumentation core: transform pipeline, coverage tracking, diagnostics, virtual-module resolution |
+| `src/create-component-highlighter-plugin.ts` | Vite adapter and devframe mount |
+| `src/rsbuild.ts` | Rsbuild/rspack adapter |
+| `src/next.ts` | Next.js/webpack adapter and route-handler factories |
+| `src/hub-setup.ts` | Host-neutral hub surfaces: docks, commands, terminals, diagnostics |
+| `src/react-dedupe.ts` | React-major-mismatch detection driving `resolve.dedupe` |
+| `src/vite.ts` | `./vite` entry: resolves the framework config and delegates to the Vite adapter |
+| `src/devframe.ts` | The `storybook-devtools` devframe definition |
+| `src/storybook-process.ts` | Storybook process lifecycle: session slot, start-failure tracking, terminal/session id constants |
+| `src/rpc/functions/` | One file per RPC function |
+| `src/rpc/index.ts` | `serverFunctions` barrel and RPC/shared-state type augmentation |
+| `src/context.ts` | Maps a devframe context to the deps it was created with |
+| `src/devframe-export.ts` | `./devframe` entry for mounting the definition in a custom DevTools host |
+| `src/frameworks/<fw>/transform.ts` | Build-time tagging (React metadata call; Vue runtime import) |
+| `src/frameworks/react/devtools-hook.ts` | Inline script installing the React DevTools global hook |
+| `src/frameworks/vue/devtools-hook.ts` | Inline script installing the Vue DevTools global hook |
+| `src/frameworks/nuxt/plugin.ts` | Nuxt entry: SSR head-script helpers and the dev-server bridge module |
+| `src/frameworks/<fw>/runtime-module.ts` | Runtime instance registration and prop serialization |
 | `src/frameworks/<fw>/story-generator.ts` | Framework-specific story code output |
-| `src/utils/story-generator.ts` | Shared story generation utilities (name generation, args formatting) |
-| `src/codegen/interactions-to-code.ts` | Converts recorded interactions to play function code |
+| `src/runtime-helpers.ts` | Shared runtime tracking: DOM anchoring, serialization coalescer, live prop-edit machinery |
+| `src/client/listeners.ts` | Event wiring, highlight mode state, keyboard shortcuts |
+| `src/client/overlay.ts` | Highlight rendering, story file cache, save actions |
+| `src/client/context-menu.ts` | Context menu UI (Shadow DOM) |
+| `src/client/highlight-machine.ts` | Highlight/selection state machine |
+| `src/client/highlight-label.ts` | Highlight label rendering |
+| `src/client/interaction-recorder.ts` | User interaction recording for play functions |
+| `src/client/coverage-actions.ts` | Client-side coverage actions (scroll, highlight) triggered by the panel |
+| `src/client/vite-devtools.ts` | DevTools dock lifecycle, client RPC handler registration |
+| `src/client/logger.ts` | Debug logging (`window.__componentHighlighterDebug`) |
+| `src/client/utils/host-context.ts` | Resolves the app-page client context across embedded/standalone hosts |
+| `src/client/utils/format-utils.ts` | Value formatting for the context menu |
+| `src/client/utils/html-preview.ts` | HTML preview rendering for prop values |
+| `src/client/utils/prop-utils.ts` | Prop classification, editability, badge utilities |
+| `src/client/utils/prop-editor.ts` | Shared inline prop editor form builder |
+| `src/panel/panel.ts` | DevTools panel tabs |
+| `src/utils/story-matching.ts` | Story-to-component matching against Storybook's `index.json`, and visit-target selection || `src/utils/story-generator.ts` | Shared story generation utilities (naming, args formatting) |
+| `src/utils/normalize-runtime-imports.ts` | Normalizes runtime import specifiers across hosts |
+| `src/utils/storybook-docs-url.ts` | Resolves the Storybook docs URL for the "Open Docs" command |
+| `src/codegen/interactions-to-code.ts` | Converts recorded interactions to play-function code |
 | `src/codegen/generate-query.ts` | Generates Testing Library queries from recorded targets |
-| `src/codegen/args-to-string.ts` | Serializes args objects to source code strings |
+| `src/codegen/args-to-string.ts` | Serializes args objects to source strings |
 | `src/codegen/combine-interactions.ts` | Combines/deduplicates sequential interaction steps |
 | `src/codegen/get-interaction-event.ts` | Maps DOM events to interaction event types |
-| `src/coverage-dashboard.ts` | Server-side coverage computation (component → story file matching) |
+| `src/coverage-dashboard.ts` | Server-side coverage computation |
 | `src/notifications.ts` | Notification abstraction (DevTools Logs API + console fallback) |
-| `src/shared-types.ts` | Shared types for server/client (SerializedRegistryInstance, RegistryDiff) |
+| `src/shared-types.ts` | Shared server/client types |
 
 ## Window globals (automation / testing hooks)
 
@@ -322,52 +231,49 @@ below.
 | `__componentHighlighterEnable()` | Enable highlight mode (bypass dock) |
 | `__componentHighlighterDisable()` | Disable highlight mode |
 | `__componentHighlighterIsActive()` | Check if highlight mode is on |
-| `__componentHighlighterDeactivateDock()` | Programmatically toggle dock off |
-| `__componentHighlighterSelectById(id)` | Select a specific component instance by its registry ID |
-| `__componentHighlighterGetRegistry()` | Return the live component name→filePath registry Map |
-| `__componentHighlighterDebug` | Set to `true` to enable verbose debug logging in the console |
-| `__componentHighlighterActivateTracking()` | Turn on prop serialization + backfill (called automatically when a DevTools client connects) |
-| `__componentHighlighterCanEditProps()` | True when live prop editing is available (React: renderer exposes `overrideProps` in dev builds; Vue: always in dev) |
-| `__componentHighlighterSetProp(id, path, {kind,text})` | Live-edit a prop (React: `renderer.overrideProps`; Vue: reactive `instance.props`); returns `{ok, error?}`. Snapshots the pre-edit value (once) so the edit is resettable |
-| `__componentHighlighterResetProp(id, path)` | Revert a previously-edited prop to its original (pre-edit) value; returns `{ok, error?}` |
-| `__componentHighlighterGetEditedProps(id)` | Top-level prop keys whose current value differs from their original (drives the per-prop reset affordance) |
+| `__componentHighlighterDeactivateDock()` | Programmatically toggle the dock off |
+| `__componentHighlighterSelectById(id)` | Select a component instance by registry ID |
+| `__componentHighlighterGetRegistry()` | Return the live name→filePath registry Map |
+| `__componentHighlighterDebug` | Set `true` for verbose debug logging |
+| `__componentHighlighterActivateTracking()` | Turn on prop serialization (called automatically when a DevTools client connects) |
+| `__componentHighlighterCanEditProps()` | True when live prop editing is available |
+| `__componentHighlighterSetProp(id, path, {kind,text})` | Live-edit a prop; returns `{ok, error?}` |
+| `__componentHighlighterResetProp(id, path)` | Revert a previously-edited prop; returns `{ok, error?}` |
+| `__componentHighlighterGetEditedProps(id)` | Top-level prop keys currently edited, for the reset affordance |
 
-## Panel↔Client communication (RPC-based)
+## Panel-client communication (RPC-based)
 
-The panel runs as a standalone HTML app that can be popped out into a separate window.
-All panel→client communication uses Vite DevTools RPC with server-side relay:
-
-```
-Panel → server RPC call → server broadcasts → client RPC handler → DOM operation
-```
+The panel is a standalone HTML app that can pop out into its own window.
+Panel-to-client communication is a server relay: panel calls a server RPC
+function, the server broadcasts, a client-registered handler acts on the DOM.
 
 | Server RPC (panel calls) | Client broadcast handler | Purpose |
 |--------------------------|-------------------------|---------|
-| `component-highlighter:push-registry-diff` | — (client pushes to server) | Client syncs registry changes to shared state |
-| `component-highlighter:scroll-to-component` | `do-scroll-to-component` | Scroll app page to a component |
-| `component-highlighter:highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights on app page |
-| `component-highlighter:set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode on/off |
-| `component-highlighter:set-prop` | `do-set-prop` | Panel live-edits a prop → client calls `__componentHighlighterSetProp` |
-| `component-highlighter:reset-prop` | `do-reset-prop` | Panel resets a prop to its original → client calls `__componentHighlighterResetProp` |
-| `component-highlighter:highlight-coverage-batch` | `do-highlight-coverage-batch` | Batch-highlight coverage instances on the app page (Preview button) |
-| `component-highlighter:select-component` | `do-select-component` | Client/overlay → panel: select a component in the highlighter panel |
-| `component-highlighter:visit-story` | `do-visit-story` | Tell panel to navigate to a story |
-| `component-highlighter:notify` | — (server-side only) | Show a toast notification via DevTools logs |
-| — (create-story handler) | `story-created` | Server→client RPC broadcast of the story creation result (not a Vite HMR custom event); the client relays it to the panel's `visit-story` RPC when Storybook is running |
-| — (command handler) | `do-open-url` | Open a URL in a new browser tab (e.g. Storybook docs) |
+| `push-registry-diff` | — (client pushes to server) | Client syncs registry changes to shared state |
+| `scroll-to-component` | `do-scroll-to-component` | Scroll the app page to a component |
+| `highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights |
+| `highlight-coverage-batch` | `do-highlight-coverage-batch` | Batch-highlight coverage instances (Preview button) |
+| `set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode |
+| `set-prop` | `do-set-prop` | Panel live-edits a prop via `__componentHighlighterSetProp` |
+| `reset-prop` | `do-reset-prop` | Panel resets a prop via `__componentHighlighterResetProp` |
+| `select-component` | `do-select-component` | Client/overlay selects a component in the panel |
+| `visit-story` | `do-visit-story` | Tell the panel to navigate to a story |
+| `notify` | — (server-side only) | Show a toast notification |
+| — (create-story handler) | `story-created` | Server broadcasts the story creation result; client relays it to `visit-story` when Storybook is running |
+| — (command handler) | `do-open-url` | Open a URL in a new tab (e.g. Storybook docs) |
 | — (command handler) | `do-open-panel-tab` | Switch the dock to the Storybook panel entry |
-| — (command handler) | `do-switch-tab` | Switch to a specific tab within the panel (registered in panel.ts) |
+| — (command handler) | `do-switch-tab` | Switch to a specific panel tab |
 
 ## Shared state (auto-synced between server and clients)
 
 | Key | Type | Purpose |
 |-----|------|---------|
-| `component-highlighter:registry` | `SerializedRegistryInstance[]` | Component instances synced from client to panel |
-| `component-highlighter:pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request (consumed by panel) |
-| `component-highlighter:pending-tab` | `string \| null` | Tab switch request (consumed by panel) |
-| `component-highlighter:highlight-active` | `boolean` | Whether highlight mode is on (syncs panel toggle button) |
-| `component-highlighter:selected-component` | `SerializedRegistryInstance \| null` | Currently selected component (synced from client to panel) |
-| `component-highlighter:highlighter-tab-active` | `boolean` | Whether the panel's highlighter tab is active (drives whether client clicks go to the panel or show the context menu) |
+| `registry` | `SerializedRegistryInstance[]` | Component instances synced from client to panel |
+| `pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request, consumed by the panel |
+| `pending-tab` | `string \| null` | Tab switch request, consumed by the panel |
+| `highlight-active` | `boolean` | Whether highlight mode is on |
+| `selected-component` | `SerializedRegistryInstance \| null` | Currently selected component |
+| `highlighter-tab-active` | `boolean` | Whether the panel's highlighter tab is active; drives whether client clicks open the panel or the context menu |
 
 ## DevTools commands (Mod+K palette)
 
@@ -375,8 +281,8 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 |------------|-------|----------|-------------|
 | `storybook:toggle-highlight-mode` | Toggle Component Highlighter | `Mod+Shift+H` | Start/stop inspecting components |
 | `storybook:create-missing-stories` | Write Stories for Missing Components | — | Generate stories for all visible uncovered components |
-| `storybook:see-coverage` | See Component Coverage | — | Open the coverage dashboard showing story status |
-| `storybook:open-docs` | Open Storybook Docs | — | Open the Storybook documentation website |
+| `storybook:see-coverage` | See Component Coverage | — | Open the coverage dashboard |
+| `storybook:open-docs` | Open Storybook Docs | — | Open the Storybook documentation site |
 
 ## Keyboard shortcuts
 
@@ -388,102 +294,83 @@ Panel → server RPC call → server broadcasts → client RPC handler → DOM o
 | `Escape` | Clear selection | While a component is selected |
 | `Escape` x2 | Exit highlight mode | While highlight mode is on |
 
-## Invariants (do not break)
+## Invariants
 
-1. **Cross-framework parity**
-   - User-visible behavior should stay aligned across supported frameworks unless intentionally documented.
+1. **Cross-framework parity.** User-visible behavior stays aligned across
+   supported frameworks unless intentionally documented otherwise.
 
-2. **Stable metadata pathing**
-   - Story save actions depend on correct component path/name metadata.
-   - Regressions often surface as unknown paths or wrong story targets.
+2. **Stable metadata pathing.** Story save actions depend on correct
+   component path/name metadata. Regressions here surface as unknown paths
+   or wrong story targets.
 
-3. **CI-safe automation path**
-   - E2E should not require manual Vite DevTools authorization.
-   - Keep deterministic activation hooks/config for tests.
+3. **CI-safe automation path.** E2E must not require manual Vite DevTools
+   authorization. Activation hooks/config must stay deterministic.
 
-4. **Shared e2e reuse first**
-   - Common behavior belongs in shared e2e helpers/suites.
-   - Framework-specific specs should only contain true deltas.
+4. **Shared e2e reuse first.** Common behavior belongs in shared e2e
+   helpers/suites. Framework-specific specs cover true deltas only.
 
-5. **Lazy prop serialization (zero overhead until DevTools connects)**
-   - Components register cheaply (id/meta/element) at all times, but prop
-     serialization is gated by `isTrackingActive()` and only turns on when a
-     DevTools RPC client connects (`setRegistryRpcCall` → `activateTracking()`).
-   - Per-render prop updates are coalesced to one serialization per animation
-     frame; instances removed before the frame flushes are skipped.
-   - Do not call `serializeProps` directly on the hot path — route it through
-     `scheduleSerialization` so this guarantee is preserved across frameworks.
-   - **Only `serializedProps` crosses RPC.** Raw live props hold unclonable
-     values (functions, DOM nodes via `ref`, circular structures) and are never
-     put on `SerializedRegistryInstance` / `create-story` / `select-component`
-     payloads. Every server + panel consumer (story generation, panel display,
-     fingerprinting, story-name suggestion) reads `serializedProps`. The
-     serializer reduces every non-story-safe value to a marker
-     (`__isJSX` / `__isFunction` / `__isDate` / `__isObject` for non-plain
-     objects like Map/Set/class instances) so the wire payload is always
-     structured-clone-safe and round-trippable.
+5. **Lazy prop serialization.** Components register cheaply (id/meta/element)
+   at all times; prop serialization is gated by `isTrackingActive()` and
+   only turns on once a DevTools RPC client connects. Per-render updates are
+   coalesced to one serialization per animation frame. Always route
+   serialization through `scheduleSerialization`, never call `serializeProps`
+   directly on the hot path.
 
-6. **React detection is non-intrusive**
-   - Never reintroduce an HOC/boundary wrapper for React. Components must not
-     be wrapped: detection runs off the React DevTools fiber tree so the
-     rendered tree stays clean and RSC keeps working. The build-time transform
-     may only append the `__chRegisterMeta` tag.
-   - **RSC (`rsc` option):** off by default (SPA — every component is a client
-     component, so all matching modules are tagged). When `rsc: true`
-     (Vite-based RSC frameworks like TanStack Start), the transform only tags
-     modules with a leading `"use client"` directive; server-component modules
-     are returned untouched so the client runtime is never injected into the
-     server graph. Do not make the gate unconditional — it must stay opt-in, or
-     it breaks plain SPAs. Gate is owned by `src/frameworks/react/transform.ts`
-     (`hasUseClientDirective`) and threaded via the `TransformOptions` arg.
-     Covered by the transform "RSC mode" unit tests (no dedicated playground).
-   - The inline DevTools hook script must be injected into `<head>` *before*
-     any module script (it must exist before react-dom registers its renderer).
-   - Must support **React 18 and 19** (both required, both E2E-gated via
-     `playground/react` + `playground/react18`). Do not depend on
-     `_debugSource` (removed in 19) or React-internal tag-number constants.
-     Use only the typeof-guarded reconciler hook contract and the fiber fields
-     stable since React 16. Source identity comes from the `__chRegisterMeta`
-     tag, not React.
-   - The bundled `react-element-to-jsx-string` is resolved from this plugin's
-     node_modules; if its React major differs from the app's, its internal
-     `React.isValidElement` rejects the app's elements and prop serialization
-     silently degrades. The `dedupeReact` option (default `'auto'`) handles
-     this: `'auto'` detects a React-major mismatch and adds `react`/
-     `react-dom` to `resolve.dedupe` **only then** — React 19 single-version
-     apps get no config mutation; React 18 apps get the fix automatically.
-     `false` opts out (advanced multi-React setups) but logs a warning on a
-     detected mismatch so it never fails silently. Do not make the dedupe
-     unconditional again — it must stay opt-in-when-needed. The detection
-     logic is shared (`src/react-dedupe.ts` → `resolveReactDedupe`) between
-     the Vite and Rsbuild adapters; each applies the result to its own
-     bundler's `resolve.dedupe`.
-   - The inline hook script carries the app's CSP nonce when `html.cspNonce`
-     is configured (so it survives a strict Content-Security-Policy), and
-     rides along with (never clobbers) a real React DevTools extension hook —
-     it only defines the global when absent, and exposes a minimal pub/sub +
-     `renderers`/`rendererInterfaces` so a late-attaching backend still works.
-   - **Multi-renderer `overrideProps` capture.** More than one renderer can
-     register on the same hook — e.g. Next's App Router registers a
-     react-dom instance without `overrideProps` alongside the real client
-     one, plus `react-server-dom-webpack`'s flight renderer for RSC.
-     `handleCommit` (`runtime-module.ts`) re-checks each commit's renderer
-     until one actually exposes `overrideProps`, instead of latching onto
-     whichever renderer committed first — otherwise live prop editing
-     silently stays unavailable on hosts with more than one renderer.
-   - The fiber walk is intentionally **synchronous on commit**. React batches
-     a render pass into one commit, so it is one traversal per render pass
-     (not per `setState`), and synchronicity preserves deterministic
-     register/update event ordering the overlay + panel state machine rely
-     on. Do not move it to `requestAnimationFrame` (throttled in background
-     tabs → registry stalls) or a microtask/coalescer (reorders events vs the
-     commit → overlay/panel races). The expensive work (serialization) stays
-     gated by `isTrackingActive()`; per-instance rect observers match the
-     prior HOC approach (parity, not new overhead).
+6. **Only `serializedProps` crosses RPC.** Raw live props hold unclonable
+   values (functions, DOM nodes, circular structures). Every server/panel
+   consumer reads `serializedProps`, never raw props. The serializer reduces
+   non-story-safe values to a marker (`__isJSX`, `__isFunction`, `__isDate`,
+   `__isObject`) so the wire payload is always structured-clone-safe.
 
-7. **Shadow DOM context menu**
-   - The context menu is rendered inside Shadow DOM to isolate styles.
-   - Key interactive elements have stable IDs for E2E: `#open-component-btn`, `#story-name-input`, `#save-story-btn`, `#save-story-with-interactions-btn`.
+7. **React detection is non-intrusive.** No HOC/boundary wrapper. Detection
+   runs off the React DevTools fiber tree; the build-time transform only
+   appends the `__chRegisterMeta` tag.
+
+8. **RSC gate is opt-in.** The `rsc` option is off by default — every
+   component is treated as a client component. When `rsc: true`, the
+   transform tags only modules with a leading `"use client"` directive,
+   leaving server-component modules untouched so the client runtime never
+   enters the server graph. Owned by
+   `src/frameworks/react/transform.ts` (`hasUseClientDirective`), covered by
+   the "RSC mode" unit tests.
+
+9. **Hook script loads before module scripts.** The inline DevTools hook
+   must be injected into `<head>` before any module script, so it exists
+   before react-dom (or Vue) registers its renderer.
+
+10. **React 18 and 19 fiber-field constraints.** Both versions are required
+    and both are E2E-gated (`playground/react` + `playground/react18`). The
+    runtime must not depend on `_debugSource` (removed in 19) or
+    React-internal tag-number constants — only the typeof-guarded reconciler
+    hook contract and fiber fields stable since React 16. Source identity
+    comes from the `__chRegisterMeta` tag, not React internals.
+
+11. **React dedupe only on a detected mismatch.** `dedupeReact` (default
+    `'auto'`) adds `react`/`react-dom` to the bundler's dedupe list only when
+    `resolveReactDedupe` detects a React-major mismatch between the app and
+    this plugin's own `react-element-to-jsx-string` dependency. Single-
+    version React 19 apps get no config mutation. `false` opts out but logs
+    a warning on a detected mismatch.
+
+12. **Fiber walk is synchronous on commit.** React batches a render pass
+    into one commit, so the walk runs once per render pass, not per
+    `setState`. This keeps register/update event ordering deterministic for
+    the overlay/panel state machine. Do not move it to
+    `requestAnimationFrame` (throttled in background tabs) or a microtask
+    (reorders events relative to the commit).
+
+13. **Multi-renderer `overrideProps` capture.** More than one renderer can
+    register on the devtools hook — for example Next's App Router registers
+    a react-dom instance without `overrideProps` alongside the real client
+    renderer, plus the RSC flight renderer. `handleCommit`
+    (`runtime-module.ts`) re-checks each commit's renderer until one exposes
+    `overrideProps`, rather than latching onto whichever renderer committed
+    first.
+
+14. **Shadow DOM context menu.** Rendered inside Shadow DOM to isolate
+    styles. Key interactive elements have stable IDs for E2E:
+    `#open-component-btn`, `#story-name-input`, `#save-story-btn`,
+    `#save-story-with-interactions-btn`.
 
 ## Tests that protect this architecture
 
@@ -520,35 +407,25 @@ pnpm exec playwright test -g "listeners-ready registry replay"
 ```
 
 The playgrounds import `client/listeners` eagerly for deterministic E2E
-activation — real consuming apps don't, so their listeners module loads late
-(via the async DevTools client) and misses the initial register events. The
-`common-listeners-replay-suite.ts` covers the recovery path for that: it
-simulates the missed events by clearing the client registry, re-dispatches
-`component-highlighter:listeners-ready`, and asserts the runtime replays the
-full registry and that highlighting works on the replayed instances.
+activation; real consuming apps don't, so their listeners module loads late
+(via the async DevTools client) and misses the initial register events.
+`e2e/common-listeners-replay-suite.ts` covers the recovery path: it clears
+the client registry, re-dispatches `component-highlighter:listeners-ready`,
+and asserts the runtime replays the full registry with working highlighting.
 
 ## Known caveats
 
-- **Pre-existing intermittent E2E flake** (not caused by the fiber refactor):
-  `common-highlight-panel-state-suite.ts` → "panel close then dock activate
-  clears stale selection and shows context menu" intermittently shows the
-  context menu when it expects it suppressed. It is **version-independent**
-  (reproduces on React 18 and 19), reproduces with the runtime reverted to
-  its pre-refactor-perf baseline, and is a race between
-  `PANEL_HIGHLIGHTER_ACTIVATE` propagation and `SELECT_COMPONENT` in the
-  xstate machine — not a detection/registry issue. Rate: low in the full
-  matrix (`pnpm exec playwright test`), higher when a single Playwright
-  project's parallel workers saturate one cold dev server. Proper fix is to
-  make the panel-active gate deterministic in `listeners.ts`/the highlight
-  machine (or web-first-assert the helper), tracked separately so the
-  detection contract stays unmodified.
-- **RSC**: client components only — server components never run the hook, so
-  they are invisible (by design; the win is it no longer forces client
-  boundaries / crashes).
-- **Detection scope**: only exported, statically-named, PascalCase components
-  are tagged — intentional, since only exported components can have stories.
+- **Intermittent E2E flake**: `e2e/common-highlight-panel-state-suite.ts` →
+  "panel close then dock activate clears stale selection and shows context
+  menu" can intermittently show the context menu when it expects it
+  suppressed. It is a race between `PANEL_HIGHLIGHTER_ACTIVATE` propagation
+  and `SELECT_COMPONENT` in the highlight state machine.
+- **RSC**: server components never run the devtools hook, so they are
+  invisible to detection. This is by design.
+- **Detection scope**: only exported, statically-named, PascalCase
+  components are tagged, since only exported components can have stories.
 
-## Agent maintenance rule
+## Maintenance rule
 
 When you change any of the following, update this file in the same PR:
 

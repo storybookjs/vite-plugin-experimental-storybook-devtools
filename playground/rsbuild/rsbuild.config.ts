@@ -19,10 +19,10 @@ export default defineConfig({
   server: { host: '127.0.0.1', port: 5177 },
   resolve: {
     alias: {
-      'vite-plugin-experimental-storybook-devtools/client/listeners': r(
+      '@storybook/experimental-devtools/client/listeners': r(
         './shims/devtools-client.ts',
       ),
-      'vite-plugin-experimental-storybook-devtools/client/overlay': r(
+      '@storybook/experimental-devtools/client/overlay': r(
         './shims/empty.ts',
       ),
     },

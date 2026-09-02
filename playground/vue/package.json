@@ -2,7 +2,7 @@
   "name": "playground-vue",
   "type": "module",
   "version": "0.0.0",
-  "description": "Vue playground for vite-plugin-experimental-storybook-devtools",
+  "description": "Vue playground for @storybook/experimental-devtools",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

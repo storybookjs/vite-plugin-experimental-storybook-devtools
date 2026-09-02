@@ -2,16 +2,14 @@
 
 Use this skill when styling or reviewing the DevTools panel UI in this repo. The panel uses vanilla JS + Shadow DOM — no React or Emotion.
 
-Full design system reference: `/Users/m/projects/storybook/DESIGN_SYSTEM_REPORT.md`
-
 ---
 
 ## Architecture
 
-The DevTools dock lives in `<vite-devtools-dock-embedded>` — a custom element with a **Shadow DOM**. Style isolation means all CSS must be injected into the shadow root.
+The DevTools dock lives in `<devframes-dock-embedded>` — a custom element with a **Shadow DOM**. Style isolation means all CSS must be injected into the shadow root.
 
 ```js
-const dock = document.querySelector('vite-devtools-dock-embedded');
+const dock = document.querySelector('devframes-dock-embedded');
 const shadow = dock.shadowRoot;
 ```
 
@@ -209,7 +207,6 @@ When adding a new UI element to the dock panel:
 1. Define styles using `--sb-*` variables
 2. Inject via the `getSbTokenStyles()` pattern or extend the existing style block
 3. For complex React-based panel content (iframe panels), you may use React — the constraint is on the dock/overlay layer only
-4. Reference `DESIGN_SYSTEM_REPORT.md` for the full Storybook component catalog if the iframe panels will use React
 
 ---
 
