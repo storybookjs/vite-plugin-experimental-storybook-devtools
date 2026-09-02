@@ -272,6 +272,7 @@ below.
 | `src/react-dedupe.ts` | `resolveReactDedupe(options)`: shared React-major-mismatch detection driving the `dedupeReact` option, called by both the Vite and Rsbuild adapters with their own `resolve.dedupe` mutation |
 | `src/vite.ts` | `./vite` entry: `storybookDevtools({ framework, ...options })` resolves the `FrameworkConfig` for `'react'`/`'vue'` and delegates to `createComponentHighlighterPlugin` |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition (`defineDevframe`): scopes the context to `component-highlighter`, registers shared state and the `serverFunctions` barrel on it, serves the panel as `clientAssets` |
+| `src/storybook-process.ts` | Shared Storybook child-process state: the `StorybookProcessSession` slot (one running Storybook per server, shared by the `start-storybook` RPC and the Vite launcher dock, whichever starts first) and `pushTerminalLine`/`adoptStorybookSession`, which fan process output out to every context's `terminal-logs` streaming sink |
 | `src/rpc/functions/` | One file per RPC function (bare name; the scope namespaces it to `component-highlighter:<name>` on the wire) |
 | `src/rpc/index.ts` | Barrel: `serverFunctions` array + the `declare module 'devframe'` augmentation (`DevframeRpcServerFunctions`/`DevframeRpcClientFunctions`/`DevframeRpcSharedStates`) |
 | `src/context.ts` | `WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>` — lets each RPC function's `setup(ctx)` read the deps `createStorybookDevframe` was called with |
