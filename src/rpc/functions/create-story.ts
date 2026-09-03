@@ -5,6 +5,7 @@ import type { SerializedProps } from '../../frameworks'
 import type { SerializedRegistryInstance } from '../../shared-types'
 import { getStorybookDevframeContext } from '../../context'
 import { ordinal } from '../../utils/instance-selection'
+import { formatStoryFile } from '../../utils/csf-writer'
 
 export interface ComponentStoryData {
   meta: {
@@ -136,7 +137,7 @@ export const createStory = defineRpcFunction({
               throw new Error(`Unsupported framework: ${framework.name}`)
             }
 
-            const story = generateStory({
+            const story = await generateStory({
               meta: {
                 componentName: data.meta.componentName,
                 filePath: data.meta.filePath,
@@ -159,6 +160,12 @@ export const createStory = defineRpcFunction({
                 : {}),
             })
 
+            if (story.fallbackReason) {
+              logDebug(
+                `Story file could not be appended to on the CSF AST, spliced as text instead: ${story.fallbackReason}`,
+              )
+            }
+
             if (data.playFunction?.length) {
               logDebug(
                 `Story includes a play function with ${data.playFunction.length} lines`,
@@ -171,8 +178,10 @@ export const createStory = defineRpcFunction({
               fs.mkdirSync(outputDir, { recursive: true })
             }
 
-            // Write the story file
-            fs.writeFileSync(outputPath, story.content, 'utf-8')
+            // Write the story file, formatted with the user project's
+            // prettier when it has one (a no-op otherwise).
+            const formatted = await formatStoryFile(outputPath, story.content)
+            fs.writeFileSync(outputPath, formatted, 'utf-8')
             logDebug(
               `Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
             )

@@ -135,6 +135,43 @@ generates framework-specific story source (React `.stories.tsx`, Vue
 `.stories.ts`), writes or appends the file, and broadcasts
 `component-highlighter:story-created` back to the client.
 
+The work splits in two. **Serialisation** — live props to story source —
+stays hand-rolled in `src/utils/story-generator.ts` (`generateArgsContent`,
+`formatPropValue`, JSX/Vue-slot handling, `toValidStoryName`); Storybook has
+no equivalent, since its own `save-story` flow re-serialises args that were
+already typed rather than arbitrary runtime values. **File mutation** —
+appending the rendered export to a file that already exists — runs through
+`src/utils/csf-writer.ts` on the CSF AST:
+`loadCsf().parse()`, dedupe the export name against `_storyExports` plus
+every other top-level binding, merge the needed imports onto the AST
+(extending a matching `ImportDeclaration` where there is one), push the
+story's statements (parsed with `babelParse` from
+`storybook/internal/babel`) onto `program.body`, and `printCsf()`.
+Recast reuses each untouched node's original source, so comments, quote
+style and formatting elsewhere in the file survive byte-identically.
+
+Generators are `async` because `storybook/internal/csf-tools` is imported
+lazily — same `webpackIgnore` reasoning as `src/story-index.ts`.
+
+Each generator computes the story's required imports
+(`collectRequiredImports`) and the rendered `export const … : Story = {…}`
+block (`renderStoryExport`) once, then either hands both to
+`writeStoryIntoCsf` (the file exists) or prints them into the new-file
+template (it doesn't) — the two paths share one definition of both.
+
+**Fallback rule.** `writeStoryIntoCsf` returns `{ code, exportName,
+fallbackReason? }`. When `loadCsf` throws — a story file with
+no default export, or one that does not parse — the writer falls back to a
+regex splice rather than failing story creation, and reports why via
+`fallbackReason`, which the generator passes back on `GeneratedStory` and
+`create-story.ts` logs through `logDebug`.
+
+Before writing, `create-story.ts` runs the content through
+`formatStoryFile`, a wrapper over `formatFileContent` from
+`storybook/internal/common`. That applies the user project's prettier when it
+has one and returns the content untouched when prettier or a
+prettier/editorconfig config is missing.
+
 ### 7. Story index and coverage (server)
 
 `src/story-index.ts` serves the index everything server-side matches
@@ -310,6 +347,7 @@ panel and overlay feature-detect it and fall back to Vite's
 | `src/panel/panel.ts` | DevTools panel tabs |
 | `src/utils/story-matching.ts` | Story-to-component matching against Storybook's `index.json`, and visit-target selection |
 | `src/utils/instance-selection.ts` | Props fingerprinting and picking one live instance per variant for story creation, preferring an instance with live edits || `src/utils/story-generator.ts` | Shared story generation utilities (naming, args formatting) |
+| `src/utils/csf-writer.ts` | CSF-AST append/dedupe/import-merge for existing story files, with a regex-splice fallback, plus prettier formatting |
 | `src/utils/normalize-runtime-imports.ts` | Normalizes runtime import specifiers across hosts |
 | `src/utils/storybook-docs-url.ts` | Resolves the Storybook docs URL for the "Open Docs" command |
 | `src/codegen/interactions-to-code.ts` | Converts recorded interactions to play-function code |

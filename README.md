@@ -268,7 +268,9 @@ variant, size, type), then click **Create** for a story with the current
 props, or **Create with Interactions** to record clicks/typing/selections
 first and generate a story with a play function.
 
-The story file is created at `<component-dir>/<ComponentName>.stories.{ts,tsx}` (`.ts` for Vue, `.tsx` for React). If the file already exists, a new named export is appended.
+The story file is created at `<component-dir>/<ComponentName>.stories.{ts,tsx}` (`.ts` for Vue, `.tsx` for React). If the file already exists, a new named export is appended to it on the CSF syntax tree via Storybook's own `csf-tools`, so the rest of the file — comments, quote style, formatting — is left byte-identical, the export name is deduplicated against everything the file already declares, and imports the new story needs are merged into matching existing import statements. A story file that Storybook cannot parse as CSF still gets the new export, appended as text.
+
+Generated files are formatted with your project's prettier when you have one installed.
 
 ### Coverage Dashboard
 
