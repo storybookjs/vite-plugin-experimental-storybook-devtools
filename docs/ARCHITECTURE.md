@@ -296,7 +296,10 @@ function, one file per function under `src/rpc/functions/`, collected by
 
 `start-storybook` spawns Storybook as an interactive PTY session
 (`storybook-dev`) in devframe's Terminals dock, so prompts like a
-port-conflict question can be answered. The panel's "Open Terminal" buttons
+port-conflict question can be answered. The launch command is built by
+`storybook-launch.ts`, which detects the project's package manager via
+`storybook/internal/common`'s `JsPackageManagerFactory` and falls back to
+`npx` when detection fails. The panel's "Open Terminal" buttons
 and the failure toast deep-link to it via `hub:docks:activate`. A dead
 session stays registered for its scrollback; the next start respawns it.
 
