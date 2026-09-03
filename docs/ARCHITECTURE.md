@@ -42,7 +42,9 @@ the RPC surface and shared state, and serves the panel as `clientAssets`.
 `src/frameworks/<fw>/transform.ts` runs at build time. Neither transform
 wraps components.
 
-- **React**: a Babel AST transform that appends one idempotent call,
+- **React**: a Babel AST transform (Babel re-exported from
+  `storybook/internal/babel`, not a direct dependency) that appends one
+  idempotent call,
   `__chRegisterMeta(Component, { componentName, filePath,
   relativeFilePath, sourceId, isDefaultExport })`. The fiber tree is
   untouched.

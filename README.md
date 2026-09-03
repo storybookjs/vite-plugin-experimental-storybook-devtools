@@ -28,6 +28,7 @@ yarn add @storybook/experimental-devtools
 
 ### Peer Dependencies
 
+- `storybook` >= 10.6.0
 - One bundler host: `vite` >= 5.0.0 with `@vitejs/devtools` >= 0.6.0, `@rsbuild/core` >= 1.1.7, or `next` (App Router, webpack dev)
 - One of: `react` >= 18.0.0 or `vue` >= 3.0.0
 
