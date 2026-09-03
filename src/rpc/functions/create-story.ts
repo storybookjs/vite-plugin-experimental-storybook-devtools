@@ -42,8 +42,14 @@ export const createStory = defineRpcFunction({
   name: 'create-story',
   type: 'action',
   setup: (ctx) => {
-    const { framework, writeStoryFiles, storiesDir, logDebug, state } =
-      getStorybookDevframeContext(ctx)
+    const {
+      framework,
+      writeStoryFiles,
+      storiesDir,
+      logDebug,
+      state,
+      storybookProject,
+    } = getStorybookDevframeContext(ctx)
     return {
       handler: async (data: ComponentStoryData) => {
         logDebug(
@@ -129,6 +135,7 @@ export const createStory = defineRpcFunction({
               throw new Error(`Unsupported framework: ${framework.name}`)
             }
 
+            const project = await storybookProject
             const story = generateStory({
               meta: {
                 componentName: data.meta.componentName,
@@ -141,7 +148,8 @@ export const createStory = defineRpcFunction({
               },
               props: data.serializedProps,
               componentRegistry: registryMap,
-              storybookFramework: framework.storybookFramework,
+              storybookFramework:
+                project?.frameworkPackage ?? framework.storybookFramework,
               ...(data.storyName ? { storyName: data.storyName } : {}),
               ...(existingContent ? { existingContent } : {}),
               ...(data.playFunction

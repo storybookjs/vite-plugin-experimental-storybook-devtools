@@ -2,6 +2,7 @@ import type { DevframeNodeContext } from 'devframe'
 import type { ViteDevServer } from 'vite'
 import type { FrameworkConfig } from './frameworks'
 import type { NotificationService } from './notifications'
+import type { StorybookProjectInfo } from './storybook-project'
 
 /**
  * Mutable state shared between the transform plugin and the RPC handlers.
@@ -40,6 +41,15 @@ export interface CreateStorybookDevframeDeps {
   storiesDir: string | undefined
   logDebug: (...args: unknown[]) => void
   state: StorybookDevframeState
+  /**
+   * The user's real Storybook project info (framework package, renderer,
+   * builder, ...), read from their `.storybook/main` config. Kicked off by
+   * the host at setup without being awaited on the startup path — handlers
+   * that need it (story generation, the docs URL) await it themselves.
+   * Resolves to `null` when no Storybook config is found; callers then fall
+   * back to `framework.storybookFramework`.
+   */
+  storybookProject: Promise<StorybookProjectInfo | null>
 }
 
 const map = new WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>()

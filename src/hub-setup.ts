@@ -20,6 +20,7 @@ import type { StorybookDevframeState } from './devframe'
 import type { ChDiagnostics } from './unplugin'
 import type { SerializedRegistryInstance } from './shared-types'
 import { getStorybookDocsUrl } from './utils/storybook-docs-url'
+import type { StorybookProjectInfo } from './storybook-project'
 
 const COMPONENT_HIGHLIGHTER_ICON =
   "data:image/svg+xml;utf8,<svg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M12 1C12.5523 1 13 1.44772 13 2V7.5C13 7.77614 12.7761 8 12.5 8C12.2239 8 12 7.77614 12 7.5V2H2V12.0039H7.5C7.77612 12.0039 7.99996 12.2278 8 12.5039C8 12.78 7.77614 13.0039 7.5 13.0039H2C1.44771 13.0039 1 12.5562 1 12.0039V2C1 1.44772 1.44771 1 2 1H12Z' fill='%23515151'/><path d='M9.50098 6.00391C9.77697 6.00444 10.0004 6.22885 10 6.50488C9.99946 6.78088 9.77506 7.00427 9.49902 7.00391L7.70801 7.00098L12.8535 12.1465C13.0488 12.3417 13.0488 12.6583 12.8535 12.8535C12.6583 13.0488 12.3417 13.0488 12.1465 12.8535L7 7.70703V9.5C7 9.77614 6.77614 10 6.5 10C6.22386 10 6 9.77614 6 9.5V6.50391C6 6.46848 6.00276 6.43373 6.00977 6.40039C6.05604 6.1717 6.25871 5.99968 6.50098 6L9.50098 6.00391Z' fill='%23515151'/></svg>"
@@ -35,8 +36,14 @@ export interface StorybookHubSetupOptions {
    * bundle.
    */
   dockClientScript: { importFrom: string; importName?: string }
-  /** Storybook framework package (e.g. `@storybook/nextjs`) — focuses the docs command on its framework page. */
+  /**
+   * Storybook framework package fallback (e.g. `@storybook/nextjs`) — used
+   * for the docs command when `storybookProject` hasn't resolved a real one
+   * from the user's `.storybook/main` config (or resolves to `null`).
+   */
   storybookFramework?: string
+  /** The user's real Storybook project info, resolved from their config. */
+  storybookProject: Promise<StorybookProjectInfo | null>
 }
 
 /**
@@ -244,12 +251,19 @@ export function registerStorybookHubSurfaces(
       description: 'Open the Storybook documentation website',
       icon: 'ph:book-open-duotone',
       category: 'Storybook',
-      handler: () => {
+      handler: async () => {
+        const project = await options.storybookProject
         // Server-side commands can't open browser tabs directly,
         // but we can broadcast to the client to do it
         ctx.rpc.broadcast({
           method: 'component-highlighter:do-open-url',
-          args: [{ url: getStorybookDocsUrl(options.storybookFramework) }],
+          args: [
+            {
+              url: getStorybookDocsUrl(
+                project?.frameworkPackage ?? options.storybookFramework,
+              ),
+            },
+          ],
         })
       },
     }),

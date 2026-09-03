@@ -220,7 +220,7 @@ Options and caveats:
 - **`host`** — pin the sidecar server's bind address (e.g. `host: '127.0.0.1'`) to match `next dev -H 127.0.0.1`; the default (`'localhost'`) can resolve to an address the browser's websocket can't reach.
 - **Turbopack is unsupported.** Running `next dev` under Turbopack prints a warning and the app runs normally, without instrumentation. Run `next dev` without `--turbopack` on Next 15, or pass `--webpack` explicitly on majors where Turbopack is the default (Next 16+).
 - **`rsc`** *(default `true`)* — only modules with a `"use client"` directive are instrumented; server components are never registered or highlighted. A module that is client-only transitively (imported by a `"use client"` module but carrying no directive of its own) is not instrumented either — only modules with their own directive are tagged.
-- **Story generation** maps to `@storybook/nextjs`.
+- **Story generation** imports from the framework package read out of your `.storybook/main` config (e.g. `@storybook/nextjs-vite`); falls back to `@storybook/nextjs` when no Storybook config is found.
 - **Manual hook fallback** — if entry injection isn't viable in your setup, `getNextDevToolsHookScript()` returns the same hook script for manual delivery, e.g. via `<Script strategy="beforeInteractive">` in the root layout.
 
 ### Start developing
@@ -374,6 +374,14 @@ The following patterns are excluded by default:
 - `**/story.*`
 
 ## Generated Story Format
+
+The `Meta`/`StoryObj` import below comes from the framework package read out
+of your project's `.storybook/main` config (`@storybook/react-webpack5`,
+`@storybook/nextjs-vite`, etc.) — `@storybook/react-vite` and
+`@storybook/vue3-vite` shown here are just the defaults each playground
+uses. When no Storybook config is found, generation falls back to the
+framework's own default (`@storybook/react-vite` for React, `@storybook/vue3-vite`
+for Vue, `@storybook/nextjs` for the Next.js host).
 
 ### React
 

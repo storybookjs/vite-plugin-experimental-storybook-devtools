@@ -30,6 +30,7 @@ import { ConsoleNotificationService } from './notifications'
 import { reactFramework } from './frameworks/react'
 import { getDevToolsHookScript } from './frameworks/react/devtools-hook'
 import type { FrameworkConfig } from './frameworks/types'
+import { resolveStorybookProject } from './storybook-project'
 
 /** Next.js framework config: React instrumentation, `@storybook/nextjs` story output. */
 export const nextFramework: FrameworkConfig = {
@@ -631,6 +632,10 @@ export function createStorybookDevtoolsRoute(
   const devtoolsDockId = options.devtoolsDockId ?? configured.devtoolsDockId
   const debugMode = configured.debugMode
 
+  // Kicked off now, awaited later by the handlers that need it (story
+  // generation, the docs URL) — not on this synchronous route-setup path.
+  const storybookProject = resolveStorybookProject(process.cwd())
+
   const hub = nextDevframeHub({
     base,
     ...(options.port != null ? { port: options.port } : {}),
@@ -650,6 +655,7 @@ export function createStorybookDevtoolsRoute(
           if (debugMode) console.log('[component-highlighter]', ...args)
         },
         state: globalState.state,
+        storybookProject,
       }),
     ],
     configure: (ctx: DevframeHubContext) => {
@@ -658,6 +664,7 @@ export function createStorybookDevtoolsRoute(
         storiesDir,
         devtoolsDockId,
         storybookFramework: nextFramework.storybookFramework,
+        storybookProject,
         dockClientScript: {
           importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
           importName: 'default',

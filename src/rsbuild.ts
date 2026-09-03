@@ -31,6 +31,7 @@ import {
 import { registerStorybookHubSurfaces } from './hub-setup'
 import { ConsoleNotificationService } from './notifications'
 import { resolveReactDedupe } from './react-dedupe'
+import { resolveStorybookProject } from './storybook-project'
 
 export interface StorybookDevtoolsRsbuildOptions
   extends ComponentHighlighterOptions {
@@ -177,6 +178,10 @@ export function storybookDevtoolsRsbuild(
   return {
     name: 'rsbuild-plugin-storybook-devtools',
     setup(api: RsbuildPluginAPI) {
+      // Kicked off now, awaited later by the handlers that need it (story
+      // generation, the docs URL) — not on this setup path.
+      const storybookProject = resolveStorybookProject(api.context.rootPath)
+
       api.modifyRspackConfig((config, utils) => {
         isServe = utils.isDev
         config.plugins ??= []
@@ -222,6 +227,7 @@ export function storybookDevtoolsRsbuild(
           storiesDir,
           logDebug,
           state,
+          storybookProject,
         })
 
         const hub = initHub({
@@ -241,6 +247,7 @@ export function storybookDevtoolsRsbuild(
               storiesDir,
               devtoolsDockId,
               storybookFramework: framework.storybookFramework,
+              storybookProject,
               dockClientScript: {
                 importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
                 importName: 'default',

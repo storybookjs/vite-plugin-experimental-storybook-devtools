@@ -9,6 +9,7 @@ import { ConsoleNotificationService } from './notifications'
 import { resolveReactDedupe } from './react-dedupe'
 import { createStorybookDevframe } from './devframe'
 import type { StorybookDevframeState } from './context'
+import { resolveStorybookProject } from './storybook-project'
 import {
   createComponentHighlighterUnplugin,
   getComponentHighlighterRuntimePaths,
@@ -140,6 +141,10 @@ export function createComponentHighlighterPlugin(
   }
 
   const runtimePaths = getComponentHighlighterRuntimePaths(framework)
+
+  // Kicked off now, awaited later by the handlers that need it (story
+  // generation, the docs URL) — not on this synchronous plugin-setup path.
+  const storybookProject = resolveStorybookProject(process.cwd())
 
   const {
     devtoolsDockId = 'component-highlighter',
@@ -361,6 +366,7 @@ export function createComponentHighlighterPlugin(
     storiesDir,
     logDebug,
     state,
+    storybookProject,
   })
 
   // Kit-only setup: docks, commands, terminals, messages, diagnostics — none
@@ -385,6 +391,7 @@ export function createComponentHighlighterPlugin(
       storiesDir,
       devtoolsDockId,
       storybookFramework: framework.storybookFramework,
+      storybookProject,
       dockClientScript: {
         importFrom:
           '@storybook/experimental-devtools/client/vite-devtools',

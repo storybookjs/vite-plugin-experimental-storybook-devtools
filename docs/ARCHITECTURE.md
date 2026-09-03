@@ -37,6 +37,25 @@ whether to add `react`/`react-dom` to the bundler's dedupe list.
 `src/devframe.ts` defines the `storybook-devtools` devframe: it registers
 the RPC surface and shared state, and serves the panel as `clientAssets`.
 
+`src/storybook-project.ts` reads the user's real Storybook config —
+framework package, renderer, builder, stories globs, addons — via
+`getStorybookInfo` from `storybook/internal/common`, and the repository root
+via `getProjectRoot` from the same module. Each host (`create-component-highlighter-plugin.ts`,
+`rsbuild.ts`, `next.ts`) kicks off `resolveStorybookProject(cwd)` at setup
+without awaiting it on the startup path; RPC handlers that need the result
+(story generation in `create-story.ts`, the docs URL in `get-config.ts` and
+`hub-setup.ts`) await it later. It resolves to `null` when no
+`.storybook/main` config is found (or `getStorybookInfo` throws for any
+other reason) — callers then fall back to the framework's static
+`storybookFramework` default (e.g. `@storybook/react-vite`). `getProjectRoot`
+has no `cwd` parameter of its own (always resolves against the real
+`process.cwd()`); the module exposes both an async (`resolveProjectRoot`)
+and a sync (`resolveProjectRootSync`, via a lazy `require()`) variant — the
+sync one exists only for `createStorybookDevframe`'s repository-root lookup,
+which has to run synchronously because a Next.js `route.ts` re-exports
+`GET`/`POST`/`DELETE` directly from `createStorybookDevtoolsRoute()`'s
+return value.
+
 ### 2. Framework transform
 
 `src/frameworks/<fw>/transform.ts` runs at build time. Neither transform
@@ -187,6 +206,7 @@ panel and overlay feature-detect it and fall back to Vite's
 | `src/react-dedupe.ts` | React-major-mismatch detection driving `resolve.dedupe` |
 | `src/vite.ts` | `./vite` entry: resolves the framework config and delegates to the Vite adapter |
 | `src/devframe.ts` | The `storybook-devtools` devframe definition |
+| `src/storybook-project.ts` | Reads the user's real Storybook framework/renderer/builder/stories/addons and repository root from their `.storybook/main` config, via `storybook/internal/common` |
 | `src/storybook-process.ts` | Storybook process lifecycle: session slot, start-failure tracking, terminal/session id constants |
 | `src/rpc/functions/` | One file per RPC function |
 | `src/rpc/index.ts` | `serverFunctions` barrel and RPC/shared-state type augmentation |
