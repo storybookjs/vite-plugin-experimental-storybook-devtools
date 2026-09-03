@@ -8,8 +8,12 @@ import { createRequire } from 'module'
 import { ConsoleNotificationService } from './notifications'
 import { resolveReactDedupe } from './react-dedupe'
 import { createStorybookDevframe } from './devframe'
-import type { StorybookDevframeState } from './context'
-import { resolveStorybookProject } from './storybook-project'
+import {
+  resolveStorybookFramework,
+  type CreateStorybookDevframeDeps,
+  type StorybookDevframeState,
+} from './context'
+import { createStoryIndexService } from './story-index'
 import {
   createComponentHighlighterUnplugin,
   getComponentHighlighterRuntimePaths,
@@ -144,7 +148,14 @@ export function createComponentHighlighterPlugin(
 
   // Kicked off now, awaited later by the handlers that need it (story
   // generation, the docs URL) — not on this synchronous plugin-setup path.
-  const storybookProject = resolveStorybookProject(process.cwd())
+  const storyIndexService = createStoryIndexService({
+    cwd: process.cwd(),
+    logDebug,
+  })
+  const storybookFramework = resolveStorybookFramework(
+    storyIndexService,
+    framework,
+  )
 
   const {
     devtoolsDockId = 'component-highlighter',
@@ -190,6 +201,7 @@ export function createComponentHighlighterPlugin(
     transformedComponents: state.transformedComponents,
     getDiagnostics: () => chDiagnostics,
     getBase: () => resolvedBase,
+    onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
   }
 
   // The unplugin-produced Vite plugin carries the portable hooks: transform
@@ -359,15 +371,18 @@ export function createComponentHighlighterPlugin(
     },
   }
 
-  const definition = createStorybookDevframe({
+  const deps: CreateStorybookDevframeDeps = {
     framework,
     storybookUrl,
     writeStoryFiles,
     storiesDir,
     logDebug,
     state,
-    storybookProject,
-  })
+    storybookFramework,
+    storyIndexService,
+  }
+
+  const definition = createStorybookDevframe(deps)
 
   // Kit-only setup: docks, commands, terminals, messages, diagnostics — none
   // of these are part of the portable `DevframeNodeContext`, so they're wired
@@ -387,11 +402,8 @@ export function createComponentHighlighterPlugin(
     // with `viteConfig`/`viteServer`/`createJsonRenderer` added — everything
     // below this point works against that shared, bundler-neutral shape.
     const { diagnostics } = registerStorybookHubSurfaces(ctx, {
-      state,
-      storiesDir,
+      deps,
       devtoolsDockId,
-      storybookFramework: framework.storybookFramework,
-      storybookProject,
       dockClientScript: {
         importFrom:
           '@storybook/experimental-devtools/client/vite-devtools',

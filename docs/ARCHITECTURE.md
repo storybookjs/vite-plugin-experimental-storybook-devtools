@@ -15,9 +15,9 @@ See `docs/SUPPORTED_FRAMEWORKS.md` for the current framework list.
 
 ## Runtime flow
 
-The plugin has six stages: bundler setup, a build-time transform, a browser
-runtime, an overlay + listeners layer, a DevTools panel, and server-side
-story generation.
+The plugin has seven stages: bundler setup, a build-time transform, a
+browser runtime, an overlay + listeners layer, a DevTools panel, server-side
+story generation, and server-side story indexing for coverage.
 
 ### 1. Plugin setup
 
@@ -40,21 +40,22 @@ the RPC surface and shared state, and serves the panel as `clientAssets`.
 `src/storybook-project.ts` reads the user's real Storybook config —
 framework package, renderer, builder, stories globs, addons — via
 `getStorybookInfo` from `storybook/internal/common`, and the repository root
-via `getProjectRoot` from the same module. Each host (`create-component-highlighter-plugin.ts`,
-`rsbuild.ts`, `next.ts`) kicks off `resolveStorybookProject(cwd)` at setup
-without awaiting it on the startup path; RPC handlers that need the result
-(story generation in `create-story.ts`, the docs URL in `get-config.ts` and
-`hub-setup.ts`) await it later. It resolves to `null` when no
-`.storybook/main` config is found (or `getStorybookInfo` throws for any
-other reason) — callers then fall back to the framework's static
-`storybookFramework` default (e.g. `@storybook/react-vite`). `getProjectRoot`
-has no `cwd` parameter of its own (always resolves against the real
-`process.cwd()`); the module exposes both an async (`resolveProjectRoot`)
-and a sync (`resolveProjectRootSync`, via a lazy `require()`) variant — the
-sync one exists only for `createStorybookDevframe`'s repository-root lookup,
-which has to run synchronously because a Next.js `route.ts` re-exports
-`GET`/`POST`/`DELETE` directly from `createStorybookDevtoolsRoute()`'s
-return value.
+via `getProjectRoot` from the same module. `createStoryIndexService({ cwd,
+logDebug })` calls `resolveStorybookProject(cwd)` itself and exposes the
+promise as `.project`, so each host (`create-component-highlighter-plugin.ts`,
+`rsbuild.ts`, `next.ts`) constructs one object at setup and awaits nothing on
+the startup path. It resolves to `null` when no `.storybook/main` config is
+found (or `getStorybookInfo` throws for any other reason). The one derived
+value handlers need — the framework package for generated stories and the
+docs URL — is resolved once per host as `CreateStorybookDevframeDeps.storybookFramework`
+(`resolveStorybookFramework` in `src/context.ts`), which falls back to the
+framework's static `storybookFramework` default (e.g. `@storybook/react-vite`).
+`getProjectRoot` has no `cwd` parameter of its own (always resolves against
+the real `process.cwd()`); `resolveProjectRootSync` wraps it behind a lazy
+`require()` and exists only for `createStorybookDevframe`'s repository-root
+lookup, which has to run synchronously because a Next.js `route.ts`
+re-exports `GET`/`POST`/`DELETE` directly from
+`createStorybookDevtoolsRoute()`'s return value.
 
 ### 2. Framework transform
 
@@ -134,6 +135,79 @@ generates framework-specific story source (React `.stories.tsx`, Vue
 `.stories.ts`), writes or appends the file, and broadcasts
 `component-highlighter:story-created` back to the client.
 
+### 7. Story index and coverage (server)
+
+`src/story-index.ts` serves the index everything server-side matches
+against. `createStoryIndexService({ cwd, logDebug })` returns `{ cwd,
+project, getIndex(), invalidate(filePath?) }` and picks between two
+strategies behind that one `getIndex()`:
+
+1. a real Storybook index built from the user's `stories` globs
+   (`storybook/internal/core-server`'s `StoryIndexGenerator`, fed by an
+   equivalent of Storybook's own unexported CSF indexer), built lazily on
+   the first `getIndex()` call and memoised;
+2. a scan for story files under `cwd`, synthesised into entries carrying
+   only `id`, `type` and `importPath`, used when there is no generator to
+   build (no Storybook config, or a build that threw). A synthesised
+   `componentPath` is deliberately absent: it would decide membership
+   outright in `findStoryCandidates`, so a same-named file beside the story
+   could hide a real match, while `importPath` alone matches by path base
+   and by file name.
+
+The build result is memoised, a missing generator included, so a broken or
+absent Storybook project costs one build attempt rather than one per
+`getIndex()` call; `invalidate()` drops that memo when the last build
+produced no generator, which is how a project that gains a `.storybook`
+config (or fixes its config) picks up the real index. `getIndex()` always
+resolves to an index, so callers carry no "no index" branch.
+
+Consumers match through `findStoryCandidates`
+(`src/utils/story-matching.ts`) on `componentPath`/`importPath`/title rather
+than a naming convention of their own: `collectCoverage` in
+`src/coverage-dashboard.ts` (used by the `get-coverage` RPC and
+`hub-setup.ts`'s "Write Stories for Missing Components" command) and the
+`check-story` RPC behind the overlay's create/open affordance. The panel's
+`storybook-index` RPC is not one of them: it navigates by story id, which
+only Storybook's own `index.json` can supply. The one definition of "this
+file is a story file" lives in `src/utils/story-files.ts` and is shared with
+`src/unplugin.ts`'s instrumentation `exclude` globs and `watchChange`
+filter.
+
+`StoryIndexGenerator.getIndex()` throws a `MultipleIndexingError` covering
+every file that failed to parse, not a partial index with those entries
+dropped, so one bad CSF file takes down the whole generated index for that
+cycle. The service then serves the last index the generator produced — only
+the broken file's own stories are stale — and logs the failure once per
+distinct message rather than once per watch event. A fixed file recovers on
+the next invalidate+getIndex cycle.
+
+**Invalidation.** `create-story.ts` calls `invalidate(outputPath)` right
+after writing a story file. Watch-based invalidation is wired once, cross-host,
+in `src/unplugin.ts`'s `watchChange` hook (`ComponentHighlighterUnpluginHost.onStoryFileChange`),
+which fires for `*.stories.*`/`*.story.*` file changes on every bundler
+unplugin targets — Vite, Rsbuild/rspack, and Next/webpack alike all get it
+through the same one wiring point, no per-host watcher needed. Each host
+constructs one `storyIndexService` instance at setup (`src/context.ts`
+carries it on the devframe deps). Next's is memoised on the `globalThis`
+singleton that also carries `state`, which shares it between
+`withStorybookDevtools` and `createStorybookDevtoolsRoute` as separate
+module instances — but only within one process. Next may run the webpack
+compiler and the route handler in separate processes, and a `globalThis`
+singleton does not cross that boundary: `watchChange` then invalidates the
+compiler process's instance while the route handler serves coverage from its
+own, so on Next only `create-story`'s explicit `invalidate(outputPath)` —
+which runs in the route-handler process — is reliable.
+
+**Note on Next/webpack.** `storybook/internal/csf-tools` (and, transitively,
+`storybook/internal/common`) pull in `oxc-resolver`'s native `.node` binding
+for tsconfig-paths resolution. A string-literal dynamic `import()` is still
+*statically bundled* by webpack even though it only *runs* lazily, so
+without care Next's server build fails trying to parse that binary as a
+module. `src/story-index.ts` and `src/storybook-project.ts` mark every such
+import with a `/* webpackIgnore: true */` magic comment — inert on
+Vite/Rollup, which don't recognize it — so webpack leaves them as real
+runtime `import()`s instead of bundling them.
+
 ## Bundler hosts
 
 | Host | Entry file | Instrumentation mount | Hook delivery | Dock/panel serving |
@@ -164,11 +238,11 @@ function, one file per function under `src/rpc/functions/`, collected by
 |---------------|------|---------|
 | `get-config` | query | Panel bootstrap: `{ storybookUrl, cwd }` |
 | `storybook-status` | query | Whether the Storybook dev server is responding; carries `startFailure` if the last start died |
-| `storybook-index` | query | Proxy of Storybook's `index.json` |
+| `storybook-index` | query | Proxy of Storybook's `index.json`; returns an empty index when Storybook isn't reachable, since the panel navigates by story id and only Storybook's own index supplies those |
 | `start-storybook` | action | Start Storybook as an interactive PTY session via `ctx.terminals` |
 | `check-story` | query | Whether a story file exists for a given component path |
 | `create-story` | action | Generate and write a story file; broadcasts `story-created` |
-| `get-coverage` | query | Compute and return coverage data |
+| `get-coverage` | query | Compute and return coverage data from the story index (see Story index and coverage above) |
 | `push-registry-diff` | action | Client syncs registry changes to shared state |
 | `scroll-to-component` | action | Panel asks the client to scroll to a component instance (by `id`, else first by name) and pulse it |
 | `toggle-highlight-visibility` | action | Panel shows/hides the selected component's persistent highlight; hover and select keep working |
@@ -243,7 +317,9 @@ panel and overlay feature-detect it and fall back to Vite's
 | `src/codegen/args-to-string.ts` | Serializes args objects to source strings |
 | `src/codegen/combine-interactions.ts` | Combines/deduplicates sequential interaction steps |
 | `src/codegen/get-interaction-event.ts` | Maps DOM events to interaction event types |
-| `src/coverage-dashboard.ts` | Server-side coverage computation |
+| `src/coverage-dashboard.ts` | Server-side coverage computation: `hasStory` from story index entries |
+| `src/story-index.ts` | Builds/serves the story index (real Storybook index, else synthesised from a story-file scan), with invalidation |
+| `src/utils/story-files.ts` | The one definition of "this file is a story file": exclude globs, watch filter, indexer test, scan names |
 | `src/notifications.ts` | Notification abstraction (DevTools Logs API + console fallback) |
 | `src/shared-types.ts` | Shared server/client types |
 

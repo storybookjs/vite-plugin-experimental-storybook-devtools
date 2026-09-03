@@ -48,7 +48,8 @@ export const createStory = defineRpcFunction({
       storiesDir,
       logDebug,
       state,
-      storybookProject,
+      storybookFramework,
+      storyIndexService,
     } = getStorybookDevframeContext(ctx)
     return {
       handler: async (data: ComponentStoryData) => {
@@ -135,7 +136,6 @@ export const createStory = defineRpcFunction({
               throw new Error(`Unsupported framework: ${framework.name}`)
             }
 
-            const project = await storybookProject
             const story = generateStory({
               meta: {
                 componentName: data.meta.componentName,
@@ -148,8 +148,7 @@ export const createStory = defineRpcFunction({
               },
               props: data.serializedProps,
               componentRegistry: registryMap,
-              storybookFramework:
-                project?.frameworkPackage ?? framework.storybookFramework,
+              storybookFramework: await storybookFramework,
               ...(data.storyName ? { storyName: data.storyName } : {}),
               ...(existingContent ? { existingContent } : {}),
               ...(data.playFunction
@@ -177,6 +176,10 @@ export const createStory = defineRpcFunction({
             logDebug(
               `Story "${story.storyName}" ${existingContent ? 'added to' : 'created in'}: ${outputPath}`,
             )
+            // Hosts without watch-based invalidation (or a slower watcher)
+            // still see the new/updated story immediately on the next
+            // coverage request.
+            storyIndexService.invalidate(outputPath)
 
             const verb = existingContent ? 'added to' : 'created in'
             const sourceNote =

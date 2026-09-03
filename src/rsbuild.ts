@@ -31,7 +31,11 @@ import {
 import { registerStorybookHubSurfaces } from './hub-setup'
 import { ConsoleNotificationService } from './notifications'
 import { resolveReactDedupe } from './react-dedupe'
-import { resolveStorybookProject } from './storybook-project'
+import {
+  resolveStorybookFramework,
+  type CreateStorybookDevframeDeps,
+} from './context'
+import { createStoryIndexService } from './story-index'
 
 export interface StorybookDevtoolsRsbuildOptions
   extends ComponentHighlighterOptions {
@@ -160,27 +164,45 @@ export function storybookDevtoolsRsbuild(
     storybookStartFailure: null,
   }
 
-  // No `loadDevSource`: the rspack host has no equivalent of Vite's
-  // `server.transformRequest` — the built dist runtime files are always
-  // served instead of dev source.
-  const host: ComponentHighlighterUnpluginHost = {
-    isServe: () => isServe,
-    transformedComponents: state.transformedComponents,
-    getDiagnostics: () => chDiagnostics,
-  }
-
-  const unplugin = createComponentHighlighterUnplugin(
-    framework,
-    pluginOptions,
-    host,
-  )
-
   return {
     name: 'rsbuild-plugin-storybook-devtools',
     setup(api: RsbuildPluginAPI) {
       // Kicked off now, awaited later by the handlers that need it (story
       // generation, the docs URL) — not on this setup path.
-      const storybookProject = resolveStorybookProject(api.context.rootPath)
+      const storyIndexService = createStoryIndexService({
+        cwd: api.context.rootPath,
+        logDebug,
+      })
+
+      // No `loadDevSource`: the rspack host has no equivalent of Vite's
+      // `server.transformRequest` — the built dist runtime files are always
+      // served instead of dev source.
+      const host: ComponentHighlighterUnpluginHost = {
+        isServe: () => isServe,
+        transformedComponents: state.transformedComponents,
+        getDiagnostics: () => chDiagnostics,
+        onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
+      }
+
+      const unplugin = createComponentHighlighterUnplugin(
+        framework,
+        pluginOptions,
+        host,
+      )
+
+      const deps: CreateStorybookDevframeDeps = {
+        framework,
+        storybookUrl,
+        writeStoryFiles,
+        storiesDir,
+        logDebug,
+        state,
+        storybookFramework: resolveStorybookFramework(
+          storyIndexService,
+          framework,
+        ),
+        storyIndexService,
+      }
 
       api.modifyRspackConfig((config, utils) => {
         isServe = utils.isDev
@@ -220,15 +242,7 @@ export function storybookDevtoolsRsbuild(
       })
 
       api.onBeforeStartDevServer(async ({ server }) => {
-        const definition = createStorybookDevframe({
-          framework,
-          storybookUrl,
-          writeStoryFiles,
-          storiesDir,
-          logDebug,
-          state,
-          storybookProject,
-        })
+        const definition = createStorybookDevframe(deps)
 
         const hub = initHub({
           base: DEVFRAMES_HUB_BASE,
@@ -243,11 +257,8 @@ export function storybookDevtoolsRsbuild(
           auth: clientAuth,
           configure(ctx) {
             const { diagnostics } = registerStorybookHubSurfaces(ctx, {
-              state,
-              storiesDir,
+              deps,
               devtoolsDockId,
-              storybookFramework: framework.storybookFramework,
-              storybookProject,
               dockClientScript: {
                 importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
                 importName: 'default',

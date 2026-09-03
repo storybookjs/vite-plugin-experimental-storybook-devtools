@@ -51,7 +51,14 @@ async function loadStorybookProject(
   cwd: string,
 ): Promise<StorybookProjectInfo | null> {
   try {
-    const { getStorybookInfo } = await import('storybook/internal/common')
+    // `webpackIgnore` keeps this off Next's server webpack bundle — a
+    // string-literal dynamic import is otherwise still statically bundled
+    // (not just lazily run), and `storybook/internal/common` transitively
+    // pulls in `oxc-resolver`'s native `.node` binding for tsconfig-paths
+    // resolution, which webpack can't parse and fails the build.
+    const { getStorybookInfo } = await import(
+      /* webpackIgnore: true */ 'storybook/internal/common'
+    )
     const info = await getStorybookInfo(path.resolve(cwd, '.storybook'), cwd)
     if (!info.mainConfigPath) return null
 

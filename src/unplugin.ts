@@ -18,6 +18,7 @@ import type { FrameworkConfig } from './frameworks'
 import type { TransformIssue } from './frameworks/types'
 import type { ComponentHighlighterOptions } from './create-component-highlighter-plugin'
 import { normalizeRuntimeImports } from './utils/normalize-runtime-imports'
+import { STORY_EXCLUDE_GLOBS, STORY_FILE_PATTERN } from './utils/story-files'
 
 /** Structured diagnostics dispatch, registered by the DevTools kit (see `kitSetup` in the Vite adapter). Not part of unplugin's or devframe's portable context. */
 export type ChDiagnostics = {
@@ -61,6 +62,15 @@ export interface ComponentHighlighterUnpluginHost {
    * rewriting omit it; `/` is assumed.
    */
   getBase?: () => string
+  /**
+   * Called on every watched file change whose path looks like a story file
+   * (`*.stories.*` or `*.story.*`), across every bundler unplugin targets —
+   * this is the one cross-host wiring point for story-index invalidation
+   * (`src/story-index.ts`), so hosts don't each need their own watcher.
+   * Wired via unplugin's `watchChange` hook, which fires in dev/watch mode
+   * on Vite, Rsbuild/rspack, and Next/webpack alike.
+   */
+  onStoryFileChange?: (filePath: string, event: 'create' | 'update' | 'delete') => void
 }
 
 /** Virtual module whose body is the framework's inline devtools-hook script, for the `entry` hook-injection strategy. */
@@ -138,10 +148,7 @@ function buildComponentHighlighterUnpluginOptions(
       '**/node_modules/**',
       '**/dist/**',
       '**/*.d.ts',
-      '**/*.stories.*',
-      '**/stories.*',
-      '**/*.story.*',
-      '**/story.*',
+      ...STORY_EXCLUDE_GLOBS,
     ],
     force = false,
     debugMode = false,
@@ -352,6 +359,13 @@ function buildComponentHighlighterUnpluginOptions(
     },
     transform(code: string, id: string) {
       return runTransform(code, id)
+    },
+    watchChange(id, change) {
+      if (!host.onStoryFileChange) return
+      const bareId = id.split('?', 1)[0]!
+      if (STORY_FILE_PATTERN.test(bareId)) {
+        host.onStoryFileChange(bareId, change.event)
+      }
     },
     // unplugin's generic `transform` type has no third parameter and cannot
     // see Vite's `{ ssr }` option; this per-bundler override replaces it for

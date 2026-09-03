@@ -2,7 +2,7 @@ import type { DevframeNodeContext } from 'devframe'
 import type { ViteDevServer } from 'vite'
 import type { FrameworkConfig } from './frameworks'
 import type { NotificationService } from './notifications'
-import type { StorybookProjectInfo } from './storybook-project'
+import type { StoryIndexService } from './story-index'
 
 /**
  * Mutable state shared between the transform plugin and the RPC handlers.
@@ -42,14 +42,34 @@ export interface CreateStorybookDevframeDeps {
   logDebug: (...args: unknown[]) => void
   state: StorybookDevframeState
   /**
-   * The user's real Storybook project info (framework package, renderer,
-   * builder, ...), read from their `.storybook/main` config. Kicked off by
-   * the host at setup without being awaited on the startup path — handlers
-   * that need it (story generation, the docs URL) await it themselves.
-   * Resolves to `null` when no Storybook config is found; callers then fall
-   * back to `framework.storybookFramework`.
+   * The Storybook framework package to write into generated stories and to
+   * pick the docs URL from: the one in the user's `.storybook/main` config,
+   * falling back to `framework.storybookFramework` when the project has no
+   * Storybook config. Resolved once per host at setup; handlers await it
+   * rather than the startup path doing so.
    */
-  storybookProject: Promise<StorybookProjectInfo | null>
+  storybookFramework: Promise<string>
+  /**
+   * Builds/serves the story index behind coverage (`src/coverage-dashboard.ts`),
+   * `check-story`, and the panel's pre-Storybook `index.json` fallback. One
+   * instance per host, constructed at setup; also carries the host's
+   * resolved Storybook project info (`storyIndexService.project`).
+   */
+  storyIndexService: StoryIndexService
+}
+
+/**
+ * The Storybook framework package for `CreateStorybookDevframeDeps`: what
+ * the user's `.storybook/main` config declares, falling back to the host
+ * framework's default when the project has no Storybook config. Hosts call
+ * this once at setup, without awaiting it there.
+ */
+export async function resolveStorybookFramework(
+  storyIndexService: StoryIndexService,
+  framework: FrameworkConfig,
+): Promise<string> {
+  const project = await storyIndexService.project
+  return project?.frameworkPackage ?? framework.storybookFramework
 }
 
 const map = new WeakMap<DevframeNodeContext, CreateStorybookDevframeDeps>()

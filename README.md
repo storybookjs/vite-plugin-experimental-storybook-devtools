@@ -280,6 +280,13 @@ buttons create one story at a time. When several instances share a
 fingerprint, the one with live prop edits is used, and the creation toast
 names which instance the story came from.
 
+Whether a component "has a story" is decided from a real Storybook story
+index built from your `stories` globs — the same matching Storybook itself
+uses, so it respects custom titles and stories living outside a component's
+own directory. If no Storybook project is found (or indexing fails), the
+index is instead synthesised from a scan for `<ComponentName>.stories.*`
+files, and coverage matches against that.
+
 ### DevTools Panel Tabs
 
 | Tab | Description |
