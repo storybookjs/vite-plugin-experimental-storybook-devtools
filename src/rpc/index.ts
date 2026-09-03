@@ -16,6 +16,7 @@ import { setProp } from './functions/set-prop'
 import { startStorybook } from './functions/start-storybook'
 import { storybookIndex } from './functions/storybook-index'
 import { storybookStatus } from './functions/storybook-status'
+import { toggleHighlightVisibility } from './functions/toggle-highlight-visibility'
 import { toggleOverlay } from './functions/toggle-overlay'
 import { visitStory } from './functions/visit-story'
 
@@ -31,6 +32,7 @@ export const serverFunctions = [
   highlightCoverageInstances,
   highlightCoverageBatch,
   setHighlightMode,
+  toggleHighlightVisibility,
   visitStory,
   selectComponent,
   notify,
@@ -56,8 +58,9 @@ declare module 'devframe' {
   interface DevframeRpcClientFunctions {
     'component-highlighter:do-scroll-to-component': (data: {
       componentName: string
-      hasStory: boolean
+      id?: string
     }) => void
+    'component-highlighter:do-toggle-highlight-visibility': () => void
     'component-highlighter:do-highlight-coverage': (
       data: { componentName: string; hasStory: boolean } | null,
     ) => void
@@ -115,5 +118,6 @@ declare module 'devframe' {
       value: SerializedRegistryInstance | null
     }
     'component-highlighter:highlighter-tab-active': { value: boolean }
+    'component-highlighter:highlights-visible': { value: boolean }
   }
 }

@@ -98,6 +98,57 @@ export async function isPanelActive(page: Page): Promise<boolean> {
   })
 }
 
+/** Move the mouse over the first instance of a component; returns its id. */
+export async function hoverComponent(page: Page, componentName: string) {
+  const id = await getHighlightIdByComponent(page, componentName)
+  expect(id).toBeTruthy()
+  const box = await page.evaluate((instanceId) => {
+    const registry = (window as any).__componentHighlighterRegistry as Map<
+      string,
+      { element?: Element }
+    >
+    const el = registry.get(instanceId!)?.element
+    el?.scrollIntoView({ block: 'center' })
+    const r = el?.getBoundingClientRect()
+    return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+  }, id)
+  expect(box).toBeTruthy()
+  await page.mouse.move(box!.x, box!.y)
+  await page.waitForTimeout(250)
+  return id!
+}
+
+export async function toggleHighlightVisibility(page: Page) {
+  await page.evaluate(() => {
+    ;(window as any).__componentHighlighterToggleVisibility?.()
+  })
+}
+
+/** Locate an instance and return the pulse rect and the instance element rect. */
+export async function locateInstance(page: Page, componentName: string, id?: string) {
+  await page.evaluate(
+    ([name, instanceId]) => {
+      ;(window as any).__componentHighlighterLocate?.(name, instanceId)
+    },
+    [componentName, id] as const,
+  )
+  await page.waitForSelector('[data-locate-pulse]')
+  return page.evaluate((instanceId) => {
+    const pulse = document.querySelector('[data-locate-pulse]') as HTMLElement
+    const registry = (window as any).__componentHighlighterRegistry as Map<
+      string,
+      { element?: Element }
+    >
+    const el = registry.get(instanceId!)?.element
+    const box = (r: DOMRect) => ({ top: Math.round(r.top), left: Math.round(r.left) })
+    return {
+      pulse: box(pulse.getBoundingClientRect()),
+      target: el ? box(el.getBoundingClientRect()) : null,
+      labelOpacity: getComputedStyle(pulse.querySelector('.ch-highlight-label')!).opacity,
+    }
+  }, id)
+}
+
 export async function isOverlayVisible(page: Page): Promise<boolean> {
   const container = page.locator('#component-highlighter-container')
   return container.isVisible().catch(() => false)

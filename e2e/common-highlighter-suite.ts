@@ -4,7 +4,11 @@ import {
   clickComponentHighlight,
   enableHighlighting,
   exerciseTaskFormInteractions,
+  hoverComponent,
   hoverTaskListHeading,
+  isHighlightActive,
+  locateInstance,
+  toggleHighlightVisibility,
   waitForCreateStoryRequest,
 } from './highlighter-helpers'
 
@@ -17,6 +21,7 @@ type TestLike = {
 
 const TARGET_COMPONENT = 'TaskList'
 const INTERACTION_COMPONENT = 'TaskForm'
+const MULTI_INSTANCE_COMPONENT = 'Badge'
 
 export function registerCommonHighlighterSuite(test: TestLike) {
   test.describe('common highlighter features', () => {
@@ -52,6 +57,48 @@ export function registerCommonHighlighterSuite(test: TestLike) {
       })
 
       expect(hasHoveredHighlight).toBe(true)
+    })
+
+    test('hide highlights hides only the selection and keeps hover/select working', async ({ page }) => {
+      const boxes = page.locator('#component-highlighter-container div[data-highlight-id]')
+      await clickComponentHighlight(page, TARGET_COMPONENT)
+      await expect(boxes).not.toHaveCount(0)
+
+      await toggleHighlightVisibility(page)
+      await expect(boxes).toHaveCount(0)
+      expect(await isHighlightActive(page)).toBe(true)
+      await expect(page.locator('[data-coverage-highlight]')).toHaveCount(0)
+
+      // Hovering a different component (outside the context menu) still
+      // draws its hover highlight.
+      const headerId = await hoverComponent(page, 'Header')
+      await expect(boxes).toHaveCount(1)
+      await expect(boxes.first()).toHaveAttribute('data-highlight-id', headerId)
+
+      await toggleHighlightVisibility(page)
+      await expect(boxes.count()).resolves.toBeGreaterThan(1)
+    })
+
+    test('locate pulses the exact selected instance, not the first match', async ({ page }) => {
+      const ids = await page.evaluate((name) => {
+        const registry = (window as any).__componentHighlighterRegistry as Map<
+          string,
+          { id: string; meta: { componentName: string } }
+        >
+        return Array.from(registry.values())
+          .filter((i) => i.meta.componentName === name)
+          .map((i) => i.id)
+      }, MULTI_INSTANCE_COMPONENT)
+      expect(ids.length).toBeGreaterThan(1)
+
+      const { pulse, target, labelOpacity } = await locateInstance(
+        page,
+        MULTI_INSTANCE_COMPONENT,
+        ids[1],
+      )
+      expect(target).not.toBeNull()
+      expect(pulse).toEqual(target)
+      expect(labelOpacity).toBe('1')
     })
 
     test('opens context menu on highlighted component click', async ({ page }) => {

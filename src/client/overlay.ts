@@ -83,6 +83,31 @@ let highlightContainer: HTMLDivElement | null = null
 let highlightElements: Map<string, HTMLDivElement> = new Map()
 let contextMenuHandle: ContextMenuHandle | null = null
 
+// Whether the selected component's persistent highlight (its own box and its
+// same-type siblings) is hidden. Toggled by the panel's "Show/Hide highlights"
+// action. Hover highlights and click-to-select keep working while hidden, and
+// selecting a different component shows highlights again.
+let highlightsHidden = false
+let onHighlightsVisibilityChange: ((visible: boolean) => void) | null = null
+let lastDraw: Parameters<typeof drawAllHighlights> | null = null
+let lastSelectedId: string | null = null
+
+/** Called with the new visible state whenever it changes (panel label sync). */
+export function setHighlightsVisibilityListener(cb: (visible: boolean) => void) {
+  onHighlightsVisibilityChange = cb
+}
+
+function setHighlightsHidden(hidden: boolean) {
+  if (highlightsHidden === hidden) return
+  highlightsHidden = hidden
+  onHighlightsVisibilityChange?.(!hidden)
+}
+
+export function toggleHighlightsHidden() {
+  setHighlightsHidden(!highlightsHidden)
+  if (lastDraw) drawAllHighlights(...lastDraw)
+}
+
 // Cache for story file existence checks
 const storyFileCache: Map<
   string,
@@ -312,6 +337,7 @@ export function drawAllHighlights(
   clickThrough: boolean,
   onHighlightClick?: (instance: ComponentInstance, e: MouseEvent) => void,
 ) {
+  lastDraw = [hoveredId, selectedId, clickThrough, onHighlightClick]
   safeOverlayCall(() =>
     drawAllHighlightsImpl(hoveredId, selectedId, clickThrough, onHighlightClick),
   )
@@ -324,6 +350,9 @@ function drawAllHighlightsImpl(
   onHighlightClick?: (instance: ComponentInstance, e: MouseEvent) => void,
 ) {
   if (!highlightContainer) return
+
+  if (selectedId && selectedId !== lastSelectedId) setHighlightsHidden(false)
+  lastSelectedId = selectedId
 
   _clickThroughActive = clickThrough
   const instances = Array.from(componentRegistry.values())
@@ -365,7 +394,7 @@ function drawAllHighlightsImpl(
 
     if (selectedId === instance.id) {
       type = 'selected'
-      shouldShow = true
+      shouldShow = !highlightsHidden
     } else if (hoveredId === instance.id) {
       type = 'hovered'
       shouldShow = true
@@ -376,7 +405,7 @@ function drawAllHighlightsImpl(
       instance.id !== hoveredId
     ) {
       type = 'sameType'
-      shouldShow = true
+      shouldShow = !(highlightsHidden && selectedId)
     }
 
     if (shouldShow) {
@@ -645,11 +674,14 @@ export function hideHoverMenu() {}
 
 export function createOverlayDOM() {
   createHighlightContainer()
+  setHighlightsHidden(false)
 }
 
 export function removeOverlayDOM() {
   clearAllHighlights()
   removeHighlightContainer()
+  lastDraw = null
+  lastSelectedId = null
 }
 
 export function setClickThroughDOM(enabled: boolean) {

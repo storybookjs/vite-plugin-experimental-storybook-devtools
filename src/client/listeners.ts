@@ -16,6 +16,8 @@ import {
   updateInstanceRects,
   pushSelectedComponentRPC,
   selectComponentById,
+  toggleHighlightsHidden,
+  setHighlightsVisibilityListener,
 } from './overlay'
 import {
   setRegistryRef,
@@ -138,8 +140,16 @@ function autoInitRpc() {
           ctx.rpc.client.register({
             name: 'component-highlighter:do-scroll-to-component',
             type: 'action',
-            handler: (data: { componentName: string; hasStory: boolean }) => {
-              scrollToComponent(data.componentName, data.hasStory)
+            handler: (data: { componentName: string; id?: string }) => {
+              scrollToComponent(data.componentName, data.id)
+            },
+          })
+
+          ctx.rpc.client.register({
+            name: 'component-highlighter:do-toggle-highlight-visibility',
+            type: 'action',
+            handler: () => {
+              toggleHighlightsHidden()
             },
           })
 
@@ -251,6 +261,17 @@ function autoInitRpc() {
         } catch {
           // Client RPC registration not supported
         }
+      }
+
+      if (ctx.rpc.sharedState) {
+        ctx.rpc.sharedState
+          .get('component-highlighter:highlights-visible')
+          .then((state: any) => {
+            highlightsVisibleState = state
+            // The value is server-global; a fresh page starts shown.
+            syncHighlightsVisible(true)
+          })
+          .catch(() => {})
       }
 
       // Subscribe to highlighter-tab-active shared state
@@ -447,6 +468,22 @@ function syncHighlighterTabActive(active: boolean) {
     .catch(() => {})
 }
 
+// Fetched once at init so later publishes are a local mutate on a cached
+// handle rather than a fresh subscription round-trip.
+let highlightsVisibleState: { mutate: (fn: (s: { value: boolean }) => void) => void } | null = null
+
+function syncHighlightsVisible(visible: boolean) {
+  // Deferred: this runs from inside a highlight-machine action, and a failed
+  // RPC send must not abort the transition.
+  queueMicrotask(() => {
+    try {
+      highlightsVisibleState?.mutate((s) => {
+        s.value = visible
+      })
+    } catch {}
+  })
+}
+
 function notifyClickThrough(enabled: boolean) {
   if (!rpcCallFn) return
   const message = enabled
@@ -634,6 +671,8 @@ function initialize() {
     { passive: true },
   )
 
+  setHighlightsVisibilityListener(syncHighlightsVisible)
+
   // Export for debugging and E2E testing
   window.__componentHighlighterRegistry = componentRegistry
 
@@ -674,6 +713,14 @@ function initialize() {
       actor.send({ type: 'PANEL_HIGHLIGHTER_DEACTIVATE' })
     }
   }
+  ;(
+    window as unknown as {
+      __componentHighlighterLocate?: (name: string, id?: string) => void
+    }
+  ).__componentHighlighterLocate = scrollToComponent
+  ;(
+    window as unknown as { __componentHighlighterToggleVisibility?: () => void }
+  ).__componentHighlighterToggleVisibility = toggleHighlightsHidden
   ;(
     window as unknown as {
       __componentHighlighterIsDockActive?: () => boolean

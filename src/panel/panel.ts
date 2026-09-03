@@ -111,6 +111,15 @@ async function initRpcClient() {
     enforceHighlightForTab(hlState.value()?.value ?? false)
     hlState.on('updated', (val: any) => enforceHighlightForTab(!!val?.value))
 
+    // The client owns overlay visibility; mirror it for the popover label.
+    const visState = await client.sharedState.get(
+      'component-highlighter:highlights-visible',
+    )
+    highlightsVisible = visState.value()?.value ?? true
+    visState.on('updated', (val: any) => {
+      highlightsVisible = val?.value ?? true
+    })
+
     // Subscribe to selected-component shared state
     const selState = await client.sharedState.get(
       'component-highlighter:selected-component',
@@ -512,7 +521,6 @@ function showActionPopover(anchor: HTMLElement, entry: CoverageEntry) {
     makePopoverItem(BULLSEYE_ICON, 'Locate component', () => {
       rpcCall('component-highlighter:scroll-to-component', {
         componentName: entry.componentName,
-        hasStory: entry.hasStory,
       }).catch(() => {})
     }),
   )
@@ -625,6 +633,7 @@ let activeTab: TabId = 'storybook'
 let coverageInterval: ReturnType<typeof setInterval> | null = null
 
 let highlightEnabled = false
+let highlightsVisible = true
 
 // devframe's built-in Terminals dock (hub-ui's dock id — not exported by
 // the package) and the Storybook session id the start-storybook RPC spawns.
@@ -1494,7 +1503,7 @@ async function buildHighlighterPanel() {
   locateBtn.addEventListener('click', () => {
     rpcCall('component-highlighter:scroll-to-component', {
       componentName: comp.meta.componentName,
-      hasStory: hasStories,
+      id: comp.id,
     }).catch(() => {})
   })
   hdrActions.appendChild(locateBtn)
@@ -1975,12 +1984,15 @@ function showHighlighterPopover(
   )
 
   popover.appendChild(
-    makePopoverItem(HIGHLIGHT_ICON, 'Toggle highlights', () => {
-      rpcCall('component-highlighter:highlight-coverage-instances', {
-        componentName: comp.meta.componentName,
-        hasStory: hasStories,
-      }).catch(() => {})
-    }),
+    makePopoverItem(
+      HIGHLIGHT_ICON,
+      highlightsVisible ? 'Hide highlights' : 'Show highlights',
+      () => {
+        rpcCall('component-highlighter:toggle-highlight-visibility').catch(
+          () => {},
+        )
+      },
+    ),
   )
 
   if (hasStories) {

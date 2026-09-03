@@ -158,6 +158,10 @@ export function createStorybookDevframe(deps: CreateStorybookDevframeDeps) {
         initialValue: { value: false },
       })
 
+      scope.rpc.sharedState('highlights-visible', {
+        initialValue: { value: true },
+      })
+
       // Which DevTools surface ('embedded' | 'standalone') is currently
       // driving — set when a surface activates the highlighter, read by the
       // panel-open/navigation handlers to route to that surface only.

@@ -149,7 +149,8 @@ function, one file per function under `src/rpc/functions/`, collected by
 | `create-story` | action | Generate and write a story file; broadcasts `story-created` |
 | `get-coverage` | query | Compute and return coverage data |
 | `push-registry-diff` | action | Client syncs registry changes to shared state |
-| `scroll-to-component` | action | Panel asks the client to scroll to a component |
+| `scroll-to-component` | action | Panel asks the client to scroll to a component instance (by `id`, else first by name) and pulse it |
+| `toggle-highlight-visibility` | action | Panel shows/hides the selected component's persistent highlight; hover and select keep working |
 | `highlight-coverage-instances` | action | Panel asks the client to show/clear coverage highlights |
 | `highlight-coverage-batch` | action | Panel asks the client to batch-highlight coverage instances |
 | `set-highlight-mode` | action | Toggle highlight mode on the client |
@@ -251,7 +252,8 @@ function, the server broadcasts, a client-registered handler acts on the DOM.
 | Server RPC (panel calls) | Client broadcast handler | Purpose |
 |--------------------------|-------------------------|---------|
 | `push-registry-diff` | — (client pushes to server) | Client syncs registry changes to shared state |
-| `scroll-to-component` | `do-scroll-to-component` | Scroll the app page to a component |
+| `scroll-to-component` | `do-scroll-to-component` | Scroll the app page to a component instance and pulse it |
+| `toggle-highlight-visibility` | `do-toggle-highlight-visibility` | Show/hide the selected component's persistent highlight |
 | `highlight-coverage-instances` | `do-highlight-coverage` | Show/clear coverage highlights |
 | `highlight-coverage-batch` | `do-highlight-coverage-batch` | Batch-highlight coverage instances (Preview button) |
 | `set-highlight-mode` | `do-set-highlight-mode` | Toggle highlight mode |
@@ -273,6 +275,7 @@ function, the server broadcasts, a client-registered handler acts on the DOM.
 | `pending-visit` | `{ relativeFilePath, preferredStoryName } \| null` | Story navigation request, consumed by the panel |
 | `pending-tab` | `string \| null` | Tab switch request, consumed by the panel |
 | `highlight-active` | `boolean` | Whether highlight mode is on |
+| `highlights-visible` | `boolean` | Whether the selected component's persistent highlight is shown; the client owns it, the panel mirrors it for the Show/Hide highlights label |
 | `selected-component` | `SerializedRegistryInstance \| null` | Currently selected component |
 | `highlighter-tab-active` | `boolean` | Whether the panel's highlighter tab is active; drives whether client clicks open the panel or the context menu |
 

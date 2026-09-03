@@ -5,7 +5,7 @@ export const scrollToComponent = defineRpcFunction({
   name: 'scroll-to-component',
   type: 'action',
   setup: (ctx) => ({
-    handler: (data: { componentName: string; hasStory: boolean }) => {
+    handler: (data: { componentName: string; id?: string }) => {
       ctx.rpc.broadcast({
         method: 'component-highlighter:do-scroll-to-component',
         args: [data],

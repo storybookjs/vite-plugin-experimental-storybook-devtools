@@ -105,30 +105,101 @@ export function showBatchCoverageHighlights(
   }
 }
 
-// ─── Scroll to component ─────────────────────────────────────────────
+// ─── Locate: scroll to a component and pulse its outline ─────────────
 
-export function scrollToComponent(componentName: string, hasStory: boolean) {
+const LOCATE_PULSE_ATTR = 'data-locate-pulse'
+// #FF4785 = --sb-color-brand, the interactive highlighter's focus color.
+const FOCUS_COLOR = '#FF4785'
+const PULSE_DURATION_MS = 1200
+const PULSE_ITERATIONS = 2
+
+function ensureLocatePulseStyle() {
+  if (document.getElementById('ch-locate-pulse-style')) return
+  const style = document.createElement('style')
+  style.id = 'ch-locate-pulse-style'
+  style.textContent = `
+    @keyframes ch-locate-pulse {
+      0%   { box-shadow: 0 0 0 2px ${FOCUS_COLOR}, 0 0 0 2px ${FOCUS_COLOR}59; }
+      70%  { box-shadow: 0 0 0 2px ${FOCUS_COLOR}, 0 0 0 18px ${FOCUS_COLOR}00; }
+      100% { box-shadow: 0 0 0 2px ${FOCUS_COLOR}00, 0 0 0 18px ${FOCUS_COLOR}00; }
+    }
+  `
+  document.head.appendChild(style)
+}
+
+/**
+ * Draw a "look here" pulse around a rect. Only the ring animates; the name
+ * label sits on a static wrapper so it does not fade with the border.
+ */
+function drawLocatePulse(rect: DOMRect, componentName: string) {
+  document.querySelectorAll(`[${LOCATE_PULSE_ATTR}]`).forEach((el) => el.remove())
+  ensureLocatePulseStyle()
+
+  const wrapper = document.createElement('div')
+  wrapper.setAttribute(LOCATE_PULSE_ATTR, 'true')
+  wrapper.style.cssText = `
+    position: fixed;
+    left: ${rect.left}px;
+    top: ${rect.top}px;
+    width: ${rect.width}px;
+    height: ${rect.height}px;
+    pointer-events: none;
+    z-index: 999999;
+  `
+  const ring = document.createElement('div')
+  ring.style.cssText = `
+    position: absolute;
+    inset: 0;
+    border-radius: 3px;
+    animation: ch-locate-pulse ${PULSE_DURATION_MS}ms ease-out ${PULSE_ITERATIONS};
+  `
+  ring.addEventListener('animationend', () => wrapper.remove())
+  wrapper.appendChild(ring)
+  attachHighlightLabel(wrapper, rect, componentName, FOCUS_COLOR)
+  document.body.appendChild(wrapper)
+}
+
+function isInView(el: Element): boolean {
+  const r = el.getBoundingClientRect()
+  return (
+    r.top >= 0 &&
+    r.left >= 0 &&
+    r.bottom <= window.innerHeight &&
+    r.right <= window.innerWidth
+  )
+}
+
+/**
+ * Scroll to a component instance and pulse it. Matches by instance `id` when
+ * given (highlighter panel, instance-level); otherwise the first instance with
+ * that component name (Coverage tab, component-level).
+ */
+export function scrollToComponent(componentName: string, id?: string) {
   if (!componentRegistry) return
 
-  for (const instance of componentRegistry.values()) {
-    if (
-      instance.meta.componentName === componentName &&
-      instance.element?.isConnected
-    ) {
-      clearCoverageHighlights()
-      instance.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-
-      // Re-highlight after scroll so overlays match new viewport positions.
-      // The panel passes the component's real story status through the
-      // scroll RPC, so the re-drawn overlay keeps its covered/missing color.
-      window.addEventListener(
-        'scrollend',
-        () => {
-          showCoverageHighlights(componentName, hasStory)
-        },
-        { once: true },
+  const instance = id
+    ? componentRegistry.get(id)
+    : Array.from(componentRegistry.values()).find(
+        (inst) => inst.meta.componentName === componentName,
       )
-      break
-    }
+  const el = instance?.element
+  if (!el?.isConnected) return
+
+  clearCoverageHighlights()
+
+  if (isInView(el)) {
+    drawLocatePulse(el.getBoundingClientRect(), componentName)
+    return
   }
+
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // Pulse once the scroll settles; the timeout covers browsers without `scrollend`.
+  let fired = false
+  const fire = () => {
+    if (fired) return
+    fired = true
+    drawLocatePulse(el.getBoundingClientRect(), componentName)
+  }
+  window.addEventListener('scrollend', fire, { once: true })
+  setTimeout(fire, 800)
 }
