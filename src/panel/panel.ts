@@ -8,6 +8,7 @@
  */
 
 import { connectDevframe, type DevframeRpcClient } from 'devframe/client'
+import { storyNameFromExport } from 'storybook/internal/csf/csf-utils'
 import { propEditability } from '../client/utils/prop-utils'
 import { createPropEditor } from '../client/utils/prop-editor'
 import {
@@ -1295,19 +1296,20 @@ async function buildCoveragePanel(coverage: CoverageData) {
 let selectedComponent: RegistryInstance | null = null
 
 /**
- * Scroll a story card into view after creation — match the requested name
- * loosely (the index title-cases it); fall back to the newest card.
+ * Scroll a story card into view after creation — match the requested export
+ * name against its Storybook-derived display name; fall back to the newest
+ * card.
  */
 function scrollToStoryCard(name?: string) {
   const cards = document.querySelectorAll<HTMLElement>('.hl-story-card')
   if (cards.length === 0) return
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
   let target: HTMLElement | undefined
   if (name) {
+    const expectedName = storyNameFromExport(name)
     target = Array.from(cards).find(
       (c) =>
-        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
-        norm(name),
+        (c.querySelector('.hl-story-label')?.textContent || '') ===
+        expectedName,
     )
   }
   const card = target ?? cards[cards.length - 1]
@@ -1395,12 +1397,12 @@ async function refreshStoriesAfterCreate(
     hdr.innerHTML = `<span class="hl-section-title">Stories <span class="cov-section-count">${stories.length}</span></span>`
   }
 
-  const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const expectedName = storyNameFromExport(requestedName)
   const target =
     Array.from(list.querySelectorAll<HTMLElement>('.hl-story-card')).find(
       (c) =>
-        norm(c.querySelector('.hl-story-label')?.textContent || '') ===
-        norm(requestedName),
+        (c.querySelector('.hl-story-label')?.textContent || '') ===
+        expectedName,
     ) ??
     appended ??
     list.lastElementChild
@@ -1771,7 +1773,7 @@ async function buildHighlighterPanel() {
           // Retry with cache busting until the index contains the NEW story —
           // a non-empty list isn't enough, pre-existing stories satisfy that
           // immediately while the indexer is still catching up.
-          const norm = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '')
+          const expectedName = storyNameFromExport(requestedName)
           for (let i = 0; i < 20; i++) {
             storybookIndexCache = null
             const stories = await findMatchingStories(
@@ -1779,8 +1781,7 @@ async function buildHighlighterPanel() {
               comp.meta.componentName,
             )
             const fresh = stories.some(
-              (st) =>
-                !preIds.has(st.id) || norm(st.name) === norm(requestedName),
+              (st) => !preIds.has(st.id) || st.name === expectedName,
             )
             if (fresh) {
               const updated = await refreshStoriesAfterCreate(
