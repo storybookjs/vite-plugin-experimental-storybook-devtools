@@ -124,6 +124,11 @@ ctx.rpc.requestTrustWithToken(token);
 ### What to verify
 
 - Coverage tab: components show correct visible/not-visible status
+- Coverage `hasStory` decision: matches a real Storybook story index
+  (custom titles, stories outside the component's directory) rather than
+  only a sibling `Name.stories.*` file; falls back to the sibling-file
+  scan when there's no Storybook project or indexing fails
+  (`src/story-index.ts`, `src/coverage-dashboard.ts`)
 - Hover on coverage rows: highlight overlays appear on app page (`[data-coverage-highlight]`)
 - Highlight toggle: `window.__componentHighlighterIsActive()` reflects state, cursor changes
 - Scroll-to-component: locate button triggers scroll via RPC

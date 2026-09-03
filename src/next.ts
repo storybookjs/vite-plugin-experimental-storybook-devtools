@@ -30,6 +30,11 @@ import { ConsoleNotificationService } from './notifications'
 import { reactFramework } from './frameworks/react'
 import { getDevToolsHookScript } from './frameworks/react/devtools-hook'
 import type { FrameworkConfig } from './frameworks/types'
+import {
+  resolveStorybookFramework,
+  type CreateStorybookDevframeDeps,
+} from './context'
+import { createStoryIndexService, type StoryIndexService } from './story-index'
 
 /** Next.js framework config: React instrumentation, `@storybook/nextjs` story output. */
 export const nextFramework: FrameworkConfig = {
@@ -179,6 +184,16 @@ interface StorybookDevtoolsNextGlobalState {
   resolvedOptions: ResolvedNextComponentHighlighterOptions | null
   state: StorybookDevframeState
   diagnostics: ChDiagnostics | null
+  /**
+   * Lazily built on first access (see `getStoryIndexService` below) — `null`
+   * until then. Kept on the `globalThis` singleton because
+   * `withStorybookDevtools` and `createStorybookDevtoolsRoute` are separate
+   * module instances within a process: sharing through it means one index
+   * per process rather than one per module instance. It does not cross
+   * process boundaries — see `PersistedComponentMap` below for state that
+   * has to.
+   */
+  storyIndexService: StoryIndexService | null
 }
 
 const GLOBAL_STATE_KEY = '__storybookDevtoolsNextGlobalState__'
@@ -283,10 +298,33 @@ function getGlobalState(): StorybookDevtoolsNextGlobalState {
         storybookStartFailure: null,
       },
       diagnostics: null,
+      storyIndexService: null,
     }
     g[GLOBAL_STATE_KEY] = existing
   }
   return existing
+}
+
+/**
+ * Lazily builds (once per `globalThis` singleton) the story index service
+ * for the Next host, memoised on `StorybookDevtoolsNextGlobalState`. Its
+ * logger reads `debugMode` off that same global state at call time, so the
+ * service behaves the same whichever module instance builds it first.
+ */
+function getStoryIndexService(
+  globalState: StorybookDevtoolsNextGlobalState,
+): StoryIndexService {
+  if (!globalState.storyIndexService) {
+    globalState.storyIndexService = createStoryIndexService({
+      cwd: process.cwd(),
+      logDebug: (...args) => {
+        if (globalState.resolvedOptions?.debugMode) {
+          console.log('[component-highlighter]', ...args)
+        }
+      },
+    })
+  }
+  return globalState.storyIndexService
 }
 
 // ─── Devtools-hook script composition ─────────────────────────────────────
@@ -516,10 +554,13 @@ export function withStorybookDevtools(
       }),
   }
 
+  const storyIndexService = getStoryIndexService(globalState)
+
   const host: ComponentHighlighterUnpluginHost = {
     isServe: () => true,
     transformedComponents: globalState.state.transformedComponents,
     getDiagnostics: () => globalState.diagnostics,
+    onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
   }
 
   const unpluginOptions: ComponentHighlighterOptions = {
@@ -631,6 +672,26 @@ export function createStorybookDevtoolsRoute(
   const devtoolsDockId = options.devtoolsDockId ?? configured.devtoolsDockId
   const debugMode = configured.debugMode
 
+  // Kicked off now, awaited later by the handlers that need it (story
+  // generation, the docs URL) — not on this synchronous route-setup path.
+  const storyIndexService = getStoryIndexService(globalState)
+
+  const deps: CreateStorybookDevframeDeps = {
+    framework: nextFramework,
+    storybookUrl,
+    writeStoryFiles,
+    storiesDir,
+    logDebug: (...args) => {
+      if (debugMode) console.log('[component-highlighter]', ...args)
+    },
+    state: globalState.state,
+    storybookFramework: resolveStorybookFramework(
+      storyIndexService,
+      nextFramework,
+    ),
+    storyIndexService,
+  }
+
   const hub = nextDevframeHub({
     base,
     ...(options.port != null ? { port: options.port } : {}),
@@ -640,24 +701,11 @@ export function createStorybookDevtoolsRoute(
     // The aggregate MCP endpoint needs the optional `@modelcontextprotocol/server`
     // peer this package doesn't declare; out of scope for the DevTools panel.
     mcp: false,
-    devframes: [
-      createStorybookDevframe({
-        framework: nextFramework,
-        storybookUrl,
-        writeStoryFiles,
-        storiesDir,
-        logDebug: (...args) => {
-          if (debugMode) console.log('[component-highlighter]', ...args)
-        },
-        state: globalState.state,
-      }),
-    ],
+    devframes: [createStorybookDevframe(deps)],
     configure: (ctx: DevframeHubContext) => {
       const { diagnostics } = registerStorybookHubSurfaces(ctx, {
-        state: globalState.state,
-        storiesDir,
+        deps,
         devtoolsDockId,
-        storybookFramework: nextFramework.storybookFramework,
         dockClientScript: {
           importFrom: CLIENT_BUNDLE_PUBLIC_PATH,
           importName: 'default',

@@ -1,5 +1,6 @@
 import { defineRpcFunction } from 'devframe'
 import { getStorybookDevframeContext } from '../../context'
+import { resolveStorybookDevCommand } from '../../storybook-launch'
 import {
   adoptStorybookSession,
   notifyStorybookFailure,
@@ -10,7 +11,7 @@ export const startStorybook = defineRpcFunction({
   name: 'start-storybook',
   type: 'action',
   setup: (ctx) => {
-    const { storybookUrl, state } = getStorybookDevframeContext(ctx)
+    const { storybookUrl, state, logDebug } = getStorybookDevframeContext(ctx)
     return {
       handler: async () => {
         if (state.storybookSession) {
@@ -32,19 +33,19 @@ export const startStorybook = defineRpcFunction({
           )
           if (stale) state.devtoolsTerminals.remove(stale)
 
+          const { command, args } = await resolveStorybookDevCommand({
+            cwd: ctx.cwd,
+            port: new URL(storybookUrl).port || '6006',
+            logDebug,
+          })
+
           // A PTY session: the Terminals dock renders it writable, so
           // interactive prompts (e.g. Storybook's port-conflict question)
           // can actually be answered, and the process sees a real TTY.
           const session = await state.devtoolsTerminals.startPtySession(
             {
-              command: 'npx',
-              args: [
-                'storybook',
-                'dev',
-                '-p',
-                new URL(storybookUrl).port || '6006',
-                '--no-open',
-              ],
+              command,
+              args,
               cwd: ctx.cwd,
               // Same env the playgrounds' own `storybook` scripts set: app
               // bundler configs use it to keep this plugin out of

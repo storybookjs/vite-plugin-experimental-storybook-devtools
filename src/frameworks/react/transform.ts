@@ -14,15 +14,11 @@
  */
 
 // @ts-nocheck
-import { parse } from '@babel/parser'
-import traverseModule from '@babel/traverse'
-import generatorModule from '@babel/generator'
-import * as t from '@babel/types'
+import { parser, traverse, generate, types as t } from 'storybook/internal/babel'
 import * as path from 'path'
 import type { TransformFunction, TransformOptions } from '../types'
 
-const traverse = (traverseModule as any).default ?? traverseModule
-const generate = (generatorModule as any).default ?? generatorModule
+const parse = parser.parse
 
 function createHash(data: string): string {
   let hash = 0
