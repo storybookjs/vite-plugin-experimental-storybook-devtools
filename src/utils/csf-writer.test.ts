@@ -86,5 +86,52 @@ export const Primary = { args: { label: 'Hello' } };
     expect(result.exportName).toBe('Primary2')
     expect(result.code).toContain('export const Primary2: Story = {')
   })
+
+  it('does not merge a value specifier into a type-only import', async () => {
+    const existingCode = csf3.replace(
+      "import { Button } from './Button';",
+      "import { Button } from './Button';\nimport type { fn } from 'storybook/test';",
+    )
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode,
+      requiredImports: [{ source: 'storybook/test', specifiers: ['fn'] }],
+    })
+
+    expect(result.fallbackReason).toBeUndefined()
+    expect(result.code).toContain("import type { fn } from 'storybook/test';")
+    expect(result.code).toContain("import { fn } from 'storybook/test';")
+  })
+
+  it('inserts a separate import type when the request is typeOnly and only a value import exists', async () => {
+    const existingCode = csf3.replace(
+      "import { Button } from './Button';",
+      "import { Button } from './Button';\nimport { fn } from 'storybook/test';",
+    )
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode,
+      requiredImports: [
+        { source: 'storybook/test', specifiers: ['Mock'], typeOnly: true },
+      ],
+    })
+
+    expect(result.fallbackReason).toBeUndefined()
+    expect(result.code).toContain("import { fn } from 'storybook/test';")
+    expect(result.code).toContain(
+      "import type { Mock } from 'storybook/test';",
+    )
+  })
+
+  it('round-trips CRLF line endings, including the appended story', async () => {
+    const crlfCsf = csf3.replace(/\n/g, '\r\n')
+    const result = await writeStoryIntoCsf({ ...base, existingCode: crlfCsf })
+
+    expect(result.fallbackReason).toBeUndefined()
+    expect(result.code).toContain('\r\n')
+    expect(result.code).not.toMatch(/\r\r\n/)
+    expect(result.code.replace(/\r\n/g, '\n')).not.toContain('\r')
+    expect(result.code).toContain('export const Primary: Story = {\r\n')
+  })
 })
 

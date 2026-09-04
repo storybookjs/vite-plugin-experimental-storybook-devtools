@@ -9,12 +9,18 @@
  * `story-generator.ts`: csf-tools has no equivalent, its `save-story` flow
  * serialises already-typed args rather than arbitrary runtime values.
  *
- * `storybook/internal/csf-tools` is imported lazily so it never lands in
- * Next's server webpack bundle — see `src/story-index.ts` for the same
- * `webpackIgnore` reasoning.
+ * `storybook/internal/csf-tools` and `storybook/internal/babel` are both
+ * imported lazily so neither lands in Next's server webpack bundle — see
+ * `src/story-index.ts` for the `webpackIgnore` reasoning. They also have to
+ * come from the same module instance: csf-tools prints the file with recast,
+ * which reprints only nodes it recognises as unchanged and asserts on the
+ * rest, so an AST assembled from a bundled Babel copy and printed by the
+ * native one fails the whole AST path.
  */
-import { babelParse, types as t } from 'storybook/internal/babel'
+import type { types as t } from 'storybook/internal/babel'
 import { escapeRegex } from './story-generator'
+
+type BabelTypes = typeof t
 
 export interface CsfImportRequest {
   /** Module specifier, e.g. `storybook/test` or `./Button`. */
@@ -48,6 +54,16 @@ export interface CsfWriteResult {
   fallbackReason?: string
 }
 
+/**
+ * Recast (the AST path) and the regex fallback both work in LF and only
+ * emit '\n'. Convert back to '\r\n' when the original file used it, without
+ * doubling any '\r\n' the printer already reproduced verbatim from source.
+ */
+function restoreCrlf(code: string, originalCode: string): string {
+  if (!originalCode.includes('\r\n')) return code
+  return code.replace(/\r?\n/g, '\r\n')
+}
+
 /** Pick the quote style recast should use for nodes it has to print fresh. */
 function detectQuoteStyle(code: string): 'single' | 'double' {
   const single = (code.match(/from '[^']*'/g) ?? []).length
@@ -63,7 +79,7 @@ function uniqueExportName(taken: Set<string>, desired: string): string {
 }
 
 /** Every top-level binding a file already declares, imports included. */
-function collectTopLevelBindings(program: t.Program): Set<string> {
+function collectTopLevelBindings(t: BabelTypes, program: t.Program): Set<string> {
   const names = new Set<string>()
   const addPattern = (node: t.Node): void => {
     if (t.isIdentifier(node)) names.add(node.name)
@@ -99,7 +115,11 @@ function collectTopLevelBindings(program: t.Program): Set<string> {
 }
 
 /** Ensure `request`'s bindings exist, extending a matching import when there is one. */
-function mergeImport(program: t.Program, request: CsfImportRequest): void {
+function mergeImport(
+  t: BabelTypes,
+  program: t.Program,
+  request: CsfImportRequest,
+): void {
   const wanted = request.specifiers ?? []
   const existing = program.body.filter(
     (node): node is t.ImportDeclaration =>
@@ -112,6 +132,7 @@ function mergeImport(program: t.Program, request: CsfImportRequest): void {
     )
     if (!hasDefault) {
       insertImport(
+        t,
         program,
         t.importDeclaration(
           [t.importDefaultSpecifier(t.identifier(request.defaultSpecifier))],
@@ -123,17 +144,29 @@ function mergeImport(program: t.Program, request: CsfImportRequest): void {
 
   if (wanted.length === 0) return
 
+  // A value specifier spliced into a type-only import is erased at
+  // runtime, and a type specifier belongs with other type-only imports —
+  // so only imports of the matching kind count as declaring a name or
+  // qualify as a merge target.
+  const matchesKind = (node: t.ImportDeclaration): boolean =>
+    request.typeOnly
+      ? node.importKind === 'type'
+      : node.importKind !== 'type'
+
   const declared = new Set<string>()
   for (const node of existing) {
+    if (!matchesKind(node)) continue
     for (const specifier of node.specifiers) {
-      if (t.isImportSpecifier(specifier)) declared.add(specifier.local.name)
+      if (t.isImportSpecifier(specifier) && specifier.importKind !== 'type') {
+        declared.add(specifier.local.name)
+      }
     }
   }
   const missing = wanted.filter((name) => !declared.has(name))
   if (missing.length === 0) return
 
-  const target = existing.find((node) =>
-    node.specifiers.some((s) => t.isImportSpecifier(s)),
+  const target = existing.find(
+    (node) => matchesKind(node) && node.specifiers.some((s) => t.isImportSpecifier(s)),
   )
   if (target) {
     for (const name of missing) {
@@ -151,10 +184,14 @@ function mergeImport(program: t.Program, request: CsfImportRequest): void {
     t.stringLiteral(request.source),
   )
   if (request.typeOnly) declaration.importKind = 'type'
-  insertImport(program, declaration)
+  insertImport(t, program, declaration)
 }
 
-function insertImport(program: t.Program, declaration: t.ImportDeclaration): void {
+function insertImport(
+  t: BabelTypes,
+  program: t.Program,
+  declaration: t.ImportDeclaration,
+): void {
   let lastImport = -1
   program.body.forEach((node, index) => {
     if (t.isImportDeclaration(node)) lastImport = index
@@ -163,7 +200,12 @@ function insertImport(program: t.Program, declaration: t.ImportDeclaration): voi
 }
 
 /** Rename the single declarator/function the snippet exports. */
-function renameExport(program: t.Program, from: string, to: string): void {
+function renameExport(
+  t: BabelTypes,
+  program: t.Program,
+  from: string,
+  to: string,
+): void {
   if (from === to) return
   for (const statement of program.body) {
     if (!t.isExportNamedDeclaration(statement)) continue
@@ -193,33 +235,35 @@ export async function writeStoryIntoCsf(
   const { existingCode, fileName, desiredExportName } = request
 
   try {
-    const { loadCsf, printCsf } = await import(
-      /* webpackIgnore: true */ 'storybook/internal/csf-tools'
-    )
+    const [{ loadCsf, printCsf }, { babelParse, types: t }] = await Promise.all([
+      import(/* webpackIgnore: true */ 'storybook/internal/csf-tools'),
+      import(/* webpackIgnore: true */ 'storybook/internal/babel'),
+    ])
     const csf = loadCsf(existingCode, {
       makeTitle: (userTitle: string) => userTitle || 'Auto',
       fileName,
     }).parse()
 
     const program = csf._ast.program
-    const taken = collectTopLevelBindings(program)
+    const taken = collectTopLevelBindings(t, program)
     for (const name of Object.keys(csf._storyExports)) taken.add(name)
     const exportName = uniqueExportName(taken, desiredExportName)
 
     for (const importRequest of request.requiredImports) {
-      mergeImport(program, importRequest)
+      mergeImport(t, program, importRequest)
     }
 
     // Two leading newlines put exactly one blank line between the last
     // existing statement and the appended story; recast derives inter-node
     // spacing from the snippet's own line numbers.
     const snippet = babelParse(`\n\n${request.storyExportSource.trimStart()}`)
-    renameExport(snippet.program, desiredExportName, exportName)
+    renameExport(t, snippet.program, desiredExportName, exportName)
     program.body.push(...snippet.program.body)
 
     const { code } = printCsf(csf, { quote: detectQuoteStyle(existingCode) })
+    const withTrailingNewline = code.endsWith('\n') ? code : `${code}\n`
     return {
-      code: code.endsWith('\n') ? code : `${code}\n`,
+      code: restoreCrlf(withTrailingNewline, existingCode),
       exportName,
     }
   } catch (error) {
@@ -300,7 +344,7 @@ function appendWithRegex(
   )
 
   return {
-    code: `${updated.trimEnd()}\n\n${story.trim()}\n`,
+    code: restoreCrlf(`${updated.trimEnd()}\n\n${story.trim()}\n`, code),
     exportName,
   }
 }
