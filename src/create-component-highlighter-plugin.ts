@@ -13,7 +13,7 @@ import {
   type CreateStorybookDevframeDeps,
   type StorybookDevframeState,
 } from './context'
-import { createStoryIndexService } from './story-index'
+import { createStoryIndexService, type StoryIndexService } from './story-index'
 import {
   createComponentHighlighterUnplugin,
   getComponentHighlighterRuntimePaths,
@@ -146,16 +146,13 @@ export function createComponentHighlighterPlugin(
 
   const runtimePaths = getComponentHighlighterRuntimePaths(framework)
 
-  // Kicked off now, awaited later by the handlers that need it (story
-  // generation, the docs URL) — not on this synchronous plugin-setup path.
-  const storyIndexService = createStoryIndexService({
-    cwd: process.cwd(),
-    logDebug,
-  })
-  const storybookFramework = resolveStorybookFramework(
-    storyIndexService,
-    framework,
-  )
+  // The plugin factory runs before Vite resolves `root` (a monorepo with
+  // `root` set, or a Nuxt-driven Vite context, means `process.cwd()` is not
+  // the app root). Built in `configResolved` below, once `config.root` is
+  // known, instead of here — `.storybook` lookup, the scan fallback, and
+  // every importPath-relative path the service produces depend on it.
+  let storyIndexService: StoryIndexService | undefined
+  let storybookFrameworkPromise: Promise<string> | undefined
 
   const {
     devtoolsDockId = 'component-highlighter',
@@ -201,7 +198,10 @@ export function createComponentHighlighterPlugin(
     transformedComponents: state.transformedComponents,
     getDiagnostics: () => chDiagnostics,
     getBase: () => resolvedBase,
-    onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
+    onStoryFileChange: (filePath, event) =>
+      storyIndexService?.invalidate(filePath, {
+        removed: event === 'delete',
+      }),
   }
 
   // The unplugin-produced Vite plugin carries the portable hooks: transform
@@ -220,6 +220,14 @@ export function createComponentHighlighterPlugin(
       isServe = config.command === 'serve'
       resolvedBase = config.base || '/'
       cspNonce = (config as { html?: { cspNonce?: string } }).html?.cspNonce
+      storyIndexService = createStoryIndexService({
+        cwd: path.resolve(config.root),
+        logDebug,
+      })
+      storybookFrameworkPromise = resolveStorybookFramework(
+        storyIndexService,
+        framework,
+      )
     },
     config: (viteConfig) => {
       viteConfig.optimizeDeps ??= {}
@@ -371,6 +379,12 @@ export function createComponentHighlighterPlugin(
     },
   }
 
+  // `deps` is captured by reference (`setStorybookDevframeContext`) well
+  // before `configResolved` runs, but every consumer reads
+  // `storyIndexService`/`storybookFramework` later, at RPC-handler time —
+  // long after `configResolved` has assigned the variables above. Getters
+  // read the current value at that later access time instead of the
+  // `undefined` one available when this object literal is built.
   const deps: CreateStorybookDevframeDeps = {
     framework,
     storybookUrl,
@@ -378,8 +392,20 @@ export function createComponentHighlighterPlugin(
     storiesDir,
     logDebug,
     state,
-    storybookFramework,
-    storyIndexService,
+    get storybookFramework() {
+      return (
+        storybookFrameworkPromise ??
+        Promise.resolve(framework.storybookFramework)
+      )
+    },
+    get storyIndexService() {
+      if (!storyIndexService) {
+        throw new Error(
+          '[component-highlighter] storyIndexService accessed before configResolved ran',
+        )
+      }
+      return storyIndexService
+    },
   }
 
   const definition = createStorybookDevframe(deps)

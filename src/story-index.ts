@@ -23,6 +23,7 @@ import type { IndexerOptions } from 'storybook/internal/types'
 import type { StoryIndexGenerator } from 'storybook/internal/core-server'
 import {
   resolveStorybookProject,
+  invalidateStorybookProject,
   type StorybookProjectInfo,
 } from './storybook-project'
 import type { StoryIndexEntryLike } from './utils/story-matching'
@@ -56,9 +57,12 @@ export interface StoryIndexService {
   /**
    * Marks the index stale so the next `getIndex()` call rebuilds it.
    * `filePath` narrows the rebuild to one story file when the generator is
-   * already built; omit it to force a full rebuild.
+   * already built; omit it to force a full rebuild. Pass `removed: true`
+   * when the file no longer exists so its entries are dropped instead of
+   * re-read — re-reading a missing file fails the whole index cycle and the
+   * stale entries would survive.
    */
-  invalidate(filePath?: string): void
+  invalidate(filePath?: string, options?: { removed?: boolean }): void
 }
 
 /** Directories the fallback scan never descends into. */
@@ -80,11 +84,14 @@ export function createStoryIndexService(
   options: StoryIndexServiceOptions,
 ): StoryIndexService {
   const { cwd, logDebug } = options
-  const project = resolveStorybookProject(cwd)
+  // Reassigned on a full rebuild — see `invalidate()` below — so a fixed or
+  // newly-added `.storybook` config is picked up without a process restart.
+  let project = resolveStorybookProject(cwd, logDebug)
 
   let generatorPromise: Promise<StoryIndexGenerator | undefined> | undefined
   let generatorMissing = false
-  let pending: Set<string> | 'all' = new Set()
+  /** Story files to invalidate on the next `getIndex()`, keyed to whether each was removed. */
+  let pending: Map<string, boolean> | 'all' = new Map()
   let scanned: StoryIndex | undefined
   let lastIndex: StoryIndex | undefined
   let lastIndexError: string | undefined
@@ -130,6 +137,14 @@ export function createStoryIndexService(
             fileName,
           }).parse().indexInputs,
       }
+
+      // `StoryIndexGenerator.findMatchingFilesCache` is a static Map shared
+      // by every instance in the process, keyed on the stories specifier and
+      // working dir — not on the instance. A second service built in the
+      // same process (a dev-server restart, or a second host/context) would
+      // otherwise inherit the first instance's file list, missing any story
+      // file created or deleted in between.
+      StoryIndexGeneratorClass.clearFindMatchingFilesCache()
 
       const gen = new StoryIndexGeneratorClass(specs, {
         workingDir,
@@ -210,7 +225,9 @@ export function createStoryIndexService(
 
   return {
     cwd,
-    project,
+    get project() {
+      return project
+    },
     async getIndex() {
       const generator = await ensureGenerator()
       if (!generator) return scanIndex()
@@ -221,9 +238,9 @@ export function createStoryIndexService(
       if (pending === 'all') {
         generator.invalidateAll()
       } else {
-        for (const filePath of pending) {
+        for (const [filePath, removed] of pending) {
           try {
-            generator.invalidate(toImportPath(filePath), false)
+            generator.invalidate(toImportPath(filePath), removed)
           } catch (error) {
             logDebug(
               '[story-index] invalidate() failed for',
@@ -233,7 +250,7 @@ export function createStoryIndexService(
           }
         }
       }
-      pending = new Set()
+      pending = new Map()
 
       try {
         lastIndex = (await generator.getIndex()) as StoryIndex
@@ -256,20 +273,32 @@ export function createStoryIndexService(
         return lastIndex ?? scanIndex()
       }
     },
-    invalidate(filePath?: string) {
+    invalidate(filePath?: string, options?: { removed?: boolean }) {
       scanned = undefined
       if (generatorMissing) {
         // A fresh build indexes every file, so queued per-file
-        // invalidations have nothing left to apply to.
+        // invalidations have nothing left to apply to. Re-resolve the
+        // project too: the generator was missing because there was no
+        // project (or it failed to build), and either can have changed
+        // since — a `.storybook` config added or fixed since the last
+        // attempt should be picked up here rather than staying stale.
         generatorPromise = undefined
-        pending = new Set()
+        pending = new Map()
+        invalidateStorybookProject(cwd)
+        project = resolveStorybookProject(cwd, logDebug)
         return
       }
       if (!filePath) {
+        // A full rebuild: also re-resolve the project, so a `.storybook`
+        // config edited since the last resolve (a stale error case aside —
+        // `resolveStorybookProject` itself never caches a transient failure)
+        // is reflected before the generator rebuilds against it.
         pending = 'all'
+        invalidateStorybookProject(cwd)
+        project = resolveStorybookProject(cwd, logDebug)
         return
       }
-      if (pending !== 'all') pending.add(filePath)
+      if (pending !== 'all') pending.set(filePath, options?.removed ?? false)
     },
   }
 }

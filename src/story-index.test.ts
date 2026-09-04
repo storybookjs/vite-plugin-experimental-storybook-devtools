@@ -85,6 +85,93 @@ export const Default: Story = {}
     )
   })
 
+  it('drops a deleted story file from the index after invalidate(path, { removed: true })', async () => {
+    const service = createStoryIndexService({
+      cwd: reactPlayground,
+      logDebug: () => {},
+    })
+    await service.getIndex()
+
+    const storyPath = path.join(
+      reactPlayground,
+      'src/components/StoryIndexDeletedWidget.stories.tsx',
+    )
+    writtenFiles.push(storyPath)
+    fs.writeFileSync(
+      storyPath,
+      `import type { Meta, StoryObj } from '@storybook/react-vite'
+
+const StoryIndexDeletedWidget = () => null
+
+const meta: Meta<typeof StoryIndexDeletedWidget> = {
+  title: 'Components/StoryIndexDeletedWidget',
+  component: StoryIndexDeletedWidget,
+}
+export default meta
+type Story = StoryObj<typeof StoryIndexDeletedWidget>
+
+export const Default: Story = {}
+`,
+    )
+    service.invalidate(storyPath)
+    const withFile = await service.getIndex()
+    expect(Object.keys(withFile.entries)).toContain(
+      'components-storyindexdeletedwidget--default',
+    )
+
+    fs.rmSync(storyPath)
+    service.invalidate(storyPath, { removed: true })
+    const after = await service.getIndex()
+
+    expect(Object.keys(after.entries)).not.toContain(
+      'components-storyindexdeletedwidget--default',
+    )
+  })
+
+  it('a second service in the same process sees a story file created between it and the first', async () => {
+    const first = createStoryIndexService({
+      cwd: reactPlayground,
+      logDebug: () => {},
+    })
+    await first.getIndex()
+
+    const newStoryPath = path.join(
+      reactPlayground,
+      'src/components/StoryIndexSecondServiceWidget.stories.tsx',
+    )
+    writtenFiles.push(newStoryPath)
+    fs.writeFileSync(
+      newStoryPath,
+      `import type { Meta, StoryObj } from '@storybook/react-vite'
+
+const StoryIndexSecondServiceWidget = () => null
+
+const meta: Meta<typeof StoryIndexSecondServiceWidget> = {
+  title: 'Components/StoryIndexSecondServiceWidget',
+  component: StoryIndexSecondServiceWidget,
+}
+export default meta
+type Story = StoryObj<typeof StoryIndexSecondServiceWidget>
+
+export const Default: Story = {}
+`,
+    )
+
+    // A second, freshly constructed service for the same cwd — no
+    // invalidate() call, so it can only see the new file if its own
+    // `StoryIndexGenerator.initialize()` scan picks it up rather than
+    // reusing the first instance's cached file list.
+    const second = createStoryIndexService({
+      cwd: reactPlayground,
+      logDebug: () => {},
+    })
+    const index = await second.getIndex()
+
+    expect(Object.keys(index.entries)).toContain(
+      'components-storyindexsecondservicewidget--default',
+    )
+  })
+
   describe('file-scan fallback (no Storybook project)', () => {
     it('synthesises an entry for a story file sitting next to its component', async () => {
       const projectRoot = makeTmpProject()

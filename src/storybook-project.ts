@@ -31,25 +31,55 @@ export interface StorybookProjectInfo {
 
 const projectCache = new Map<string, Promise<StorybookProjectInfo | null>>()
 
+/** Marks a `loadStorybookProject` failure that isn't a missing config — see `resolveStorybookProject`. */
+const TRANSIENT_FAILURE = Symbol('storybook-project-transient-failure')
+
 /**
  * Resolves the user's Storybook project info for `cwd`, memoised per cwd.
  * Returns `null` when no Storybook main config is found — absence of a
  * config is not an error, callers fall back to their own defaults.
+ *
+ * Only that "no config" case is cached as `null`. Any other failure (a
+ * `.storybook/main` that exists but momentarily fails to parse or evaluate,
+ * for instance) is not cached — the next call re-reads the config from
+ * disk instead of repeating the same failure forever.
  */
 export function resolveStorybookProject(
   cwd: string,
+  logDebug?: (...args: unknown[]) => void,
 ): Promise<StorybookProjectInfo | null> {
   const cached = projectCache.get(cwd)
   if (cached) return cached
 
-  const promise = loadStorybookProject(cwd)
+  const promise: Promise<StorybookProjectInfo | null> = loadStorybookProject(
+    cwd,
+    logDebug,
+  ).then((result) => {
+    if (result === TRANSIENT_FAILURE) {
+      projectCache.delete(cwd)
+      return null
+    }
+    return result
+  })
   projectCache.set(cwd, promise)
   return promise
 }
 
+/**
+ * Drops the memoised project for `cwd`, so the next `resolveStorybookProject`
+ * call re-reads the config from disk instead of serving the old memo. Used
+ * when the story-index service rebuilds from scratch — a project that gains
+ * a `.storybook` config, or fixes a broken one, is picked up without a
+ * process restart.
+ */
+export function invalidateStorybookProject(cwd: string): void {
+  projectCache.delete(cwd)
+}
+
 async function loadStorybookProject(
   cwd: string,
-): Promise<StorybookProjectInfo | null> {
+  logDebug?: (...args: unknown[]) => void,
+): Promise<StorybookProjectInfo | null | typeof TRANSIENT_FAILURE> {
   try {
     // `webpackIgnore` keeps this off Next's server webpack bundle — a
     // string-literal dynamic import is otherwise still statically bundled
@@ -73,28 +103,41 @@ async function loadStorybookProject(
         : [],
       addons: info.addons ?? [],
     }
-  } catch {
-    // getStorybookInfo throws (invariant) when no main config is found
-    // under the given configDir — that's the common "not a Storybook
-    // project" case here, not a failure worth surfacing.
-    return null
+  } catch (error) {
+    // `webpackIgnore` — see the import above.
+    const { MainFileMissingError } = await import(
+      /* webpackIgnore: true */ 'storybook/internal/server-errors'
+    )
+    if (error instanceof MainFileMissingError) {
+      // No `main.*` file under the given configDir — the common "not a
+      // Storybook project" case here, not a failure worth surfacing.
+      return null
+    }
+    // Any other error (a config that exists but fails to evaluate, for
+    // instance) is worth logging but not caching — see `resolveStorybookProject`.
+    logDebug?.(
+      '[storybook-project] Failed to resolve the Storybook project config for',
+      cwd,
+      error instanceof Error ? error.message : String(error),
+    )
+    return TRANSIENT_FAILURE
   }
 }
 
-let resolvedRoot: { value: string | undefined } | undefined
+const resolvedRoots = new Map<string, string | undefined>()
 
 /**
  * Resolves the repository root the way Storybook itself does: the
  * `STORYBOOK_PROJECT_ROOT` env override, else the nearest ancestor under
  * version control, else the nearest ancestor with a workspace manifest or
- * lockfile. Memoised process-wide since the result can't change within a
- * single run.
+ * lockfile. Memoised per `process.cwd()` since the result can't change
+ * within a single run for a given cwd — but a process can still call this
+ * from more than one cwd (e.g. Nuxt's client + SSR Vite contexts, each
+ * started from their own directory).
  *
  * `getProjectRoot` takes no `cwd` argument — it always resolves against the
- * real `process.cwd()` at call time, not a caller-supplied directory — so
- * this only makes sense for hosts that run with the repo's own `cwd` (true
- * for every host in this package; each starts its dev server from the
- * project root).
+ * real `process.cwd()` at call time, not a caller-supplied directory — which
+ * is why the memo is keyed on `process.cwd()` rather than on a parameter.
  *
  * Synchronous because its one call site (`createStorybookDevframe`) builds
  * its result synchronously and has no async entry point to await from: a
@@ -105,16 +148,19 @@ let resolvedRoot: { value: string | undefined } | undefined
  * sync access.
  */
 export function resolveProjectRootSync(): string | undefined {
-  if (resolvedRoot) return resolvedRoot.value
+  const cwd = process.cwd()
+  if (resolvedRoots.has(cwd)) return resolvedRoots.get(cwd)
 
+  let root: string | undefined
   try {
     const require = createRequire(import.meta.url)
     const { getProjectRoot } = require('storybook/internal/common') as {
       getProjectRoot: () => string
     }
-    resolvedRoot = { value: getProjectRoot() }
+    root = getProjectRoot()
   } catch {
-    resolvedRoot = { value: undefined }
+    root = undefined
   }
-  return resolvedRoot.value
+  resolvedRoots.set(cwd, root)
+  return root
 }
