@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { resolveStorybookDevCommand } from './storybook-launch'
+import {
+  buildStorybookEnv,
+  resolveStorybookDevCommand,
+} from './storybook-launch'
 
 describe('resolveStorybookDevCommand', () => {
   it('detects this repo as pnpm and defers to its getPackageCommand', async () => {
@@ -74,5 +77,33 @@ describe('resolveStorybookDevCommand', () => {
 
     vi.doUnmock('storybook/internal/common')
     vi.resetModules()
+  })
+})
+
+describe('buildStorybookEnv', () => {
+  it('sets STORYBOOK=true and pins PORT to the Storybook port over the host dev server value', () => {
+    const env = buildStorybookEnv(
+      {
+        PATH: '/usr/bin',
+        PORT: '5178',
+        NODE_ENV: 'development',
+        UNSET: undefined,
+      },
+      '6006',
+    )
+
+    expect(env).toEqual({
+      PATH: '/usr/bin',
+      NODE_ENV: 'development',
+      STORYBOOK: 'true',
+      PORT: '6006',
+    })
+  })
+
+  it('overrides an inherited STORYBOOK value', () => {
+    expect(buildStorybookEnv({ STORYBOOK: 'false' }, '6006')).toEqual({
+      STORYBOOK: 'true',
+      PORT: '6006',
+    })
   })
 })

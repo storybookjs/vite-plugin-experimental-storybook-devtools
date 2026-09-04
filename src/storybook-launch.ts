@@ -64,3 +64,28 @@ export async function resolveStorybookDevCommand({
     return NPX_FALLBACK(port)
   }
 }
+
+/**
+ * Environment for the spawned Storybook process: the host dev server's own
+ * env (so PATH, package-manager and Node settings carry over) with
+ * `STORYBOOK=true` set — the playgrounds' bundler configs read it to keep
+ * this plugin out of Storybook's builder, which loads the same config file
+ * — and `PORT` pinned to Storybook's port. Storybook's CLI lets a `PORT` env
+ * var override `-p`, and Next's dev server exports its own port under that
+ * name, so an inherited value makes the child bind the app's port and never
+ * come up at `storybookUrl`. Pinned rather than deleted because the PTY host
+ * layers the caller's env over its own copy of `process.env`, so only an
+ * explicit value can displace the inherited one.
+ */
+export function buildStorybookEnv(
+  base: NodeJS.ProcessEnv,
+  port: string,
+): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (value !== undefined) env[key] = value
+  }
+  env['STORYBOOK'] = 'true'
+  env['PORT'] = port
+  return env
+}

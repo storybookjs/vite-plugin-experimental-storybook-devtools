@@ -1,6 +1,9 @@
 import { defineRpcFunction } from 'devframe'
 import { getStorybookDevframeContext } from '../../context'
-import { resolveStorybookDevCommand } from '../../storybook-launch'
+import {
+  buildStorybookEnv,
+  resolveStorybookDevCommand,
+} from '../../storybook-launch'
 import {
   adoptStorybookSession,
   notifyStorybookFailure,
@@ -33,9 +36,10 @@ export const startStorybook = defineRpcFunction({
           )
           if (stale) state.devtoolsTerminals.remove(stale)
 
+          const port = new URL(storybookUrl).port || '6006'
           const { command, args } = await resolveStorybookDevCommand({
             cwd: ctx.cwd,
-            port: new URL(storybookUrl).port || '6006',
+            port,
             logDebug,
           })
 
@@ -47,13 +51,7 @@ export const startStorybook = defineRpcFunction({
               command,
               args,
               cwd: ctx.cwd,
-              // Same env the playgrounds' own `storybook` scripts set: app
-              // bundler configs use it to keep this plugin out of
-              // Storybook's builder (which loads the same config file).
-              env: { ...process.env, STORYBOOK: 'true' } as Record<
-                string,
-                string
-              >,
+              env: buildStorybookEnv(process.env, port),
             },
             {
               id: STORYBOOK_SESSION_ID,
