@@ -19,6 +19,7 @@ import type { TransformIssue } from './frameworks/types'
 import type { ComponentHighlighterOptions } from './create-component-highlighter-plugin'
 import { normalizeRuntimeImports } from './utils/normalize-runtime-imports'
 import { STORY_EXCLUDE_GLOBS, STORY_FILE_PATTERN } from './utils/story-files'
+import { assertStorybookPeer } from './storybook-peer'
 
 /** Structured diagnostics dispatch, registered by the DevTools kit (see `kitSetup` in the Vite adapter). Not part of unplugin's or devframe's portable context. */
 export type ChDiagnostics = {
@@ -389,6 +390,10 @@ export function createComponentHighlighterUnplugin(
   options: ComponentHighlighterOptions,
   host: ComponentHighlighterUnpluginHost,
 ) {
+  // Every host builds its plugin through here at config-load time, so a
+  // missing or too-old `storybook` peer is reported once, up front, rather
+  // than at the first transform or RPC that needs one of its internals.
+  assertStorybookPeer()
   return createUnplugin(() =>
     buildComponentHighlighterUnpluginOptions(framework, options, host),
   )
