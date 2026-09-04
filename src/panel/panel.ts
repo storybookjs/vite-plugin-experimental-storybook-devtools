@@ -696,6 +696,21 @@ type SbStartFailure = { code: number | null; detail?: string | null }
 type SbStatus = {
   running: boolean
   startFailure?: SbStartFailure | null | undefined
+  /** Whether the host has a Terminals dock the Storybook session can be opened in. */
+  terminalDockAvailable?: boolean
+}
+
+/**
+ * Last known answer from `storybook-status`: only the Vite host registers
+ * the Terminals dock, so "Open Terminal" buttons are rendered only when the
+ * host reported one — an unavailable action is left out of the DOM.
+ */
+let terminalDockAvailable = false
+
+function openTerminalButton(id: string): string {
+  return terminalDockAvailable
+    ? `<button class="start-btn" id="${id}">Open Terminal</button>`
+    : ''
 }
 
 function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
@@ -729,7 +744,7 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
         <div class="sb-state">
           <div class="spinner"></div>
           <div class="msg">Starting Storybook\u2026</div>
-          <button class="start-btn" id="sb-viewlog-btn">Open Terminal</button>
+          ${openTerminalButton('sb-viewlog-btn')}
         </div>`
       document
         .getElementById('sb-viewlog-btn')
@@ -752,7 +767,7 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
               : ''
           }
           <div class="btn-row">
-            <button class="start-btn" id="sb-error-btn">Open Terminal</button>
+            ${openTerminalButton('sb-error-btn')}
             <button class="start-btn" id="sb-retry-btn">Try again</button>
           </div>
         </div>`
@@ -768,7 +783,8 @@ function renderStorybookState(state: SbState, failure?: SbStartFailure | null) {
 
 /**
  * Put the Storybook pane into its failed state — the failure detail lives
- * in the Terminals dock's Storybook session, a click away via its button.
+ * in the Terminals dock's Storybook session, a click away via its button on
+ * hosts that have that dock.
  */
 function markStorybookStartFailed(failure: SbStartFailure | null | undefined) {
   renderStorybookState('failed', failure)
@@ -780,6 +796,7 @@ async function getStorybookStatus(): Promise<SbStatus> {
     const data = (await rpcCall(
       'component-highlighter:storybook-status',
     )) as SbStatus
+    terminalDockAvailable = data.terminalDockAvailable === true
     return { running: data.running === true, startFailure: data.startFailure }
   } catch {
     return { running: false }

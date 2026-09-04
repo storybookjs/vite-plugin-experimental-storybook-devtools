@@ -36,6 +36,7 @@ import {
   type CreateStorybookDevframeDeps,
 } from './context'
 import { createStoryIndexService } from './story-index'
+import { createTerminalsDevframe } from '@devframes/plugin-terminals'
 
 export interface StorybookDevtoolsRsbuildOptions
   extends ComponentHighlighterOptions {
@@ -181,7 +182,10 @@ export function storybookDevtoolsRsbuild(
         isServe: () => isServe,
         transformedComponents: state.transformedComponents,
         getDiagnostics: () => chDiagnostics,
-        onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
+        onStoryFileChange: (filePath, event) =>
+          storyIndexService.invalidate(filePath, {
+            removed: event === 'delete',
+          }),
       }
 
       const unplugin = createComponentHighlighterUnplugin(
@@ -246,7 +250,9 @@ export function storybookDevtoolsRsbuild(
 
         const hub = initHub({
           base: DEVFRAMES_HUB_BASE,
-          devframes: [definition],
+          // Same Terminals dock `@vitejs/devtools` mounts on the Vite host, so
+          // "Open Terminal" reaches the Storybook session here as well.
+          devframes: [definition, createTerminalsDevframe()],
           ui: createUi(),
           ws: { sidecar: true },
           // Node's 'localhost' can bind IPv6-only ([::1]) while browsers on a

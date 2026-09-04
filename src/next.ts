@@ -18,6 +18,7 @@ import { createRequire } from 'module'
 import { normalizeHubBase } from '@devframes/hub/constants'
 import type { DevframeHubContext } from '@devframes/hub'
 import { nextDevframeHub } from '@devframes/next/hub'
+import { createTerminalsDevframe } from '@devframes/plugin-terminals'
 import {
   createComponentHighlighterUnplugin,
   type ChDiagnostics,
@@ -76,6 +77,7 @@ const SERVER_EXTERNAL_PACKAGES = [
   '@devframes/next',
   '@devframes/hub',
   '@devframes/hub-ui',
+  '@devframes/plugin-terminals',
   // unplugin's own top-level code resolves its webpack loader paths via
   // `import.meta.dirname` — a Node-native ESM field webpack's module
   // wrapper doesn't populate when it bundles (rather than externalizes) the
@@ -560,7 +562,8 @@ export function withStorybookDevtools(
     isServe: () => true,
     transformedComponents: globalState.state.transformedComponents,
     getDiagnostics: () => globalState.diagnostics,
-    onStoryFileChange: (filePath) => storyIndexService.invalidate(filePath),
+    onStoryFileChange: (filePath, event) =>
+      storyIndexService.invalidate(filePath, { removed: event === 'delete' }),
   }
 
   const unpluginOptions: ComponentHighlighterOptions = {
@@ -701,7 +704,10 @@ export function createStorybookDevtoolsRoute(
     // The aggregate MCP endpoint needs the optional `@modelcontextprotocol/server`
     // peer this package doesn't declare; out of scope for the DevTools panel.
     mcp: false,
-    devframes: [createStorybookDevframe(deps)],
+    // The Terminals dock is a separate devframe; `@vitejs/devtools` mounts
+    // it on the Vite host, so the Next hub mounts it too for the same
+    // "Open Terminal" → Storybook session experience.
+    devframes: [createStorybookDevframe(deps), createTerminalsDevframe()],
     configure: (ctx: DevframeHubContext) => {
       const { diagnostics } = registerStorybookHubSurfaces(ctx, {
         deps,

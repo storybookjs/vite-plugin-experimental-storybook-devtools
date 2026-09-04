@@ -24,6 +24,15 @@ export interface StorybookDevframeState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   devtoolsMessages: any
   /**
+   * Hub docks host, set alongside `devtoolsTerminals`. Consulted to decide
+   * whether a Terminals dock exists to deep-link into: the hub always
+   * provides `ctx.terminals` for spawning sessions, but the dock that shows
+   * them is a separate plugin the Vite host registers and the Rsbuild/Next
+   * hubs do not.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  devtoolsDocks?: any
+  /**
    * Set when the last `start-storybook` child process exited before
    * Storybook became reachable; cleared on the next start attempt.
    */

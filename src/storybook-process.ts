@@ -137,26 +137,49 @@ export function adoptStorybookSession(
 }
 
 /**
- * Toast an error notification with an action that opens the Terminals dock
- * on the Storybook session, where the failure output lives.
+ * Whether the hub has a Terminals dock registered to deep-link into. The
+ * dock is a separate hub plugin: the Vite host ships it, the Rsbuild and
+ * Next hubs do not, so on those hosts the session's scrollback has no UI
+ * and "Open Terminal" affordances are omitted.
+ */
+export function hasTerminalsDock(state: StorybookDevframeState): boolean {
+  try {
+    const entries: Array<{ id?: string }> | undefined =
+      state.devtoolsDocks?.values?.()
+    return entries?.some((entry) => entry.id === TERMINALS_DOCK_ID) ?? false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Toast an error notification, with an action that opens the Terminals dock
+ * on the Storybook session (where the failure output lives) when that dock
+ * exists on the host.
  */
 export function notifyStorybookFailure(state: StorybookDevframeState): void {
   const detail = state.storybookStartFailure?.detail
+  const terminal = hasTerminalsDock(state)
+  const hint = terminal
+    ? 'Open the terminal for the full output.'
+    : 'Rerun Storybook from a shell for the full output.'
   state.devtoolsMessages?.error?.('Storybook failed to start', {
-    description: detail
-      ? `${detail}\n\nOpen the terminal for the full output.`
-      : 'The process exited — Open the terminal for the error output.',
+    description: detail ? `${detail}\n\n${hint}` : `The process exited. ${hint}`,
     category: 'storybook',
-    actions: [
-      {
-        id: 'open-storybook-terminal',
-        label: 'Open Terminal',
-        kind: 'activate',
-        activate: {
-          dockId: TERMINALS_DOCK_ID,
-          params: { sessionId: STORYBOOK_SESSION_ID },
-        },
-      },
-    ],
+    ...(terminal
+      ? {
+          actions: [
+            {
+              id: 'open-storybook-terminal',
+              label: 'Open Terminal',
+              kind: 'activate',
+              activate: {
+                dockId: TERMINALS_DOCK_ID,
+                params: { sessionId: STORYBOOK_SESSION_ID },
+              },
+            },
+          ],
+        }
+      : {}),
   })
 }

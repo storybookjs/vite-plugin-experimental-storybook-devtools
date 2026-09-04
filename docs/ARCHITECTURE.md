@@ -176,7 +176,7 @@ prettier/editorconfig config is missing.
 
 `src/story-index.ts` serves the index everything server-side matches
 against. `createStoryIndexService({ cwd, logDebug })` returns `{ cwd,
-project, getIndex(), invalidate(filePath?) }` and picks between two
+project, getIndex(), invalidate(filePath?, { removed? }) }` and picks between two
 strategies behind that one `getIndex()`:
 
 1. a real Storybook index built from the user's `stories` globs
@@ -193,10 +193,31 @@ strategies behind that one `getIndex()`:
 
 The build result is memoised, a missing generator included, so a broken or
 absent Storybook project costs one build attempt rather than one per
-`getIndex()` call; `invalidate()` drops that memo when the last build
-produced no generator, which is how a project that gains a `.storybook`
-config (or fixes its config) picks up the real index. `getIndex()` always
-resolves to an index, so callers carry no "no index" branch.
+`getIndex()` call; `invalidate()` (with no `filePath`, or when the last build
+produced no generator) drops that memo and re-resolves the Storybook project
+(`storybook-project.ts`'s `invalidateStorybookProject` plus a fresh
+`resolveStorybookProject` call), which is how a project that gains a
+`.storybook` config (or fixes its config) picks up the real index.
+`getIndex()` always resolves to an index, so callers carry no "no index"
+branch.
+
+Before constructing a `StoryIndexGenerator`, `buildGenerator()` calls the
+class's own `clearFindMatchingFilesCache()`. `StoryIndexGenerator` keeps a
+`findMatchingFiles` result cache as a `static` `Map` on the class itself, not
+per instance, so a second generator built in the same process — a dev-server
+restart, or a second host/context (Nuxt's client + SSR Vite contexts) —
+would otherwise inherit the first instance's file list and miss any story
+file created or deleted in between.
+
+`storybook-project.ts`'s `resolveStorybookProject(cwd, logDebug)` only caches
+a `null` result when Storybook itself reports no main config found
+(`MainFileMissingError` from `storybook/internal/server-errors`); any other
+failure (a `.storybook/main` that momentarily fails to parse or evaluate) is
+logged but not cached, so the next call re-reads the config from disk instead
+of repeating the same failure forever. `resolveProjectRootSync` (used for the
+`@devframes/service-open` extra root, not the story index) memoises per
+`process.cwd()` rather than once per process, since a process can call it
+from more than one cwd.
 
 Consumers match through `findStoryCandidates`
 (`src/utils/story-matching.ts`) on `componentPath`/`importPath`/title rather
@@ -223,9 +244,22 @@ after writing a story file. Watch-based invalidation is wired once, cross-host,
 in `src/unplugin.ts`'s `watchChange` hook (`ComponentHighlighterUnpluginHost.onStoryFileChange`),
 which fires for `*.stories.*`/`*.story.*` file changes on every bundler
 unplugin targets — Vite, Rsbuild/rspack, and Next/webpack alike all get it
-through the same one wiring point, no per-host watcher needed. Each host
+through the same one wiring point, no per-host watcher needed. A `delete`
+event is passed on as `invalidate(path, { removed: true })`, which maps to
+`StoryIndexGenerator.invalidate(importPath, removed = true)` and drops the
+file's entries; re-reading a deleted file instead fails the whole index
+cycle and leaves its entries in the served (last good) index. Each host
 constructs one `storyIndexService` instance at setup (`src/context.ts`
-carries it on the devframe deps). Next's is memoised on the `globalThis`
+carries it on the devframe deps). On Vite, that construction happens in
+`configResolved`, not in the plugin factory: the factory runs before Vite
+resolves `root`, so building the service there would anchor `.storybook`
+lookup and every importPath-relative path to `process.cwd()` instead of the
+app root — wrong for a monorepo with `root` set, or for Nuxt's own Vite
+context. `create-component-highlighter-plugin.ts` exposes
+`storyIndexService`/`storybookFramework` on `CreateStorybookDevframeDeps` as
+getters over module-scoped variables assigned in `configResolved`, so the
+devframe/RPC setup that runs after it (and reads `deps` by reference) sees
+the resolved-root service. Next's is memoised on the `globalThis`
 singleton that also carries `state`, which shares it between
 `withStorybookDevtools` and `createStorybookDevtoolsRoute` as separate
 module instances — but only within one process. Next may run the webpack
@@ -240,10 +274,29 @@ which runs in the route-handler process — is reliable.
 for tsconfig-paths resolution. A string-literal dynamic `import()` is still
 *statically bundled* by webpack even though it only *runs* lazily, so
 without care Next's server build fails trying to parse that binary as a
-module. `src/story-index.ts` and `src/storybook-project.ts` mark every such
+module. `src/story-index.ts`, `src/storybook-project.ts`,
+`src/storybook-launch.ts` and `src/utils/csf-writer.ts` mark every such
 import with a `/* webpackIgnore: true */` magic comment — inert on
 Vite/Rollup, which don't recognize it — so webpack leaves them as real
-runtime `import()`s instead of bundling them.
+runtime `import()`s instead of bundling them. `csf-writer.ts` loads
+`storybook/internal/babel` the same way, and for a second reason: the AST it
+assembles is printed by csf-tools' recast, which only reprints nodes it
+recognises as unchanged, so a Babel copy bundled by webpack mixed with the
+natively loaded csf-tools makes every append fall back to the text splice.
+
+**Peer dependency loading.** `storybook` is a required peer. Node-side
+code reaches `storybook/internal/*` through `src/storybook-peer.ts`
+(`loadStorybookInternal`, a memoised `createRequire` load behind a version
+check against the `peerDependencies` floor) or through a lazy `import()`,
+never through a static import in a host entry: ES module linking resolves
+every static import before any body runs, so a missing or too-old
+`storybook` would otherwise surface as a bare resolution error naming an
+internal subpath. `createComponentHighlighterUnplugin` calls
+`assertStorybookPeer()` so every host reports the requirement once at
+config load. Modules shared with the browser bundles
+(`src/utils/story-matching.ts`) keep a static import of the browser-safe
+`storybook/internal/csf/csf-utils` chunk, which `createRequire` cannot
+replace there.
 
 ## Bundler hosts
 
@@ -296,10 +349,20 @@ function, one file per function under `src/rpc/functions/`, collected by
 
 `start-storybook` spawns Storybook as an interactive PTY session
 (`storybook-dev`) in devframe's Terminals dock, so prompts like a
-port-conflict question can be answered. The launch command is built by
+port-conflict question can be answered. That dock is a separate devframe,
+`@devframes/plugin-terminals`: `@vitejs/devtools` mounts it on the Vite
+host, and `src/next.ts` / `src/rsbuild.ts` mount it on their hubs so every
+host has the same dock. `storybook-status` reports
+`terminalDockAvailable` from the hub's registered docks, and the panel's
+"Open Terminal" buttons and the failure toast's action are omitted when it
+is false (a custom hub without the dock). The launch command is built by
 `storybook-launch.ts`, which detects the project's package manager via
 `storybook/internal/common`'s `JsPackageManagerFactory` and falls back to
-`npx` when detection fails. The panel's "Open Terminal" buttons
+`npx` when detection fails. The child inherits the host dev server's env
+with `STORYBOOK=true` set and `PORT` pinned to Storybook's port: Storybook's
+CLI lets `PORT` override `-p`, and Next's dev server exports its own port
+under that name, so an inherited value would bind Storybook to the app's
+port while the panel polls `storybookUrl` forever. The panel's "Open Terminal" buttons
 and the failure toast deep-link to it via `hub:docks:activate`. A dead
 session stays registered for its scrollback; the next start respawns it.
 
