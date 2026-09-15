@@ -89,7 +89,9 @@ async function loadStorybookProject(
     const { getStorybookInfo } = await import(
       /* webpackIgnore: true */ 'storybook/internal/common'
     )
-    const info = await getStorybookInfo(path.resolve(cwd, '.storybook'), cwd)
+    const info = await getStorybookInfo(path.resolve(cwd, '.storybook'), cwd, {
+      skipCache: true,
+    })
     if (!info.mainConfigPath) return null
 
     return {

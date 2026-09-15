@@ -147,9 +147,36 @@ they work before dock activation. See `docs/ARCHITECTURE.md` for the full RPC ta
 Run at minimum:
 
 ```bash
-pnpm test
+pnpm build
+pnpm test --run
+pnpm typecheck
 pnpm exec playwright test
 ```
+
+Build before tests: runtime-helper tests and Next/Rsbuild load `dist`.
+Do not build concurrently with tests; the build clears that directory.
+
+For Storybook peer, indexing, generation, or launcher changes, also run:
+
+```bash
+pnpm exec playwright test --config=playwright.storybook.config.ts
+```
+
+This serial suite uses port 6006, starts Storybook through the panel,
+backs up a component's story file, creates and appends stories through RPC,
+runs the generated play function in a preview, and checks external deletion.
+It restores the exact original file and stops its own PTY. Keep port 6006
+free before running it. React 18 has no
+`.storybook` config: it checks fallback coverage and the launch failure UI.
+The other five playgrounds must launch and render successfully.
+
+The regular save-flow E2Es inspect emitted payloads; they do **not** prove
+that disk writes, Storybook indexing, or the generated preview work.
+When reviewing these paths, also cover concurrent saves, existing import
+aliases/type imports, `.mjs` stories, source-directory symlinks, and separate
+Nuxt client/SSR terminal hosts.
+Webpack/rspack do not watch stories outside the app import graph; tests
+must edit files without manually calling `invalidate()` to verify refresh.
 
 Run the broader test set too when the change touches more than one area.
 

@@ -9,7 +9,7 @@
 const STORY_INFIXES = ['stories', 'story'] as const
 
 /** Script extensions the CSF indexer and the generated story files use. */
-const STORY_SCRIPT_EXTENSIONS = ['tsx', 'ts', 'jsx', 'js'] as const
+const STORY_SCRIPT_EXTENSIONS = ['tsx', 'ts', 'jsx', 'js', 'mjs'] as const
 
 /**
  * Matches `*.stories.*`/`*.story.*` and bare `stories.*`/`story.*` files,

@@ -28,6 +28,61 @@ describe('createStoryIndexService', () => {
     return dir
   }
 
+  function configuredProject(extension = 'tsx'): string {
+    const dir = makeTmpProject()
+    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"index-fixture"}')
+    fs.mkdirSync(path.join(dir, '.storybook'))
+    fs.mkdirSync(path.join(dir, 'src'))
+    fs.writeFileSync(path.join(dir, '.storybook/main.ts'),
+      `export default { framework: '@storybook/react-vite', stories: ['../src/*.stories.${extension}'] }`)
+    fs.writeFileSync(path.join(dir, `src/Button.stories.${extension}`),
+      `export default { title: 'Custom/Button' }; export const First = {};`)
+    return dir
+  }
+
+  it('indexes mjs stories accepted by the playground configs', async () => {
+    const service = createStoryIndexService({ cwd: configuredProject('mjs'), logDebug: () => {} })
+    expect(Object.keys((await service.getIndex()).entries)).toContain('custom-button--first')
+  })
+
+  it('rebuilds against changed config globs after full invalidation', async () => {
+    const cwd = configuredProject()
+    const service = createStoryIndexService({ cwd, logDebug: () => {} })
+    expect(Object.keys((await service.getIndex()).entries)).toContain('custom-button--first')
+    fs.mkdirSync(path.join(cwd, 'other'))
+    fs.writeFileSync(path.join(cwd, 'other/Card.stories.tsx'),
+      `export default { title: 'Custom/Card' }; export const Second = {};`)
+    fs.writeFileSync(path.join(cwd, '.storybook/main.ts'),
+      `export default { framework: '@storybook/react-vite', stories: ['../other/*.stories.tsx'] }`)
+    service.invalidate()
+    expect(Object.keys((await service.getIndex()).entries)).toEqual(['custom-card--second'])
+  })
+
+  it('sees external edits, additions and deletions without bundler watch events', async () => {
+    const cwd = configuredProject()
+    const service = createStoryIndexService({ cwd, logDebug: () => {} })
+    await service.getIndex()
+    fs.writeFileSync(path.join(cwd, 'src/Button.stories.tsx'),
+      `export default { title: 'Custom/Button' }; export const Edited = {};`)
+    fs.writeFileSync(path.join(cwd, 'src/Card.stories.tsx'),
+      `export default { title: 'Custom/Card' }; export const Added = {};`)
+    expect(Object.keys((await service.getIndex()).entries).sort()).toEqual([
+      'custom-button--edited', 'custom-card--added',
+    ])
+    fs.rmSync(path.join(cwd, 'src/Button.stories.tsx'))
+    expect(Object.keys((await service.getIndex()).entries)).toEqual(['custom-card--added'])
+  })
+
+  it('scans symlinked source trees without following cycles', async () => {
+    const cwd = makeTmpProject()
+    const shared = makeTmpProject()
+    fs.writeFileSync(path.join(shared, 'Button.stories.tsx'), '')
+    fs.symlinkSync(shared, path.join(cwd, 'src'), 'dir')
+    fs.symlinkSync(cwd, path.join(shared, 'cycle'), 'dir')
+    const service = createStoryIndexService({ cwd, logDebug: () => {} })
+    expect(Object.values((await service.getIndex()).entries).map(e => e.importPath)).toEqual(['./src/Button.stories.tsx'])
+  })
+
   it('builds an index with the known react playground story entries', async () => {
     const service = createStoryIndexService({
       cwd: reactPlayground,

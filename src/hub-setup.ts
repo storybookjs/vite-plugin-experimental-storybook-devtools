@@ -16,7 +16,7 @@ import {
 } from '@devframes/hub'
 import { DevToolsNotificationService } from './notifications'
 import { collectCoverage } from './coverage-dashboard'
-import type { CreateStorybookDevframeDeps } from './context'
+import { getStorybookDevframeContext, type CreateStorybookDevframeDeps } from './context'
 import type { ChDiagnostics } from './unplugin'
 import type { SerializedRegistryInstance } from './shared-types'
 import { getStorybookDocsUrl } from './utils/storybook-docs-url'
@@ -48,7 +48,8 @@ export function registerStorybookHubSurfaces(
   options: StorybookHubSetupOptions,
 ): { diagnostics: ChDiagnostics | null } {
   const { deps, devtoolsDockId, dockClientScript } = options
-  const { state, storyIndexService } = deps
+  const { storyIndexService } = deps
+  const { state } = getStorybookDevframeContext(ctx)
 
   // Upgrade to DevTools notifications when the Messages API is available.
   if (ctx.messages) {

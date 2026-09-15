@@ -138,9 +138,8 @@ export function adoptStorybookSession(
 
 /**
  * Whether the hub has a Terminals dock registered to deep-link into. The
- * dock is a separate hub plugin: the Vite host ships it, the Rsbuild and
- * Next hubs do not, so on those hosts the session's scrollback has no UI
- * and "Open Terminal" affordances are omitted.
+ * dock is a separate hub plugin, registered by all three hosts. Check the
+ * actual registration so custom hosts can omit unavailable actions.
  */
 export function hasTerminalsDock(state: StorybookDevframeState): boolean {
   try {

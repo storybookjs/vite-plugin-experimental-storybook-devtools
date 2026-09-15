@@ -701,9 +701,8 @@ type SbStatus = {
 }
 
 /**
- * Last known answer from `storybook-status`: only the Vite host registers
- * the Terminals dock, so "Open Terminal" buttons are rendered only when the
- * host reported one — an unavailable action is left out of the DOM.
+ * Last known answer from `storybook-status`. Render "Open Terminal" only
+ * when the host reports an available dock.
  */
 let terminalDockAvailable = false
 

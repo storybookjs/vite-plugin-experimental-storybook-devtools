@@ -5,9 +5,9 @@ import type { NotificationService } from './notifications'
 import type { StoryIndexService } from './story-index'
 
 /**
- * Mutable state shared between the transform plugin and the RPC handlers.
- * Fields not yet known at devframe `setup()` time (terminals, the DevTools
- * notification service) are populated later by the host's kit/hub setup.
+ * Transform state shared by the plugin, with a derived state per RPC context.
+ * Hub resources (terminals, notifications) and process lifecycle are assigned
+ * on that derived state so Nuxt client/SSR hubs remain independent.
  * Shared-state stores are NOT cached here — `setup()` may run in more than
  * one context (e.g. Nuxt's client + SSR Vite), so handlers resolve stores
  * from their own `ctx.rpc.sharedState` per call.
@@ -28,7 +28,7 @@ export interface StorybookDevframeState {
    * whether a Terminals dock exists to deep-link into: the hub always
    * provides `ctx.terminals` for spawning sessions, but the dock that shows
    * them is a separate plugin the Vite host registers and the Rsbuild/Next
-   * hubs do not.
+   * adapters register explicitly.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   devtoolsDocks?: any
@@ -59,9 +59,8 @@ export interface CreateStorybookDevframeDeps {
    */
   storybookFramework: Promise<string>
   /**
-   * Builds/serves the story index behind coverage (`src/coverage-dashboard.ts`),
-   * `check-story`, and the panel's pre-Storybook `index.json` fallback. One
-   * instance per host, constructed at setup; also carries the host's
+   * Builds/serves the index behind coverage and `check-story`. One instance
+   * per host, constructed at setup; also carries the host's
    * resolved Storybook project info (`storyIndexService.project`).
    */
   storyIndexService: StoryIndexService
@@ -87,7 +86,13 @@ export function setStorybookDevframeContext(
   ctx: DevframeNodeContext,
   deps: CreateStorybookDevframeDeps,
 ): void {
-  map.set(ctx, deps)
+  // Nuxt installs the same definition into client and SSR hubs. Share
+  // transform state through the prototype, but keep process/terminal state
+  // on each RPC context so the second hub cannot steal the first's PTY.
+  const state: StorybookDevframeState = Object.create(deps.state)
+  state.storybookSession = null
+  state.storybookStartFailure = null
+  map.set(ctx, { ...deps, state })
 }
 
 export function getStorybookDevframeContext(

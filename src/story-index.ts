@@ -18,7 +18,7 @@
  * `storybook-project.ts`.
  */
 import * as path from 'path'
-import { readFile, readdir } from 'fs/promises'
+import { readFile, readdir, realpath, stat } from 'fs/promises'
 import type { IndexerOptions } from 'storybook/internal/types'
 import type { StoryIndexGenerator } from 'storybook/internal/core-server'
 import {
@@ -91,10 +91,36 @@ export function createStoryIndexService(
   let generatorPromise: Promise<StoryIndexGenerator | undefined> | undefined
   let generatorMissing = false
   /** Story files to invalidate on the next `getIndex()`, keyed to whether each was removed. */
-  let pending: Map<string, boolean> | 'all' = new Map()
-  let scanned: StoryIndex | undefined
+  let pending = new Map<string, boolean>()
+  let fileStamps = new Map<string, string>()
+  let inFlight: Promise<StoryIndex> | undefined
   let lastIndex: StoryIndex | undefined
   let lastIndexError: string | undefined
+
+  async function snapshotFiles(
+    generator: StoryIndexGenerator,
+  ): Promise<Map<string, string>> {
+    const { StoryIndexGenerator: Generator } = await import(
+      /* webpackIgnore: true */ 'storybook/internal/core-server'
+    )
+    Generator.clearFindMatchingFilesCache()
+    const matches = await Generator.findMatchingFilesForSpecifiers(
+      generator.specifiers, cwd, true,
+    )
+    const files = [
+      ...new Set(matches.flatMap(([, entries]) => Object.keys(entries))),
+    ]
+    const stamps = new Map<string, string>()
+    await Promise.all(files.map(async (file) => {
+      try {
+        const info = await stat(file)
+        stamps.set(file, `${info.mtimeMs}:${info.ctimeMs}:${info.size}`)
+      } catch {
+        // A file can disappear between the glob and stat calls.
+      }
+    }))
+    return stamps
+  }
 
   async function buildGenerator(): Promise<StoryIndexGenerator | undefined> {
     const projectInfo = await project
@@ -152,6 +178,7 @@ export function createStoryIndexService(
         indexers: [csfIndexer],
         docs: {},
       })
+      fileStamps = await snapshotFiles(gen)
       await gen.initialize()
       return gen
     } catch (error) {
@@ -187,13 +214,15 @@ export function createStoryIndexService(
    * the story could hide a real match.
    */
   async function scanIndex(): Promise<StoryIndex> {
-    if (scanned) return scanned
-
     const entries: Record<string, StoryIndexEntryLike> = {}
 
+    const visited = new Set<string>()
     const walk = async (dir: string): Promise<void> => {
       let contents
       try {
+        const physicalPath = await realpath(dir)
+        if (visited.has(physicalPath)) return
+        visited.add(physicalPath)
         contents = await readdir(dir, { withFileTypes: true })
       } catch {
         return
@@ -201,7 +230,12 @@ export function createStoryIndexService(
       for (const item of contents) {
         if (item.name.startsWith('.')) continue
         const full = path.join(dir, item.name)
-        if (item.isDirectory()) {
+        const isDirectory = item.isDirectory() ||
+          (item.isSymbolicLink() && await stat(full).then(
+            info => info.isDirectory(),
+            () => false,
+          ))
+        if (isDirectory) {
           if (SCAN_IGNORED_DIRS.has(item.name)) continue
           await walk(full)
           continue
@@ -219,8 +253,7 @@ export function createStoryIndexService(
     }
 
     await walk(cwd)
-    scanned = { v: 5, entries }
-    return scanned
+    return { v: 5, entries }
   }
 
   return {
@@ -228,77 +261,66 @@ export function createStoryIndexService(
     get project() {
       return project
     },
-    async getIndex() {
-      const generator = await ensureGenerator()
-      if (!generator) return scanIndex()
-
-      // Apply any file-scoped invalidations queued since the last
-      // `getIndex()` call, so the generator drops its cached entry for
-      // each changed file before recomputing.
-      if (pending === 'all') {
-        generator.invalidateAll()
-      } else {
-        for (const [filePath, removed] of pending) {
-          try {
-            generator.invalidate(toImportPath(filePath), removed)
-          } catch (error) {
-            logDebug(
-              '[story-index] invalidate() failed for',
-              filePath,
-              error instanceof Error ? error.message : String(error),
-            )
-          }
-        }
-      }
-      pending = new Map()
-
-      try {
-        lastIndex = (await generator.getIndex()) as StoryIndex
-        lastIndexError = undefined
-        return lastIndex
-      } catch (error) {
-        // `getIndex()` throws `MultipleIndexingError` when ANY indexed file
-        // failed to parse — it does not return a partial index with just
-        // the bad file skipped, so one broken CSF file takes down the whole
-        // index for this cycle. Serve the last index the generator produced
-        // (the broken file's own stories are the only stale part of it); a
-        // fixed file recovers on the next invalidate()+getIndex() cycle.
-        // The same failure repeats on every watch event, so log it only
-        // when the message changes.
-        const message = error instanceof Error ? error.message : String(error)
-        if (message !== lastIndexError) {
-          lastIndexError = message
-          logDebug('[story-index] getIndex() failed:', message)
-        }
-        return lastIndex ?? scanIndex()
-      }
+    getIndex() {
+      // Coverage and check-story can request the same index concurrently.
+      inFlight ??= readIndex().finally(() => {
+        inFlight = undefined
+      })
+      return inFlight
     },
     invalidate(filePath?: string, options?: { removed?: boolean }) {
-      scanned = undefined
-      if (generatorMissing) {
-        // A fresh build indexes every file, so queued per-file
-        // invalidations have nothing left to apply to. Re-resolve the
-        // project too: the generator was missing because there was no
-        // project (or it failed to build), and either can have changed
-        // since — a `.storybook` config added or fixed since the last
-        // attempt should be picked up here rather than staying stale.
+      if (!filePath || generatorMissing) {
         generatorPromise = undefined
+        fileStamps = new Map()
         pending = new Map()
+        lastIndex = undefined
         invalidateStorybookProject(cwd)
         project = resolveStorybookProject(cwd, logDebug)
         return
       }
-      if (!filePath) {
-        // A full rebuild: also re-resolve the project, so a `.storybook`
-        // config edited since the last resolve (a stale error case aside —
-        // `resolveStorybookProject` itself never caches a transient failure)
-        // is reflected before the generator rebuilds against it.
-        pending = 'all'
-        invalidateStorybookProject(cwd)
-        project = resolveStorybookProject(cwd, logDebug)
-        return
-      }
-      if (pending !== 'all') pending.set(filePath, options?.removed ?? false)
+      pending.set(filePath, options?.removed ?? false)
     },
+  }
+
+  async function readIndex(): Promise<StoryIndex> {
+    const generator = await ensureGenerator()
+    if (!generator) return scanIndex()
+
+    // webpack/rspack only watch app dependencies, and Next's route runs
+    // separately from its compiler. Check the actual Storybook globs on
+    // requests so external story edits work on every host without timers.
+    const current = await snapshotFiles(generator)
+    for (const [file, stamp] of current) {
+      if (fileStamps.get(file) !== stamp) pending.set(file, false)
+    }
+    for (const file of fileStamps.keys()) {
+      if (!current.has(file)) pending.set(file, true)
+    }
+    fileStamps = current
+    for (const [filePath, removed] of pending) {
+      generator.invalidate(toImportPath(filePath), removed)
+    }
+    pending = new Map()
+
+    try {
+      lastIndex = (await generator.getIndex()) as StoryIndex
+      lastIndexError = undefined
+      return lastIndex
+    } catch (error) {
+      // `getIndex()` throws `MultipleIndexingError` when ANY indexed file
+      // failed to parse — it does not return a partial index with just
+      // the bad file skipped, so one broken CSF file takes down the whole
+      // index for this cycle. Serve the last index the generator produced
+      // (which may be stale until every file parses); a
+      // fixed file recovers on the next invalidate()+getIndex() cycle.
+      // The same failure repeats on every watch event, so log it only
+      // when the message changes.
+      const message = error instanceof Error ? error.message : String(error)
+      if (message !== lastIndexError) {
+        lastIndexError = message
+        logDebug('[story-index] getIndex() failed:', message)
+      }
+      return lastIndex ?? scanIndex()
+    }
   }
 }

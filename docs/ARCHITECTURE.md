@@ -57,6 +57,13 @@ lookup, which has to run synchronously because a Next.js `route.ts`
 re-exports `GET`/`POST`/`DELETE` directly from
 `createStorybookDevtoolsRoute()`'s return value.
 
+Hub resources and Storybook process state are scoped to each RPC context.
+Nuxt installs the same definition in client and SSR hubs; sharing their
+terminal reference starts a PTY in the other hub, where the visible
+Terminals dock cannot find or stop it. Context state inherits shared
+transform state, while hub setup assigns its own terminals, notifications,
+messages, and docks.
+
 ### 2. Framework transform
 
 `src/frameworks/<fw>/transform.ts` runs at build time. Neither transform
@@ -147,11 +154,17 @@ every other top-level binding, merge the needed imports onto the AST
 (extending a matching `ImportDeclaration` where there is one), push the
 story's statements (parsed with `babelParse` from
 `storybook/internal/babel`) onto `program.body`, and `printCsf()`.
+Import merging matches exported symbols, reuses aliases, promotes type-only
+bindings when a value is needed, and allocates free names for collisions.
+Only references in the appended snippet are rewritten.
 Recast reuses each untouched node's original source, so comments, quote
 style and formatting elsewhere in the file survive byte-identically.
 
 Generators are `async` because `storybook/internal/csf-tools` is imported
 lazily — same `webpackIgnore` reasoning as `src/story-index.ts`.
+
+Concurrent saves to the same output file are queued around the complete
+read/generate/format/write operation, preventing lost exports.
 
 Each generator computes the story's required imports
 (`collectRequiredImports`) and the rendered `export const … : Story = {…}`
@@ -201,13 +214,14 @@ produced no generator) drops that memo and re-resolves the Storybook project
 `getIndex()` always resolves to an index, so callers carry no "no index"
 branch.
 
-Before constructing a `StoryIndexGenerator`, `buildGenerator()` calls the
-class's own `clearFindMatchingFilesCache()`. `StoryIndexGenerator` keeps a
-`findMatchingFiles` result cache as a `static` `Map` on the class itself, not
-per instance, so a second generator built in the same process — a dev-server
-restart, or a second host/context (Nuxt's client + SSR Vite contexts) —
-would otherwise inherit the first instance's file list and miss any story
-file created or deleted in between.
+On each index request, the service uses Storybook's
+`findMatchingFilesForSpecifiers` and file timestamps to detect additions,
+edits, and deletions. It invalidates only changed entries; concurrent
+requests share one refresh. This also works in Next's route process and
+for stories outside webpack/rspack's app dependency graph. The static
+Storybook glob cache is cleared before each scan. No timer or additional
+watcher needs disposal. The fallback scan follows source-directory symlinks
+with realpath cycle detection (required by React 18's shared `src`).
 
 `storybook-project.ts`'s `resolveStorybookProject(cwd, logDebug)` only caches
 a `null` result when Storybook itself reports no main config found
@@ -234,22 +248,18 @@ filter.
 `StoryIndexGenerator.getIndex()` throws a `MultipleIndexingError` covering
 every file that failed to parse, not a partial index with those entries
 dropped, so one bad CSF file takes down the whole generated index for that
-cycle. The service then serves the last index the generator produced — only
-the broken file's own stories are stale — and logs the failure once per
+cycle. The service then serves the last successful index, which may be
+stale, and logs the failure once per
 distinct message rather than once per watch event. A fixed file recovers on
 the next invalidate+getIndex cycle.
 
-**Invalidation.** `create-story.ts` calls `invalidate(outputPath)` right
-after writing a story file. Watch-based invalidation is wired once, cross-host,
-in `src/unplugin.ts`'s `watchChange` hook (`ComponentHighlighterUnpluginHost.onStoryFileChange`),
-which fires for `*.stories.*`/`*.story.*` file changes on every bundler
-unplugin targets — Vite, Rsbuild/rspack, and Next/webpack alike all get it
-through the same one wiring point, no per-host watcher needed. A `delete`
-event is passed on as `invalidate(path, { removed: true })`, which maps to
-`StoryIndexGenerator.invalidate(importPath, removed = true)` and drops the
-file's entries; re-reading a deleted file instead fails the whole index
-cycle and leaves its entries in the served (last good) index. Each host
-constructs one `storyIndexService` instance at setup (`src/context.ts`
+**Invalidation.** `create-story.ts` explicitly invalidates after a write;
+`unplugin.ts` forwards story watch events when the bundler supplies them.
+Request-time file checks provide correctness when those events are absent.
+A full `invalidate()` discards the generator and reloads config through
+`getStorybookInfo(..., { skipCache: true })`, bypassing Storybook's own cache
+as well as ours. Config changes still require full invalidation or a host
+restart. Each host constructs one `storyIndexService` instance at setup (`src/context.ts`
 carries it on the devframe deps). On Vite, that construction happens in
 `configResolved`, not in the plugin factory: the factory runs before Vite
 resolves `root`, so building the service there would anchor `.storybook`
@@ -583,8 +593,11 @@ function, the server broadcasts, a client-registered handler acts on the DOM.
 Baseline commands:
 
 ```bash
-pnpm test
+pnpm build
+pnpm test --run
+pnpm typecheck
 pnpm exec playwright test
+pnpm exec playwright test --config=playwright.storybook.config.ts
 ```
 
 Focused e2e entrypoints:

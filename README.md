@@ -11,7 +11,7 @@ Dev-server devtools for visual component highlighting and automatic Storybook st
 - **Append to Existing Stories** - Add new story variants to existing story files
 - **Smart Imports** - Automatically resolves and adds component imports
 - **DevTools Integration** - Dock panel with Storybook, Coverage, Terminal, and Docs tabs
-- **Coverage Dashboard** - Track story coverage across all detected components
+- **Coverage Dashboard** - Track story coverage across all detected components using the Storybook index, refreshed after story-file edits on every host
 - **Copy Prompt** - Copy LLM-friendly component context to clipboard for AI-assisted development
 - **Development Only** - Never runs in production builds
 - **Keyboard Shortcuts** - Quick toggles and navigation

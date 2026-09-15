@@ -7,6 +7,23 @@ import { getStorybookDevframeContext } from '../../context'
 import { ordinal } from '../../utils/instance-selection'
 import { formatStoryFile } from '../../utils/csf-writer'
 
+// Generating/formatting is async. Serialize read-modify-write per output
+// file so two save actions cannot overwrite each other's exports.
+const writes = new Map<string, Promise<void>>()
+async function lockStoryFile(filePath: string): Promise<() => void> {
+  const previous = writes.get(filePath)
+  let release!: () => void
+  const current = new Promise<void>(resolve => {
+    release = resolve
+  })
+  writes.set(filePath, current)
+  await previous
+  return () => {
+    if (writes.get(filePath) === current) writes.delete(filePath)
+    release()
+  }
+}
+
 export interface ComponentStoryData {
   meta: {
     componentName: string
@@ -63,6 +80,7 @@ export const createStory = defineRpcFunction({
 
         // Generate and write the story file
         if (writeStoryFiles && data.serializedProps) {
+          let releaseWrite: (() => void) | undefined
           try {
             // Convert component registry from object to Map
             const registryMap = new Map<string, string>()
@@ -114,6 +132,8 @@ export const createStory = defineRpcFunction({
                 `${componentFileName}.stories.${storyExtension}`,
               )
             }
+
+            releaseWrite = await lockStoryFile(outputPath)
 
             // Check if file already exists
             let existingContent: string | undefined
@@ -248,6 +268,8 @@ export const createStory = defineRpcFunction({
               ],
               optional: true,
             })
+          } finally {
+            releaseWrite?.()
           }
         }
       },

@@ -82,7 +82,7 @@ function uniqueExportName(taken: Set<string>, desired: string): string {
 function collectTopLevelBindings(t: BabelTypes, program: t.Program): Set<string> {
   const names = new Set<string>()
   const addPattern = (node: t.Node): void => {
-    if (t.isIdentifier(node)) names.add(node.name)
+    for (const name of Object.keys(t.getBindingIdentifiers(node))) names.add(name)
   }
 
   for (const statement of program.body) {
@@ -114,77 +114,69 @@ function collectTopLevelBindings(t: BabelTypes, program: t.Program): Set<string>
   return names
 }
 
-/** Ensure `request`'s bindings exist, extending a matching import when there is one. */
+/** Resolve imports by exported symbol; reuse aliases and promote type bindings. */
 function mergeImport(
   t: BabelTypes,
   program: t.Program,
   request: CsfImportRequest,
-): void {
-  const wanted = request.specifiers ?? []
-  const existing = program.body.filter(
-    (node): node is t.ImportDeclaration =>
-      t.isImportDeclaration(node) && node.source.value === request.source,
-  )
-
-  if (request.defaultSpecifier) {
-    const hasDefault = existing.some((node) =>
-      node.specifiers.some((s) => t.isImportDefaultSpecifier(s)),
-    )
-    if (!hasDefault) {
-      insertImport(
-        t,
-        program,
-        t.importDeclaration(
-          [t.importDefaultSpecifier(t.identifier(request.defaultSpecifier))],
-          t.stringLiteral(request.source),
-        ),
-      )
+  taken: Set<string>,
+  snippetBindings: Set<string>,
+): Map<string, string> {
+  const aliases = new Map<string, string>()
+  const requested = [
+    ...(request.defaultSpecifier ? [{ imported: 'default', local: request.defaultSpecifier }] : []),
+    ...(request.specifiers ?? []).map(name => ({ imported: name, local: name })),
+  ]
+  for (const { imported, local } of requested) {
+    const imports = program.body.filter((node): node is t.ImportDeclaration =>
+      t.isImportDeclaration(node) && node.source.value === request.source)
+    const candidates = imports.flatMap(declaration => declaration.specifiers
+      .filter(specifier => imported === 'default'
+        ? t.isImportDefaultSpecifier(specifier)
+        : t.isImportSpecifier(specifier) &&
+          (t.isIdentifier(specifier.imported) ? specifier.imported.name : specifier.imported.value) === imported)
+      .map(specifier => ({ declaration, specifier })))
+    const isType = ({ declaration, specifier }: typeof candidates[number]) =>
+      declaration.importKind === 'type' ||
+      (t.isImportSpecifier(specifier) && specifier.importKind === 'type')
+    const reusable = candidates.filter(candidate =>
+      !snippetBindings.has(candidate.specifier.local.name))
+    const existing = reusable.find(candidate => !isType(candidate)) ?? reusable[0]
+    if (existing && (request.typeOnly || !isType(existing))) {
+      aliases.set(local, existing.specifier.local.name)
+      continue
     }
-  }
 
-  if (wanted.length === 0) return
-
-  // A value specifier spliced into a type-only import is erased at
-  // runtime, and a type specifier belongs with other type-only imports —
-  // so only imports of the matching kind count as declaring a name or
-  // qualify as a merge target.
-  const matchesKind = (node: t.ImportDeclaration): boolean =>
-    request.typeOnly
-      ? node.importKind === 'type'
-      : node.importKind !== 'type'
-
-  const declared = new Set<string>()
-  for (const node of existing) {
-    if (!matchesKind(node)) continue
-    for (const specifier of node.specifiers) {
-      if (t.isImportSpecifier(specifier) && specifier.importKind !== 'type') {
-        declared.add(specifier.local.name)
+    // A type-only binding of the same symbol can serve both uses once
+    // promoted. Leave other specifiers in the original type declaration.
+    const binding = existing?.specifier.local.name ?? uniqueExportName(taken, local)
+    if (existing) {
+      const declaration = existing.declaration
+      declaration.specifiers = declaration.specifiers.filter(s => s !== existing.specifier)
+      if (declaration.specifiers.length === 0) {
+        program.body.splice(program.body.indexOf(declaration), 1)
       }
     }
-  }
-  const missing = wanted.filter((name) => !declared.has(name))
-  if (missing.length === 0) return
-
-  const target = existing.find(
-    (node) => matchesKind(node) && node.specifiers.some((s) => t.isImportSpecifier(s)),
-  )
-  if (target) {
-    for (const name of missing) {
-      target.specifiers.push(
-        t.importSpecifier(t.identifier(name), t.identifier(name)),
-      )
+    taken.add(binding)
+    aliases.set(local, binding)
+    const specifier = imported === 'default'
+      ? t.importDefaultSpecifier(t.identifier(binding))
+      : t.importSpecifier(t.identifier(binding), t.identifier(imported))
+    const target = program.body.find((node): node is t.ImportDeclaration =>
+      t.isImportDeclaration(node) && node.source.value === request.source &&
+      (node.importKind === 'type') === !!request.typeOnly &&
+      !node.specifiers.some(s => t.isImportNamespaceSpecifier(s)) &&
+      (imported !== 'default' || !node.specifiers.some(s => t.isImportDefaultSpecifier(s))))
+    if (target) {
+      if (imported === 'default') target.specifiers.unshift(specifier)
+      else target.specifiers.push(specifier)
+    } else {
+      const declaration = t.importDeclaration([specifier], t.stringLiteral(request.source))
+      if (request.typeOnly) declaration.importKind = 'type'
+      insertImport(t, program, declaration)
     }
-    return
   }
-
-  const declaration = t.importDeclaration(
-    missing.map((name) =>
-      t.importSpecifier(t.identifier(name), t.identifier(name)),
-    ),
-    t.stringLiteral(request.source),
-  )
-  if (request.typeOnly) declaration.importKind = 'type'
-  insertImport(t, program, declaration)
+  return aliases
 }
 
 function insertImport(
@@ -235,7 +227,7 @@ export async function writeStoryIntoCsf(
   const { existingCode, fileName, desiredExportName } = request
 
   try {
-    const [{ loadCsf, printCsf }, { babelParse, types: t }] = await Promise.all([
+    const [{ loadCsf, printCsf }, { babelParse, types: t, traverse }] = await Promise.all([
       import(/* webpackIgnore: true */ 'storybook/internal/csf-tools'),
       import(/* webpackIgnore: true */ 'storybook/internal/babel'),
     ])
@@ -247,20 +239,44 @@ export async function writeStoryIntoCsf(
     const program = csf._ast.program
     const taken = collectTopLevelBindings(t, program)
     for (const name of Object.keys(csf._storyExports)) taken.add(name)
-    const exportName = uniqueExportName(taken, desiredExportName)
+    const requiredNames = request.requiredImports.flatMap(imp => [
+      ...(imp.specifiers ?? []), ...(imp.defaultSpecifier ? [imp.defaultSpecifier] : []),
+    ])
+    const exportName = uniqueExportName(new Set([...taken, ...requiredNames]), desiredExportName)
 
-    for (const importRequest of request.requiredImports) {
-      mergeImport(t, program, importRequest)
-    }
-
-    // Two leading newlines put exactly one blank line between the last
-    // existing statement and the appended story; recast derives inter-node
-    // spacing from the snippet's own line numbers.
+    // Keep snippet line numbers for recast's inter-statement spacing.
     const snippet = babelParse(`\n\n${request.storyExportSource.trimStart()}`)
     renameExport(t, snippet.program, desiredExportName, exportName)
+    const snippetBindings = new Set<string>()
+    traverse(snippet, {
+      Scope(scopePath) {
+        for (const name of Object.keys(scopePath.scope.bindings)) {
+          snippetBindings.add(name)
+          taken.add(name)
+        }
+      },
+    })
+    const aliases = new Map<string, string>()
+    for (const importRequest of request.requiredImports) {
+      for (const [name, binding] of mergeImport(t, program, importRequest, taken, snippetBindings)) {
+        aliases.set(name, binding)
+      }
+    }
+    traverse(snippet, {
+      ReferencedIdentifier(identifierPath) {
+        const name = identifierPath.node.name
+        const binding = aliases.get(name)
+        if (!binding || binding === name || identifierPath.scope.hasBinding(name)) return
+        if (identifierPath.parentPath.isObjectProperty() && identifierPath.parentPath.node.shorthand) {
+          identifierPath.parentPath.node.shorthand = false
+        }
+        identifierPath.node.name = binding
+      },
+    })
     program.body.push(...snippet.program.body)
 
     const { code } = printCsf(csf, { quote: detectQuoteStyle(existingCode) })
+    babelParse(code)
     const withTrailingNewline = code.endsWith('\n') ? code : `${code}\n`
     return {
       code: restoreCrlf(withTrailingNewline, existingCode),

@@ -379,12 +379,8 @@ export function createComponentHighlighterPlugin(
     },
   }
 
-  // `deps` is captured by reference (`setStorybookDevframeContext`) well
-  // before `configResolved` runs, but every consumer reads
-  // `storyIndexService`/`storybookFramework` later, at RPC-handler time —
-  // long after `configResolved` has assigned the variables above. Getters
-  // read the current value at that later access time instead of the
-  // `undefined` one available when this object literal is built.
+  // Constructed before configResolved; these getters are first read during
+  // devframe setup, after the resolved Vite root initializes both services.
   const deps: CreateStorybookDevframeDeps = {
     framework,
     storybookUrl,

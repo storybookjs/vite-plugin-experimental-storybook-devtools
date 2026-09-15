@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { babelParse } from 'storybook/internal/babel'
 import { writeStoryIntoCsf } from './csf-writer'
 
 const story = `export const Primary: Story = {
@@ -99,7 +100,7 @@ export const Primary = { args: { label: 'Hello' } };
     })
 
     expect(result.fallbackReason).toBeUndefined()
-    expect(result.code).toContain("import type { fn } from 'storybook/test';")
+    expect(() => babelParse(result.code)).not.toThrow()
     expect(result.code).toContain("import { fn } from 'storybook/test';")
   })
 
@@ -121,6 +122,65 @@ export const Primary = { args: { label: 'Hello' } };
     expect(result.code).toContain(
       "import type { Mock } from 'storybook/test';",
     )
+  })
+
+  it('does not mistake an unrelated imported symbol for a requested helper', async () => {
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode: csf3 + "\nimport { spyOn as fn } from 'storybook/test';\n",
+      storyExportSource: 'export const Primary: Story = { args: { onClick: fn() } };',
+      requiredImports: [{ source: 'storybook/test', specifiers: ['fn'] }],
+    })
+    expect(result.fallbackReason).toBeUndefined()
+    expect(() => babelParse(result.code)).not.toThrow()
+    expect(result.code).toMatch(/fn as fn2/)
+    expect(result.code).toContain('onClick: fn2()')
+  })
+
+  it('defines the requested default binding when the existing import has an alias', async () => {
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode: csf3.replace("import { Button } from './Button';", "import ExistingButton from './Button';"),
+      storyExportSource: 'export const Primary: Story = { render: () => Button };',
+      requiredImports: [{ source: './Button', defaultSpecifier: 'Button' }],
+    })
+    expect(result.fallbackReason).toBeUndefined()
+    expect(() => babelParse(result.code)).not.toThrow()
+    expect(result.code).toContain('render: () => ExistingButton')
+  })
+
+  it('dedupes exports against destructured bindings and required imports', async () => {
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode: csf3 + '\nconst { Primary } = { Primary: 1 };',
+    })
+    expect(result.exportName).toBe('Primary2')
+    expect(() => babelParse(result.code)).not.toThrow()
+  })
+
+  it('avoids imported aliases shadowed by locals in the new play function', async () => {
+    const result = await writeStoryIntoCsf({
+      ...base,
+      existingCode: csf3 + "\nimport { within as canvas } from 'storybook/test';",
+      storyExportSource: 'export const Primary: Story = { play: ({ canvasElement }) => { const canvas = within(canvasElement); } };',
+      requiredImports: [{ source: 'storybook/test', specifiers: ['within'] }],
+    })
+    expect(result.fallbackReason).toBeUndefined()
+    expect(result.code).toContain('const canvas = within(canvasElement)')
+    expect(() => babelParse(result.code)).not.toThrow()
+  })
+
+  it('reserves component imports before choosing the story export name', async () => {
+    const result = await writeStoryIntoCsf({
+      ...base,
+      desiredExportName: 'Button',
+      existingCode: csf3.replace("import { Button } from './Button';", "import ExistingButton from './Button';"),
+      storyExportSource: 'export const Button: Story = { render: () => ({ components: { Button }, template: `<Button/>` }) };',
+      requiredImports: [{ source: './Button', defaultSpecifier: 'Button' }],
+    })
+    expect(result.exportName).toBe('Button2')
+    expect(result.code).toContain('Button: ExistingButton')
+    expect(result.fallbackReason).toBeUndefined()
   })
 
   it('round-trips CRLF line endings, including the appended story', async () => {
